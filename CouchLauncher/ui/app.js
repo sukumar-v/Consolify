@@ -92,7 +92,10 @@ function repaintFocus() {
   else if (manageOpen) renderManage();
   else if (confirmState) renderConfirm();
   else if (view === "library") updateLibraryFocus(true);
-  else if (view === "collections") renderCollections();
+  else if (view === "collections") {
+    if (collMode === "grid") updateCollFocus(true);
+    else updateCollListFocus(true);
+  }
   else if (view === "detail") updateDetailFocus();
   else if (view === "settings") renderSettings();
 }
@@ -775,21 +778,12 @@ function renderCollections() {
         </div>
         <div class="coll-thumbs">${thumbs}</div>`;
 
-      card.addEventListener("mouseenter", () => { if (hoverEnabled() && collListIdx !== i) { collListIdx = i; renderCollections(); } });
+      card.addEventListener("mouseenter", () => { if (hoverEnabled() && collListIdx !== i) { collListIdx = i; updateCollListFocus(true); } });
       card.addEventListener("click", () => { collListIdx = i; openCollectionGrid(c.id); });
       listEl.appendChild(card);
     });
 
-    const focused = listEl.querySelector(".coll-card.focused");
-    if (focused) revealIn(listEl, focused, collListIdx === 0, collListIdx === cols.length - 1);
-
-    const delHint = cols[collListIdx] && cols[collListIdx].custom
-      ? `<div class="legend-item"><div class="btn-badge">X</div><span>Delete collection</span></div>` : "";
-    legend.innerHTML = `
-      <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>
-      <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
-      ${delHint}
-      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
+    updateCollListFocus();
     setBackdrop(null);
   } else {
     const col = cols.find(c => c.id === collSel);
@@ -832,10 +826,35 @@ function renderCollections() {
 
     legend.innerHTML = `
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
-      <div class="legend-item"><div class="btn-badge">Y</div><span>Details</span></div>
+      <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
       <div class="legend-item"><div class="btn-badge">B</div><span>Collections</span></div>
       <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
   }
+}
+
+/**
+ * Focus-only update for the collections list. Re-running renderCollections() on every hover
+ * rebuilt every card and grid tile, which restarted the async cover loads and made the whole
+ * screen flicker as the pointer crossed the gaps between items.
+ */
+function updateCollListFocus(noScroll) {
+  const show = focusVisible();
+  const listEl = $("collList");
+  const cards = listEl.querySelectorAll(".coll-card");
+  cards.forEach((el, i) => {
+    const f = i === collListIdx;
+    el.classList.toggle("focused", show && f);
+    if (show && f && !noScroll) revealIn(listEl, el, i === 0, i === cards.length - 1);
+  });
+
+  const cols = collectionsData();
+  const delHint = cols[collListIdx] && cols[collListIdx].custom
+    ? `<div class="legend-item"><div class="btn-badge">X</div><span>Delete collection</span></div>` : "";
+  $("legend-collections").innerHTML = `
+    <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>
+    <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
+    ${delHint}
+    <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
 }
 
 function updateCollFocus(noScroll) {
@@ -864,8 +883,8 @@ function collectionsInput(btn) {
   const cols = collectionsData();
   if (collMode === "list") {
     switch (btn) {
-      case "Up": collListIdx = Math.max(0, collListIdx - 1); renderCollections(); break;
-      case "Down": collListIdx = Math.min(cols.length - 1, collListIdx + 1); renderCollections(); break;
+      case "Up": collListIdx = Math.max(0, collListIdx - 1); updateCollListFocus(); break;
+      case "Down": collListIdx = Math.min(cols.length - 1, collListIdx + 1); updateCollListFocus(); break;
       case "A": if (focusVisible() && cols[collListIdx]) openCollectionGrid(cols[collListIdx].id); break;
       case "X": {
         const c = cols[collListIdx];
@@ -888,8 +907,12 @@ function collectionsInput(btn) {
       case "Left": collFocus.col = Math.max(0, collFocus.col - 1); updateCollFocus(); break;
       case "Right": collFocus.col = Math.min((collGridRows[collFocus.row] || []).length - 1, collFocus.col + 1); updateCollFocus(); break;
       case "Up":
-        if (collFocus.row === 0) { collMode = "list"; renderCollections(); }
-        else { collFocus.row--; collFocus.col = Math.min(collFocus.col, collGridRows[collFocus.row].length - 1); updateCollFocus(); }
+        // Stays inside the collection: only B returns to the list.
+        if (collFocus.row > 0) {
+          collFocus.row--;
+          collFocus.col = Math.min(collFocus.col, collGridRows[collFocus.row].length - 1);
+          updateCollFocus();
+        }
         break;
       case "Down":
         if (collFocus.row < collGridRows.length - 1) { collFocus.row++; collFocus.col = Math.min(collFocus.col, collGridRows[collFocus.row].length - 1); updateCollFocus(); }
