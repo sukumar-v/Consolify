@@ -117,15 +117,61 @@ function initials(title) {
   return (words.length >= 2 ? words[0][0] + words[1][0] : title.slice(0, 2)).toUpperCase();
 }
 
-function applyArt(g, el, url) {
-  if (url) {
-    el.style.backgroundImage = `url('${url}')`;
-  } else {
-    const h = hashHue(g.title);
-    el.style.background = `linear-gradient(150deg, hsl(${h},16%,15%) 0%, hsl(${(h + 40) % 360},22%,9%) 100%)`;
-    el.classList.add("ph");
-    el.innerHTML = `<span>${esc(initials(g.title))}</span>`;
+/*
+ * Cover art loads through a small queue.
+ *
+ * WebView2's virtual-host mapping drops requests when a whole screen's worth of tiles
+ * fire at once: with ~22 images requested simultaneously from https://couch.data only
+ * the first handful resolved and the rest failed outright, leaving most tiles blank
+ * even though every file was present and valid. Capping concurrency and retrying with
+ * a cache-busting suffix makes the load reliable; anything still failing after its
+ * retries falls back to the initials placeholder instead of an empty tile.
+ */
+const IMG_MAX_CONCURRENT = 6;
+const IMG_MAX_ATTEMPTS = 4;
+const imgQueue = [];
+let imgActive = 0;
+
+function queueArt(url, done) {
+  imgQueue.push({ url, done, attempt: 0 });
+  pumpImgQueue();
+}
+
+function pumpImgQueue() {
+  while (imgActive < IMG_MAX_CONCURRENT && imgQueue.length) {
+    const job = imgQueue.shift();
+    imgActive++;
+    const probe = new Image();
+    probe.onload = () => { imgActive--; job.done(probe.src); pumpImgQueue(); };
+    probe.onerror = () => {
+      imgActive--;
+      job.attempt++;
+      if (job.attempt < IMG_MAX_ATTEMPTS) {
+        setTimeout(() => { imgQueue.push(job); pumpImgQueue(); }, 80 * job.attempt);
+      } else {
+        job.done(null);
+      }
+      pumpImgQueue();
+    };
+    // A fresh query string on retry also sidesteps any negatively-cached response.
+    probe.src = job.attempt ? `${job.url}?r=${job.attempt}` : job.url;
   }
+}
+
+function paintPlaceholder(g, el) {
+  const h = hashHue(g.title);
+  el.style.background = `linear-gradient(150deg, hsl(${h},16%,15%) 0%, hsl(${(h + 40) % 360},22%,9%) 100%)`;
+  el.classList.add("ph");
+  el.innerHTML = `<span>${esc(initials(g.title))}</span>`;
+}
+
+function applyArt(g, el, url) {
+  if (!url) { paintPlaceholder(g, el); return; }
+  queueArt(url, (src) => {
+    if (!el.isConnected) return;          // tile was re-rendered while loading
+    if (src) el.style.backgroundImage = `url('${src}')`;
+    else paintPlaceholder(g, el);
+  });
 }
 
 function fmtPlaytime(min) {
