@@ -1,0 +1,69 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+*.binlog
+
+# Publish / packaging
+[Pp]ublish/
+*.publishsettings
+*.pubxml.user
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio / Rider / VS Code user state
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local settings (launch.json is shared project config and IS tracked)
+.claude/settings.local.json
+
+# Test / coverage results
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+
+# ReSharper / dotCover
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# OS cruft
+[Tt]humbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Editor backups
+*.swp
+*~
+
+# Couch Launcher runtime data (lives in %APPDATA%\CouchLauncher, but never commit strays)
+/settings.json
+/library.json
+/couchlauncher.log
+/covers/

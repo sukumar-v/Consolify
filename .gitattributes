@@ -1,0 +1,25 @@
+# Normalize line endings: LF in the repository, native in the working copy.
+* text=auto
+
+# Windows-native tooling expects CRLF in the working copy
+*.sln       text eol=crlf
+*.csproj    text eol=crlf
+*.manifest  text eol=crlf
+
+# Source and web assets
+*.cs        text diff=csharp
+*.xaml      text
+*.html      text
+*.css       text
+*.js        text
+*.json      text
+*.md        text
+
+# Binary assets — never diff or convert
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.ico       binary
+*.dll       binary
+*.exe       binary

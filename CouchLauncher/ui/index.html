@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Couch Launcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="backdrop">
+  <div class="bd" id="bdA"></div>
+  <div class="bd" id="bdB"></div>
+</div>
+
+<div id="stage">
+
+  <!-- ============ LIBRARY ============ -->
+  <div class="screen" id="screen-library">
+    <header class="topbar">
+      <div class="topbar-left" data-tabbar="library"></div>
+      <div class="topbar-right mono">
+        <span id="padBattery" class="pad-status"></span>
+        <span id="scanStatus"></span>
+        <span id="titleCount">0 TITLES</span>
+        <span class="vsep"></span>
+        <span class="clock">--:--</span>
+      </div>
+    </header>
+
+    <div class="lib-body">
+      <section class="lib-section" id="continueSection">
+        <div class="section-head">
+          <div class="section-title">Continue</div>
+          <div class="section-label mono">RECENTLY PLAYED</div>
+        </div>
+        <div class="continue-row" id="continueRow"></div>
+      </section>
+
+      <section class="lib-section lib-grid-section">
+        <div class="section-head">
+          <div class="section-title">All games</div>
+          <div class="section-label mono" id="gridLabel">0 TITLES</div>
+        </div>
+        <div class="grid-scroll" id="gridScroll"></div>
+      </section>
+    </div>
+
+    <footer class="legend">
+      <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
+      <div class="legend-item"><div class="btn-badge">Y</div><span>Details</span></div>
+      <div class="legend-item"><div class="btn-badge">X</div><span>Filter</span></div>
+      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>
+    </footer>
+  </div>
+
+  <!-- ============ COLLECTIONS ============ -->
+  <div class="screen" id="screen-collections">
+    <header class="topbar">
+      <div class="topbar-left" data-tabbar="collections"></div>
+      <div class="topbar-right mono">
+        <span id="collCrumb"></span>
+        <span class="vsep"></span>
+        <span class="clock">--:--</span>
+      </div>
+    </header>
+
+    <div class="coll-body">
+      <div class="coll-list" id="collList"></div>
+      <div class="coll-grid-wrap" id="collGridWrap">
+        <div class="section-head">
+          <div class="section-title" id="collGridTitle">Collection</div>
+          <div class="section-label mono" id="collGridLabel"></div>
+        </div>
+        <div class="grid-scroll" id="collGridScroll"></div>
+      </div>
+    </div>
+
+    <footer class="legend" id="legend-collections"></footer>
+  </div>
+
+  <!-- ============ DETAIL ============ -->
+  <div class="screen" id="screen-detail">
+    <div class="detail-art" id="detailArt"></div>
+    <div class="detail-shade-x"></div>
+    <div class="detail-shade-y"></div>
+
+    <div class="detail-content">
+      <div class="crumb mono"><span>LIBRARY</span><span>/</span><span class="crumb-here" id="detailCrumb">STEAM</span></div>
+
+      <div class="detail-main">
+        <div class="detail-titleblock">
+          <h1><span id="detailFav" class="fav-star" style="display:none">★</span><span id="detailTitle">—</span></h1>
+          <p id="detailDesc">—</p>
+        </div>
+
+        <div class="detail-stats">
+          <div class="stat"><div class="stat-label mono">PLAYTIME</div><div class="stat-value" id="statPlaytime">—</div></div>
+          <div class="stat"><div class="stat-label mono">LAST PLAYED</div><div class="stat-value" id="statLastPlayed">—</div></div>
+          <div class="stat"><div class="stat-label mono">SESSIONS</div><div class="stat-value" id="statSessions">—</div></div>
+          <div class="stat"><div class="stat-label mono">INSTALLED</div><div class="stat-value" id="statSize">—</div></div>
+        </div>
+
+        <div class="detail-actions" id="detailActions">
+          <div class="pill-btn pill-primary" data-act="play">
+            <div class="pill-a-badge">A</div>
+            <span id="playLabel">Play</span>
+          </div>
+          <div class="pill-btn pill-secondary" data-act="collect">Add to Collection</div>
+          <div class="pill-btn pill-secondary" data-act="manage">Manage</div>
+        </div>
+      </div>
+
+      <footer class="legend">
+        <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>
+        <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
+        <div class="legend-item"><div class="btn-badge">X</div><span id="favLegend">Favorite</span></div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS ============ -->
+  <div class="screen" id="screen-settings">
+    <header class="topbar">
+      <div class="topbar-left" data-tabbar="settings"></div>
+      <div class="topbar-right mono">
+        <span class="clock">--:--</span>
+      </div>
+    </header>
+
+    <div class="settings-scroll" id="settingsScroll"></div>
+
+    <footer class="legend">
+      <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>
+      <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
+      <div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>
+      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>
+    </footer>
+  </div>
+
+  <!-- ============ FILTER & SORT ============ -->
+  <div class="overlay" id="overlay-filter">
+    <div class="quick-card filter-card">
+      <div class="quick-title mono">FILTER &amp; SORT</div>
+      <div id="filterList"></div>
+      <div class="wol-foot"><div class="btn-badge">B</div><span>Close</span></div>
+    </div>
+  </div>
+
+  <!-- ============ ADD TO COLLECTION ============ -->
+  <div class="overlay" id="overlay-collect">
+    <div class="quick-card">
+      <div class="quick-title mono">ADD TO COLLECTION</div>
+      <div id="collectList"></div>
+    </div>
+  </div>
+
+  <!-- ============ MANAGE ============ -->
+  <div class="overlay" id="overlay-manage">
+    <div class="quick-card">
+      <div class="quick-title mono">MANAGE</div>
+      <div id="manageList"></div>
+    </div>
+  </div>
+
+  <!-- ============ CONFIRM ============ -->
+  <div class="overlay" id="overlay-confirm">
+    <div class="quick-card">
+      <div class="quick-title mono" id="confirmTitle">ARE YOU SURE?</div>
+      <div id="confirmList"></div>
+    </div>
+  </div>
+
+  <!-- ============ TEXT INPUT ============ -->
+  <div class="overlay" id="overlay-input">
+    <div class="quick-card">
+      <div class="quick-title mono" id="inputTitle">NAME</div>
+      <input id="inputField" class="text-input" type="text" autocomplete="off" spellcheck="false">
+      <div class="wol-foot mono input-hint">ENTER CONFIRM · ESC CANCEL</div>
+    </div>
+  </div>
+
+  <!-- ============ LOCK SCREEN / WAKE GUIDE ============ -->
+  <div class="overlay" id="overlay-wol">
+    <div class="wol-card">
+      <div class="quick-title mono">LOCK SCREEN, WAKE &amp; STARTUP</div>
+      <div class="wol-body" id="wolBody"></div>
+      <div class="wol-foot"><div class="btn-badge">B</div><span>Close</span></div>
+    </div>
+  </div>
+
+  <div id="toast" class="mono"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

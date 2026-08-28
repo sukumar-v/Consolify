@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "CouchLauncher/ui", "-p", "8930", "-c-1", "--silent"],
+      "port": 8930
+    }
+  ]
+}
