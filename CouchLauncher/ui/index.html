@@ -51,7 +51,7 @@
 
     <footer class="legend">
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
-      <div class="legend-item"><div class="btn-badge">Y</div><span>Details</span></div>
+      <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
       <div class="legend-item"><div class="btn-badge">X</div><span>Filter</span></div>
       <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>
     </footer>
@@ -144,9 +144,17 @@
   <!-- ============ FILTER & SORT ============ -->
   <div class="overlay" id="overlay-filter">
     <div class="quick-card filter-card">
-      <div class="quick-title mono">FILTER &amp; SORT</div>
-      <div id="filterList"></div>
-      <div class="wol-foot"><div class="btn-badge">B</div><span>Close</span></div>
+      <div class="quick-title mono" id="filterTitle">FILTER &amp; SORT</div>
+      <div class="ov-scroll" id="filterList"></div>
+      <div class="ov-foot" id="filterFoot"></div>
+    </div>
+  </div>
+
+  <!-- ============ GAME CONTEXT MENU ============ -->
+  <div class="overlay" id="overlay-gamemenu">
+    <div class="quick-card menu-card">
+      <div class="quick-title mono" id="gameMenuTitle">GAME</div>
+      <div id="gameMenuList"></div>
     </div>
   </div>
 
@@ -186,7 +194,7 @@
   <!-- ============ LOCK SCREEN / WAKE GUIDE ============ -->
   <div class="overlay" id="overlay-wol">
     <div class="wol-card">
-      <div class="quick-title mono">LOCK SCREEN, WAKE &amp; STARTUP</div>
+      <div class="quick-title mono">COUCH SETUP GUIDE</div>
       <div class="wol-body" id="wolBody"></div>
       <div class="wol-foot"><div class="btn-badge">B</div><span>Close</span></div>
     </div>

@@ -31,9 +31,11 @@ CouchLauncher/
   Services/
     DisplayService.cs     Monitor enumeration + primary-display switching (ChangeDisplaySettingsEx)
     GameLaunchService.cs  Launch orchestration, process tracking, window repositioning, playtime
-    LibraryScanner.cs     Steam (ACF/VDF + librarycache art), Epic (.item manifests), GOG (registry)
+    LibraryScanner.cs     Steam (ACF/VDF + librarycache art), Epic (.item manifests),
+                          GOG (registry), Xbox (MicrosoftGame.config + AppModel repository)
     GamepadService.cs     XInput polling: UI navigation events + gamepad-mouse (SendInput/SetCursorPos)
-    VirtualKeyboardService.cs  TabTip.exe / osk.exe toggle
+    VirtualKeyboardService.cs  Touch keyboard (TabTip) via ITipInvocation COM
+    CursorService.cs      Optional system-wide pointer hiding while the D-pad drives
     StartupService.cs     HKCU Run key registration
     Storage.cs            JSON persistence in %APPDATA%\CouchLauncher (settings, library, log, covers)
   Interop/NativeMethods.cs   All P/Invoke declarations
@@ -55,11 +57,22 @@ CouchLauncher/
   Cyberpunk2077.exe) don't end the session early. Per-game **launch arguments**
   (e.g. `--launcher-skip` for Cyberpunk) and a **direct-exe override** that bypasses the store
   launcher are available under Detail → Manage.
-- **Library organisation** — Favorites (X on a game's detail page), automatic per-platform
-  collections, and custom collections (Detail → Add to Collection → New collection, named via
-  the touch keyboard). The Filter overlay (X in the library) filters by platform / favorites /
-  installed state and sorts A–Z, Z–A, recently played, most played, or by size.
+- **Game options menu** — **Y** on any game opens a context menu: View game (the full detail
+  page), favorite, add to collection, change cover art, and **Hide**. Hidden entries drop out of
+  the library entirely and collect under the **Hidden** collection, which is how you get rid of
+  non-games that the platform scanners pick up (benchmarks, wallpaper tools, redistributables).
+- **Library organisation** — Favorites, automatic per-platform collections (Steam, Epic, GOG,
+  Xbox, Manual), custom collections, and Hidden. The **X** overlay has two dropdowns: a
+  categorised **multi-select Filter** (platform / status / favorites) and a single-select
+  **Sort** (A–Z, Z–A, recently played, most played, largest, smallest); **Y** resets both.
   LB/RB switches between Library, Collections and Settings.
+- **Adding games** — a **+ Add game** tile sits at the end of the library grid, and the same
+  action lives under Settings → Library. File dialogs drop always-on-top while open, otherwise
+  they open *behind* the full-screen launcher and appear to do nothing.
+- **Pointer / D-pad input modes** — the mouse pointer hides and hover stops stealing focus as
+  soon as the D-pad drives; moving the stick or a real mouse brings it straight back. Inside the
+  launcher this is free; Settings → "Hide pointer system-wide" extends it to the rest of Windows
+  by swapping the system cursors (restored on exit, on crash and on process exit).
 - **Gamepad** (XInput, pad 0):
   - Launcher focused → D-pad/A/B/X/Y drive the UI exactly as the on-screen legend shows;
     the left stick moves the mouse cursor (hover focuses, so stick and D-pad stay in sync),
@@ -74,10 +87,13 @@ CouchLauncher/
     deflection) are sliders in Settings.
   - The header shows a controller **battery gauge** — only for wireless pads that actually
     report a battery; wired controllers show nothing.
-- **Virtual keyboard** — the Windows *touch* keyboard (TabTip, which has native gamepad
-  support) via the ITipInvocation COM interface; osk.exe is only a last-resort fallback when
-  TabTip doesn't exist. Hold Start (button + hold time configurable) to toggle; text inputs in
-  the UI (collection names, launch arguments) raise it automatically.
+- **Virtual keyboard** — the Windows *touch* keyboard (TabTip) via the ITipInvocation COM
+  interface; osk.exe is only a last-resort fallback when TabTip doesn't exist. Hold Start
+  (button + hold time configurable) to toggle; text inputs in the UI (collection names, launch
+  arguments) raise it automatically. **The keyboard only accepts gamepad input on its "Gamepad"
+  layout**, which Windows exposes solely through the keyboard's own settings flyout — there is
+  no registry value or API to select it, so the app cannot switch it for you. It is a one-time
+  choice that persists: step 01 of the in-app setup guide walks through it.
 - **Lock screen, wake & startup** — Settings → "Launch Couch Launcher at login" (HKCU Run key),
   plus a step-by-step in-app guide: Windows Hello PIN for couch-friendly sign-in (the sign-in
   screen's touch keyboard supports gamepad input), BIOS Wake-on-LAN, adapter magic-packet
@@ -109,9 +125,13 @@ behaviour and screen structure. Things that could not map 1:1 to local desktop r
    only installed games are discoverable (store catalogs need authenticated APIs), so
    "not installed" shows for entries whose files have been removed since scanning.
 7. **Sample imagery** — the design's placeholder photos are replaced by real cover art
-   (Steam caches both portrait covers and landscape banners; manual entries use user-picked
-   images) with a procedural gradient-and-initials placeholder when art is unavailable
-   (Epic/GOG have no local art cache).
+   (Steam caches both portrait covers and landscape banners; Xbox supplies square store logos;
+   manual entries use user-picked images) with a procedural gradient-and-initials placeholder
+   when art is unavailable (Epic/GOG have no local art cache).
+9. **Touch keyboard "Gamepad" layout** — the keyboard ignores controller input on its default
+   layout, but Windows offers no registry value or API to select the Gamepad layout; it is
+   only selectable from the keyboard's own settings flyout. Documented as a one-time manual
+   step (guide step 01) rather than automated with an undocumented registry write.
 8. **Fonts** — Manrope / IBM Plex Mono load from Google Fonts when online; otherwise the UI
    falls back to Segoe UI / Consolas.
 

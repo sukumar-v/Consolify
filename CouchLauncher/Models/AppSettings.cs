@@ -15,6 +15,9 @@ public class AppSettings
     public double Deadzone { get; set; } = 0.18;       // 0.05 .. 0.40
     public double Sensitivity { get; set; } = 1.0;     // 0.2 .. 3.0 (multiplier on max cursor speed)
     public double AccelExponent { get; set; } = 1.8;   // 1.0 linear .. 3.0 strongly curved
+    /// <summary>Replace Windows' cursors with blank ones while the D-pad drives navigation.
+    /// Global state, so off by default — see CursorService.</summary>
+    public bool HideCursorSystemWide { get; set; }
 
     // Button bindings (used outside the launcher UI; inside it A/B/Y/X/MENU follow the on-screen legend)
     public string LeftClickButton { get; set; } = "A";

@@ -122,10 +122,19 @@ public class GameLaunchService
         bool direct = game.ExePath is not null && File.Exists(game.ExePath)
                       && (game.Platform is "GOG" or "Manual" || game.PreferDirectLaunch);
 
-        if (!direct && game.LaunchUri is not null && game.Platform is "Steam" or "Epic")
+        if (!direct && game.LaunchUri is not null)
         {
-            Process.Start(new ProcessStartInfo(game.LaunchUri) { UseShellExecute = true });
-            return null; // real process found later via install dir
+            if (game.LaunchUri.StartsWith("shell:AppsFolder", StringComparison.OrdinalIgnoreCase))
+            {
+                // Packaged (Xbox / Microsoft Store) apps are activated through the shell.
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{game.LaunchUri}\"") { UseShellExecute = true });
+                return null;
+            }
+            if (game.Platform is "Steam" or "Epic")
+            {
+                Process.Start(new ProcessStartInfo(game.LaunchUri) { UseShellExecute = true });
+                return null; // real process found later via install dir
+            }
         }
 
         if (game.ExePath is null || !File.Exists(game.ExePath))

@@ -31,6 +31,8 @@ public class GamepadService : IDisposable
     public event Action? KeyboardToggleRequested;
     /// <summary>Raised when Back+Start are pressed together (minimize/restore the launcher).</summary>
     public event Action? MinimizeToggleRequested;
+    /// <summary>"pad" when the D-pad/buttons drive navigation, "pointer" when the stick moves the cursor.</summary>
+    public event Action<string>? InputModeChanged;
     /// <summary>type: 0 none/wired, 2 alkaline, 3 NiMH; level: 0 empty .. 3 full.</summary>
     public event Action<byte, byte>? BatteryChanged;
     public event Action<bool>? ConnectedChanged;
@@ -68,6 +70,14 @@ public class GamepadService : IDisposable
         long nextBatteryPoll = 0;
         var lastBattery = (type: (byte)255, level: (byte)255);
         int missCount = 0;
+        string inputMode = "pointer";
+
+        void SetInputMode(string mode)
+        {
+            if (inputMode == mode) return;
+            inputMode = mode;
+            InputModeChanged?.Invoke(mode);
+        }
 
         while (_running)
         {
@@ -147,6 +157,9 @@ public class GamepadService : IDisposable
             bool toggleReleasedAsTap = (released & toggleMask) != 0 && !toggleFired && toggleDownAt >= 0;
             if ((released & toggleMask) != 0) toggleDownAt = -1;
 
+            // Any button press means the user is driving with the pad, not the pointer.
+            if (pressed != 0) SetInputMode("pad");
+
             // ---- launcher UI navigation ----
             if (launcherFg)
             {
@@ -208,6 +221,8 @@ public class GamepadService : IDisposable
                     fracX -= dx; fracY -= dy;
                     if (dx != 0 || dy != 0)
                     {
+                        // Moving the stick brings the pointer back.
+                        SetInputMode("pointer");
                         NativeMethods.GetCursorPos(out var p);
                         NativeMethods.SetCursorPos(p.X + dx, p.Y + dy);
                     }

@@ -143,6 +143,7 @@ public class LibraryStore
                     s.PlaytimeMinutes = old.PlaytimeMinutes;
                     s.Sessions = old.Sessions;
                     s.Favorite = old.Favorite;
+                    s.Hidden = old.Hidden;
                     if (old.LastPlayed is not null && (s.LastPlayed is null || old.LastPlayed > s.LastPlayed))
                         s.LastPlayed = old.LastPlayed;
                     if (s.CoverFile is null) s.CoverFile = old.CoverFile;

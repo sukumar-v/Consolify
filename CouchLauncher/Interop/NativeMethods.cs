@@ -162,6 +162,43 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
+    // ---- System cursor replacement (optional system-wide pointer hiding) ----
+
+    public const uint OCR_NORMAL = 32512;
+    public const uint OCR_IBEAM = 32513;
+    public const uint OCR_WAIT = 32514;
+    public const uint OCR_CROSS = 32515;
+    public const uint OCR_UP = 32516;
+    public const uint OCR_SIZENWSE = 32642;
+    public const uint OCR_SIZENESW = 32643;
+    public const uint OCR_SIZEWE = 32644;
+    public const uint OCR_SIZENS = 32645;
+    public const uint OCR_SIZEALL = 32646;
+    public const uint OCR_NO = 32648;
+    public const uint OCR_HAND = 32649;
+    public const uint OCR_APPSTARTING = 32650;
+
+    public static readonly uint[] SystemCursorIds =
+    {
+        OCR_NORMAL, OCR_IBEAM, OCR_CROSS, OCR_UP, OCR_SIZENWSE, OCR_SIZENESW,
+        OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL, OCR_NO, OCR_HAND, OCR_APPSTARTING
+    };
+
+    public const uint SPI_SETCURSORS = 0x0057;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot,
+        int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyCursor(IntPtr hCursor);
+
     public const uint INPUT_MOUSE = 0;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;

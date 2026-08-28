@@ -32,10 +32,10 @@ let detailGameId = null;
 let detailReturn = "library";            // where B goes back to from detail
 let detailBtn = 0;
 
-/* filter & sort (session state) */
-const F = { platform: "All", fav: false, installed: "All", sort: "az" };
-const PLATFORMS = ["All", "Steam", "Epic", "GOG", "Manual"];
-const INSTALLED_OPTS = ["All", "Installed", "Not installed"];
+/* filter & sort (session state) — empty sets mean "no restriction" */
+const F = { platforms: new Set(), status: new Set(), fav: false, sort: "az" };
+const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
+const STATUSES = ["Installed", "Not installed"];
 const SORTS = [
   { id: "az", label: "A – Z" },
   { id: "za", label: "Z – A" },
@@ -44,6 +44,31 @@ const SORTS = [
   { id: "sizeDesc", label: "Largest first" },
   { id: "sizeAsc", label: "Smallest first" },
 ];
+
+function resetFilters() {
+  F.platforms.clear();
+  F.status.clear();
+  F.fav = false;
+  F.sort = "az";
+}
+
+function activeFilterCount() {
+  return F.platforms.size + F.status.size + (F.fav ? 1 : 0);
+}
+
+/* input mode: "pad" hides the pointer and ignores hover; "pointer" is stick or real mouse */
+let inputMode = "pointer";
+
+function setInputMode(mode) {
+  if (inputMode === mode) return;
+  inputMode = mode;
+  document.body.classList.toggle("pad-mode", mode === "pad");
+}
+
+/** Hover should only move focus when the pointer is actually the active input. */
+function hoverEnabled() { return inputMode === "pointer"; }
+
+window.addEventListener("mousemove", () => setInputMode("pointer"));
 
 /* collections screen */
 let collMode = "list";                   // list | grid
@@ -217,6 +242,7 @@ function renderTabbars() {
       el.textContent = t.label;
       el.dataset.tab = t.id;
       el.addEventListener("mouseenter", () => {
+        if (!hoverEnabled()) return;
         if (view === "library") { focus = { zone: "tabs", row: 0, col: 0 }; tabIdx = i; updateLibraryFocus(true); }
       });
       el.addEventListener("click", () => { if (t.id !== view) switchView(t.id); });
@@ -227,7 +253,18 @@ function renderTabbars() {
 
 /* ============================== tiles (shared) ============================== */
 
+function makeAddTile(onHover, onClick) {
+  const item = document.createElement("div");
+  item.className = "grid-item add-tile";
+  item.innerHTML = `<div class="add-plus">+</div><div class="add-label">Add game</div>`;
+  item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
+  item.addEventListener("click", onClick);
+  return item;
+}
+
 function makeGridTile(g, onHover, onClick, onDetails) {
+  if (g.__add) return makeAddTile(onHover, onClick);
+
   const item = document.createElement("div");
   item.className = "grid-item" + (g.installed ? "" : " uninstalled");
 
@@ -249,7 +286,7 @@ function makeGridTile(g, onHover, onClick, onDetails) {
     item.appendChild(star);
   }
 
-  item.addEventListener("mouseenter", onHover);
+  item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
   item.addEventListener("click", onClick);
   if (onDetails) item.addEventListener("contextmenu", (e) => { e.preventDefault(); onDetails(); });
   return item;
@@ -269,31 +306,39 @@ function sortGames(list) {
   return [...list].sort(by);
 }
 
-function libraryData() {
-  let filtered = S.games;
-  if (F.platform !== "All") filtered = filtered.filter(g => g.platform === F.platform);
-  if (F.fav) filtered = filtered.filter(g => g.favorite);
-  if (F.installed === "Installed") filtered = filtered.filter(g => g.installed);
-  if (F.installed === "Not installed") filtered = filtered.filter(g => !g.installed);
+/** Games eligible for the library: everything the user hasn't hidden. */
+function visibleGames() { return S.games.filter(g => !g.hidden); }
 
-  const cont = [...S.games]
+function libraryData() {
+  let filtered = visibleGames();
+  if (F.platforms.size) filtered = filtered.filter(g => F.platforms.has(g.platform));
+  if (F.fav) filtered = filtered.filter(g => g.favorite);
+  if (F.status.size === 1) {
+    const wantInstalled = F.status.has("Installed");
+    filtered = filtered.filter(g => g.installed === wantInstalled);
+  }
+
+  const cont = visibleGames()
     .filter(g => g.lastPlayed && g.installed)
     .sort((a, b) => new Date(b.lastPlayed) - new Date(a.lastPlayed))
     .slice(0, 5);
 
-  const sorted = sortGames(filtered);
+  // The "add a game" tile always trails the grid so it's reachable without a menu.
+  const items = [...sortGames(filtered), { __add: true }];
   const rows = [];
-  for (let i = 0; i < sorted.length; i += 8) rows.push(sorted.slice(i, i + 8));
+  for (let i = 0; i < items.length; i += 8) rows.push(items.slice(i, i + 8));
   return { cont, rows, total: filtered.length };
 }
 
 function filterSummary(total) {
   const bits = [`${total} TITLE${total === 1 ? "" : "S"}`];
-  if (F.platform !== "All") bits.push(F.platform.toUpperCase());
+  if (F.platforms.size) bits.push([...F.platforms].join(" + ").toUpperCase());
   if (F.fav) bits.push("FAVORITES");
-  if (F.installed !== "All") bits.push(F.installed.toUpperCase());
+  if (F.status.size === 1) bits.push([...F.status][0].toUpperCase());
   const sort = SORTS.find(s => s.id === F.sort);
   if (F.sort !== "az" && sort) bits.push(sort.label.toUpperCase());
+  const hidden = S.games.length - visibleGames().length;
+  if (hidden > 0) bits.push(`${hidden} HIDDEN`);
   return bits.join(" · ");
 }
 
@@ -331,7 +376,10 @@ function renderLibrary() {
     meta.innerHTML = `<div class="cont-title">${esc(g.title)}</div><div class="cont-sub">${esc(shortMeta(g))}</div>`;
 
     item.appendChild(art); item.appendChild(meta);
-    item.addEventListener("mouseenter", () => { focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true); });
+    item.addEventListener("mouseenter", () => {
+      if (!hoverEnabled()) return;
+      focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true);
+    });
     item.addEventListener("click", () => { focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true); libraryAccept("A"); });
     rowEl.appendChild(item);
   });
@@ -339,14 +387,14 @@ function renderLibrary() {
   // Grid
   const scroll = $("gridScroll");
   scroll.innerHTML = "";
-  if (!rows.length) {
+  if (total === 0) {
     const note = document.createElement("div");
     note.className = "empty-note";
     note.innerHTML = S.scanning
-      ? "Scanning your Steam, Epic and GOG libraries…"
-      : (S.games.length
-        ? "Nothing matches the current filter. Press <b>X</b> to change it."
-        : "No games found. Open <b>Settings → Library</b> to rescan platforms or add a game manually.");
+      ? "Scanning your Steam, Epic, GOG and Xbox libraries…"
+      : (visibleGames().length
+        ? "Nothing matches the current filter. Press <b>X</b> to change it, or <b>Y</b> to reset."
+        : "No games found yet. Use the <b>+ Add game</b> tile below, or rescan from <b>Settings → Library</b>.");
     scroll.appendChild(note);
   }
   rows.forEach((row, r) => {
@@ -372,7 +420,17 @@ function focusedGame() {
     return null;
   }
   if (focus.zone === "cont") return contItems[focus.col] || null;
+  if (focus.zone === "grid") {
+    const it = (gridRows[focus.row] || [])[focus.col];
+    return it && !it.__add ? it : null;
+  }
+  return null;
+}
+
+/** The focused grid cell, including the trailing "add game" tile. */
+function focusedCell() {
   if (focus.zone === "grid") return (gridRows[focus.row] || [])[focus.col] || null;
+  if (focus.zone === "cont") return contItems[focus.col] || null;
   return null;
 }
 
@@ -462,13 +520,18 @@ function libraryAccept(btn) {
     if (target !== "library") switchView(target);
     return;
   }
+  const cell = focusedCell();
+  if (cell && cell.__add) {
+    if (btn === "A") send({ cmd: "addManual" });
+    return;
+  }
   const g = focusedGame();
   if (!g) return;
   if (btn === "A") {
     if (!g.installed) { toast(`${g.title} is not installed`); return; }
     launchGame(g);
   } else if (btn === "Y") {
-    openDetail(g.id, "library");
+    openGameMenu(g.id, "library");
   }
 }
 
@@ -494,16 +557,19 @@ function launchGame(g) {
 
 function collectionsData() {
   const list = [];
-  const favs = S.games.filter(g => g.favorite);
-  list.push({ id: "fav", name: "Favorites", star: true, games: sortGames(favs) });
-  PLATFORMS.slice(1).forEach(p => {
-    const games = S.games.filter(g => g.platform === p);
+  const vis = visibleGames();
+  list.push({ id: "fav", name: "Favorites", star: true, games: sortGames(vis.filter(g => g.favorite)) });
+  PLATFORMS.forEach(p => {
+    const games = vis.filter(g => g.platform === p);
     if (games.length) list.push({ id: "plat:" + p, name: p, games: sortGames(games) });
   });
   S.collections.forEach(c => {
-    const games = sortGames(c.gameIds.map(gameById).filter(Boolean));
+    const games = sortGames(c.gameIds.map(gameById).filter(g => g && !g.hidden));
     list.push({ id: c.id, name: c.name, custom: true, games });
   });
+  // Hidden lives at the end — it's a holding pen for things that aren't really games.
+  const hidden = S.games.filter(g => g.hidden);
+  if (hidden.length) list.push({ id: "hidden", name: "Hidden", games: sortGames(hidden) });
   return list;
 }
 
@@ -539,7 +605,7 @@ function renderCollections() {
         </div>
         <div class="coll-thumbs">${thumbs}</div>`;
 
-      card.addEventListener("mouseenter", () => { if (collListIdx !== i) { collListIdx = i; renderCollections(); } });
+      card.addEventListener("mouseenter", () => { if (hoverEnabled() && collListIdx !== i) { collListIdx = i; renderCollections(); } });
       card.addEventListener("click", () => { collListIdx = i; openCollectionGrid(c.id); });
       listEl.appendChild(card);
     });
@@ -576,8 +642,10 @@ function renderCollections() {
       const note = document.createElement("div");
       note.className = "empty-note";
       note.innerHTML = col.id === "fav"
-        ? "No favorites yet — press <b>X</b> on a game's detail page to favorite it."
-        : "This collection is empty — use <b>Add to Collection</b> on a game's detail page.";
+        ? "No favorites yet — press <b>Y</b> on a game and choose <b>Add to favorites</b>."
+        : col.id === "hidden"
+          ? "Nothing hidden. Press <b>Y</b> on anything that isn't really a game and choose <b>Hide</b>."
+          : "This collection is empty — press <b>Y</b> on a game and choose <b>Add to collection</b>.";
       scroll.appendChild(note);
     }
     collGridRows.forEach((row, r) => {
@@ -655,7 +723,7 @@ function collectionsInput(btn) {
         if (collFocus.row < collGridRows.length - 1) { collFocus.row++; collFocus.col = Math.min(collFocus.col, collGridRows[collFocus.row].length - 1); updateCollFocus(); }
         break;
       case "A": if (g) { if (g.installed) launchGame(g); else toast(`${g.title} is not installed`); } break;
-      case "Y": if (g) openDetail(g.id, "collections"); break;
+      case "Y": if (g) openGameMenu(g.id, "collections"); break;
       case "B": collMode = "list"; renderCollections(); break;
     }
   }
@@ -703,7 +771,7 @@ function renderDetail() {
   applyArt(g, art, bannerUrl(g));
 
   document.querySelectorAll("#detailActions .pill-btn").forEach((el, i) => {
-    el.onmouseenter = () => { detailBtn = i; updateDetailFocus(); };
+    el.onmouseenter = () => { if (hoverEnabled()) { detailBtn = i; updateDetailFocus(); } };
     el.onclick = () => { detailBtn = i; updateDetailFocus(); detailActivate(); };
   });
 
@@ -782,6 +850,8 @@ function settingsRows() {
   rows.push(cycleRow("Left click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.leftClickButton, v => set(() => s.leftClickButton = v),
     "Sends a real mouse click when the launcher is not focused"));
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
+  rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Couch Launcher exits",
+    () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
   rows.push({
     name: "Minimize / restore launcher", hint: "Press View + Menu (Back + Start) together at any time",
     type: "static", value: "VIEW + MENU",
@@ -813,7 +883,7 @@ function settingsRows() {
   rows.push(toggleRow("Launch Couch Launcher at login", "Registers a startup entry so the launcher is ready after wake or reboot",
     () => s.launchOnStartup, v => set(() => s.launchOnStartup = v)));
   rows.push({
-    name: "Lock screen, wake & startup guide", hint: "PIN sign-in from the couch, Wake-on-LAN, controller wake",
+    name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, Wake-on-LAN, controller wake",
     type: "action", label: "Open guide",
     action: () => { wolOpen = true; $("overlay-wol").classList.add("active"); },
   });
@@ -893,7 +963,7 @@ function renderSettings() {
 
     el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}</div><div class="set-value">${right}</div>`;
 
-    el.addEventListener("mouseenter", () => { if (settingsIdx !== idx) { settingsIdx = idx; renderSettings(); } });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && settingsIdx !== idx) { settingsIdx = idx; renderSettings(); } });
     el.addEventListener("click", () => { settingsIdx = idx; const row = settingsRows().filter(x => !x.section)[idx]; if (row.action) row.action(); else if (row.adjust) row.adjust(1); });
     scroll.appendChild(el);
   });
@@ -922,26 +992,8 @@ function scheduleSave() {
 
 /* ============================== filter overlay ============================== */
 
-function filterRows() {
-  return [
-    cycleOv("Platform", PLATFORMS, () => F.platform, v => F.platform = v),
-    cycleOv("Favorites", ["All games", "Favorites only"], () => F.fav ? "Favorites only" : "All games", v => F.fav = v === "Favorites only"),
-    cycleOv("Installed", INSTALLED_OPTS, () => F.installed, v => F.installed = v),
-    cycleOv("Sort by", SORTS.map(s => s.label), () => SORTS.find(s => s.id === F.sort).label, v => F.sort = SORTS.find(s => s.label === v).id),
-    { name: "Reset filters", type: "action", action: () => { F.platform = "All"; F.fav = false; F.installed = "All"; F.sort = "az"; applyFilter(); } },
-  ];
-}
-
-function cycleOv(name, options, get, setV) {
-  return {
-    name, type: "select", value: get(),
-    adjust: (dir) => {
-      const i = (options.indexOf(get()) + dir + options.length) % options.length;
-      setV(options[i]);
-      applyFilter();
-    },
-  };
-}
+/* filterLevel: null = the Filter/Sort menu, "filter"/"sort" = an open dropdown */
+let filterLevel = null;
 
 function applyFilter() {
   focus = { zone: "grid", row: 0, col: 0 };
@@ -949,47 +1001,208 @@ function applyFilter() {
   renderFilter();
 }
 
-function openFilter() { filterOpen = true; filterIdx = 0; renderFilter(); $("overlay-filter").classList.add("active"); }
-function closeFilter() { filterOpen = false; $("overlay-filter").classList.remove("active"); }
+function openFilter() {
+  filterOpen = true; filterIdx = 0; filterLevel = null;
+  renderFilter();
+  $("overlay-filter").classList.add("active");
+}
+
+function closeFilter() {
+  filterOpen = false; filterLevel = null;
+  $("overlay-filter").classList.remove("active");
+}
+
+/** Rows of the top-level Filter / Sort menu. */
+function filterMenuRows() {
+  const n = activeFilterCount();
+  return [
+    { name: "Filter", summary: n ? `${n} active` : "All games", open: "filter" },
+    { name: "Sort", summary: SORTS.find(s => s.id === F.sort).label, open: "sort" },
+  ];
+}
+
+/** Flat list of the multi-select dropdown, with category headers interleaved. */
+function filterDropdownRows() {
+  const rows = [{ cat: "PLATFORM" }];
+  PLATFORMS.forEach(p => rows.push({
+    label: p, checked: F.platforms.has(p),
+    toggle: () => { F.platforms.has(p) ? F.platforms.delete(p) : F.platforms.add(p); },
+  }));
+  rows.push({ cat: "STATUS" });
+  STATUSES.forEach(s => rows.push({
+    label: s, checked: F.status.has(s),
+    toggle: () => { F.status.has(s) ? F.status.delete(s) : F.status.add(s); },
+  }));
+  rows.push({ cat: "OTHER" });
+  rows.push({
+    label: "Favorites only", checked: F.fav,
+    toggle: () => { F.fav = !F.fav; },
+  });
+  return rows;
+}
+
+function sortDropdownRows() {
+  return SORTS.map(s => ({
+    label: s.label, checked: F.sort === s.id, radio: true,
+    toggle: () => { F.sort = s.id; },
+  }));
+}
+
+function currentFilterRows() {
+  if (filterLevel === "filter") return filterDropdownRows();
+  if (filterLevel === "sort") return sortDropdownRows();
+  return filterMenuRows();
+}
+
+/** Indices of rows that can take focus (category headers can't). */
+function filterFocusable(rows) {
+  return rows.map((r, i) => r.cat ? -1 : i).filter(i => i >= 0);
+}
 
 function renderFilter() {
+  const rows = currentFilterRows();
+  const focusable = filterFocusable(rows);
+  if (!focusable.includes(filterIdx)) filterIdx = focusable[0] ?? 0;
+
+  $("filterTitle").textContent =
+    filterLevel === "filter" ? "FILTER" : filterLevel === "sort" ? "SORT" : "FILTER & SORT";
+
   const list = $("filterList");
   list.innerHTML = "";
-  filterRows().forEach((r, i) => {
+  rows.forEach((r, i) => {
+    if (r.cat) {
+      const c = document.createElement("div");
+      c.className = "ov-cat";
+      c.textContent = r.cat;
+      list.appendChild(c);
+      return;
+    }
     const el = document.createElement("div");
     el.className = "ov-row" + (i === filterIdx ? " focused" : "");
-    if (r.type === "select") {
-      el.innerHTML = `<span>${esc(r.name)}</span><div class="ov-value"><span class="arrow">◂</span><span>${esc(r.value)}</span><span class="arrow">▸</span></div>`;
+    if (r.open) {
+      el.innerHTML = `<span>${esc(r.name)}</span><div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
     } else {
-      el.innerHTML = `<span class="ov-action">${esc(r.name)}</span>`;
+      const mark = r.radio ? "●" : "✓";
+      el.innerHTML = `<span>${esc(r.label)}</span><span class="ov-check${r.checked ? "" : " off"}">${r.checked ? mark : "○"}</span>`;
     }
-    el.addEventListener("mouseenter", () => { if (filterIdx !== i) { filterIdx = i; renderFilter(); } });
-    el.addEventListener("click", () => { filterIdx = i; if (r.action) r.action(); else r.adjust(1); });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && filterIdx !== i) { filterIdx = i; renderFilter(); } });
+    el.addEventListener("click", () => { filterIdx = i; filterActivate(); });
+    list.appendChild(el);
+  });
+
+  const foot = $("filterFoot");
+  foot.innerHTML = filterLevel === null
+    ? `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>
+       <div class="legend-item"><div class="btn-badge">Y</div><span>Reset all</span></div>
+       <div class="legend-item"><div class="btn-badge">B</div><span>Close</span></div>`
+    : `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>${filterLevel === "sort" ? "Choose" : "Toggle"}</span></div>
+       <div class="legend-item"><div class="btn-badge">Y</div><span>Reset all</span></div>
+       <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>`;
+
+  const focusedEl = list.querySelector(".ov-row.focused");
+  if (focusedEl) focusedEl.scrollIntoView({ block: "nearest" });
+}
+
+function filterActivate() {
+  const row = currentFilterRows()[filterIdx];
+  if (!row) return;
+  if (row.open) { filterLevel = row.open; filterIdx = 0; renderFilter(); return; }
+  row.toggle();
+  if (row.radio) { filterLevel = null; filterIdx = 1; }  // sort is single-select: pick and close
+  applyFilter();
+}
+
+function filterInput(btn) {
+  const rows = currentFilterRows();
+  const focusable = filterFocusable(rows);
+  const pos = focusable.indexOf(filterIdx);
+  switch (btn) {
+    case "Up": filterIdx = focusable[Math.max(0, pos - 1)]; renderFilter(); break;
+    case "Down": filterIdx = focusable[Math.min(focusable.length - 1, pos + 1)]; renderFilter(); break;
+    case "A": case "Right": filterActivate(); break;
+    case "Y": resetFilters(); applyFilter(); toast("Filters and sort reset"); break;
+    case "Left": case "B":
+      if (filterLevel) { filterLevel = null; filterIdx = 0; renderFilter(); }
+      else if (btn === "B") closeFilter();
+      break;
+    case "X": closeFilter(); break;
+  }
+}
+
+/* ============================== game context menu (Y) ============================== */
+
+let gameMenu = null;   // { gameId, from, idx }
+
+function openGameMenu(gameId, from) {
+  gameMenu = { gameId, from, idx: 0 };
+  renderGameMenu();
+  $("overlay-gamemenu").classList.add("active");
+}
+
+function closeGameMenu() {
+  gameMenu = null;
+  $("overlay-gamemenu").classList.remove("active");
+}
+
+function gameMenuItems() {
+  if (!gameMenu) return [];
+  const g = gameById(gameMenu.gameId);
+  if (!g) return [{ label: "Close", action: closeGameMenu }];
+  const items = [
+    { label: "View game", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
+    { label: g.favorite ? "Remove from favorites" : "Add to favorites", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
+    { label: "Add to collection", action: () => { closeGameMenu(); openCollect(g.id); } },
+    { label: "Change cover art", action: () => { closeGameMenu(); send({ cmd: "pickCover", id: g.id }); } },
+    { label: g.hidden ? "Unhide" : "Hide", sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
+      action: () => { send({ cmd: "toggleHidden", id: g.id }); closeGameMenu(); } },
+  ];
+  if (g.manual) items.push({
+    label: "Remove from library", danger: true,
+    action: () => { send({ cmd: "removeGame", id: g.id }); closeGameMenu(); },
+  });
+  items.push({ label: "Close", action: closeGameMenu });
+  return items;
+}
+
+function renderGameMenu() {
+  if (!gameMenu) return;
+  const g = gameById(gameMenu.gameId);
+  $("gameMenuTitle").textContent = (g ? g.title : "GAME").toUpperCase();
+  const list = $("gameMenuList");
+  list.innerHTML = "";
+  gameMenuItems().forEach((it, i) => {
+    const el = document.createElement("div");
+    el.className = "quick-item" + (i === gameMenu.idx ? " focused" : "") + (it.danger ? " danger" : "");
+    el.innerHTML = `<span>${esc(it.label)}</span>${it.sub ? `<span class="quick-sub">${esc(it.sub)}</span>` : ""}`;
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && gameMenu.idx !== i) { gameMenu.idx = i; renderGameMenu(); } });
+    el.addEventListener("click", () => it.action());
     list.appendChild(el);
   });
 }
 
-function filterInput(btn) {
-  const rows = filterRows();
-  const row = rows[filterIdx];
+function gameMenuInput(btn) {
+  const items = gameMenuItems();
   switch (btn) {
-    case "Up": filterIdx = Math.max(0, filterIdx - 1); renderFilter(); break;
-    case "Down": filterIdx = Math.min(rows.length - 1, filterIdx + 1); renderFilter(); break;
-    case "Left": if (row.adjust) row.adjust(-1); break;
-    case "Right": if (row.adjust) row.adjust(1); break;
-    case "A": if (row.action) row.action(); else if (row.adjust) row.adjust(1); break;
-    case "B": case "X": closeFilter(); break;
+    case "Up": gameMenu.idx = Math.max(0, gameMenu.idx - 1); renderGameMenu(); break;
+    case "Down": gameMenu.idx = Math.min(items.length - 1, gameMenu.idx + 1); renderGameMenu(); break;
+    case "A": items[gameMenu.idx].action(); break;
+    case "B": case "Y": closeGameMenu(); break;
   }
 }
 
 /* ============================== add-to-collection overlay ============================== */
 
+let collectTarget = null;
+
 function collectItems() {
-  const g = gameById(detailGameId);
+  const g = gameById(collectTarget);
   if (!g) return [];
   const items = [{
     label: "Favorites", star: true, checked: g.favorite,
     action: () => { send({ cmd: "toggleFavorite", id: g.id }); },
+  }, {
+    label: "Hidden", checked: g.hidden,
+    action: () => { send({ cmd: "toggleHidden", id: g.id }); },
   }];
   S.collections.forEach(c => items.push({
     label: c.name, checked: c.gameIds.includes(g.id),
@@ -1006,7 +1219,12 @@ function collectItems() {
   return items;
 }
 
-function openCollect() { collectOpen = true; collectIdx = 0; renderCollect(); $("overlay-collect").classList.add("active"); }
+function openCollect(gameId) {
+  collectTarget = gameId || detailGameId;
+  collectOpen = true; collectIdx = 0;
+  renderCollect();
+  $("overlay-collect").classList.add("active");
+}
 function closeCollect() { collectOpen = false; $("overlay-collect").classList.remove("active"); }
 
 function renderCollect() {
@@ -1018,7 +1236,7 @@ function renderCollect() {
     const check = it.checked === undefined ? "" :
       `<span class="ov-check${it.checked ? "" : " off"}">${it.star ? "★" : "✓"}</span>`;
     el.innerHTML = `<span>${esc(it.label)}</span>${check}`;
-    el.addEventListener("mouseenter", () => { if (collectIdx !== i) { collectIdx = i; renderCollect(); } });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && collectIdx !== i) { collectIdx = i; renderCollect(); } });
     el.addEventListener("click", () => it.action());
     list.appendChild(el);
   });
@@ -1073,7 +1291,7 @@ function renderManage() {
     const el = document.createElement("div");
     el.className = "quick-item" + (i === manageIdx ? " focused" : "") + (it.danger ? " danger" : "");
     el.innerHTML = `<span>${esc(it.label)}</span>${it.sub ? `<span class="quick-sub">${esc(it.sub)}</span>` : ""}`;
-    el.addEventListener("mouseenter", () => { if (manageIdx !== i) { manageIdx = i; renderManage(); } });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && manageIdx !== i) { manageIdx = i; renderManage(); } });
     el.addEventListener("click", () => it.action());
     list.appendChild(el);
   });
@@ -1099,7 +1317,7 @@ function renderConfirm() {
     const el = document.createElement("div");
     el.className = "quick-item" + (i === confirmIdx ? " focused" : "") + (i === 0 ? " danger" : "");
     el.innerHTML = `<span>${label}</span>`;
-    el.addEventListener("mouseenter", () => { if (confirmIdx !== i) { confirmIdx = i; renderConfirm(); } });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && confirmIdx !== i) { confirmIdx = i; renderConfirm(); } });
     el.addEventListener("click", () => confirmChoose(i));
     list.appendChild(el);
   });
@@ -1154,6 +1372,7 @@ $("inputField").addEventListener("keydown", (e) => {
 /* ============================== lock screen / wake guide ============================== */
 
 const WOL_STEPS = [
+  ["Switch the touch keyboard to the Gamepad layout (one time)", "Windows does not expose this as a setting an app can flip, so do it once by hand and it sticks. Open the touch keyboard (hold <b>Start</b>), tap the <b>cog icon</b> in its top-left, open <b>Keyboard layout</b> and choose <b>Gamepad</b>. You then get controller navigation with button accelerators — <b>X</b> backspace, <b>Y</b> space. On the default layout the keyboard ignores the pad entirely. Requires Windows 11 build 26100.3624 or newer."],
   ["Sign in from the couch: set up a Windows Hello PIN", "Apps cannot type into the secure lock screen, but you don't need one: in <b>Settings → Accounts → Sign-in options</b>, add a <b>PIN (Windows Hello)</b>. The sign-in screen's PIN pad works with the touch keyboard, which supports gamepad input — so after a wake you can sign in without leaving the sofa. For a fully hands-off couch PC, enable automatic sign-in instead (<b>netplwiz</b>, untick \"Users must enter a user name and password\")."],
   ["Enable Wake-on-LAN in BIOS/UEFI", "Reboot and enter BIOS setup (usually <b>Del</b> or <b>F2</b> during boot). Find <b>Wake-on-LAN</b>, <b>Power On by PCI-E</b> or <b>Resume by LAN</b> — often under Power Management or Advanced — and enable it. Save and exit."],
   ["Allow the network adapter to wake the PC", "In Windows, open <b>Device Manager → Network adapters</b>, double-click your Ethernet adapter, and on the <b>Power Management</b> tab tick <b>Allow this device to wake the computer</b> and <b>Only allow a magic packet to wake the computer</b>. On the <b>Advanced</b> tab enable <b>Wake on Magic Packet</b>."],
@@ -1165,7 +1384,7 @@ const WOL_STEPS = [
 
 function renderWol() {
   $("wolBody").innerHTML = WOL_STEPS.map(([t, txt], i) =>
-    `<div class="wol-step"><div class="wol-num">0${i + 1}</div><div class="wol-step-body"><div class="wol-step-title">${t}</div><div class="wol-step-text">${txt}</div></div></div>`
+    `<div class="wol-step"><div class="wol-num">${String(i + 1).padStart(2, "0")}</div><div class="wol-step-body"><div class="wol-step-title">${t}</div><div class="wol-step-text">${txt}</div></div></div>`
   ).join("");
 }
 
@@ -1204,6 +1423,7 @@ function handleInput(btn, src) {
   if (confirmState) { confirmInput(btn); return; }
   if (wolOpen) { wolInput(btn); return; }
   if (filterOpen) { filterInput(btn); return; }
+  if (gameMenu) { gameMenuInput(btn); return; }
   if (collectOpen) { collectInput(btn); return; }
   if (manageOpen) { manageInput(btn); return; }
 
@@ -1230,6 +1450,7 @@ window.addEventListener("keydown", (e) => {
   const btn = KEYMAP[e.code];
   if (!btn) return;
   e.preventDefault();
+  setInputMode("pad");   // keyboard drives like a D-pad: get the pointer out of the way
   handleInput(btn, "kb");
 });
 
@@ -1259,6 +1480,8 @@ function handleHostMessage(m) {
       if (view === "detail") renderDetail();
       if (collectOpen) renderCollect();
       if (manageOpen) renderManage();
+      if (gameMenu) renderGameMenu();
+      if (filterOpen) renderFilter();
       if (firstState && S.settings && !S.settings.tvDeviceName && S.displays.length > 1) {
         switchView("settings");
         toast("Welcome — pick which display is your TV");
@@ -1272,6 +1495,9 @@ function handleHostMessage(m) {
       break;
     case "pad":
       handleInput(m.button, "pad");
+      break;
+    case "inputMode":
+      setInputMode(m.mode);
       break;
     case "padConnected":
       S.padConnected = m.connected;
@@ -1309,7 +1535,7 @@ function mockHandle(msg) {
       id: platform.toLowerCase() + ":" + title.toLowerCase().replace(/[^a-z]/g, ""),
       title, platform, installed: true, manual: platform === "Manual",
       playtimeMinutes: 0, sessions: 0, lastPlayed: null, sizeBytes: 0,
-      favorite: false, preferDirectLaunch: false, args: null,
+      favorite: false, hidden: false, preferDirectLaunch: false, args: null,
       coverFile: seedP(title), bannerFile: seedW(title), ...opts,
     });
     const now = Date.now();
@@ -1329,8 +1555,13 @@ function mockHandle(msg) {
       g("Hollow Reef", "Steam", { installed: false, sizeBytes: 27 * 1024 ** 3 }),
       g("Glassmoor", "Manual", { installed: false, sizeBytes: 55 * 1024 ** 3 }),
       g("Tidewrack", "GOG", { installed: false, sizeBytes: 12 * 1024 ** 3 }),
+      g("Forza Horizon 5", "Xbox", { playtimeMinutes: 1240, sessions: 18, sizeBytes: 110 * 1024 ** 3 }),
+      g("Sea of Thieves", "Xbox", { sizeBytes: 78 * 1024 ** 3 }),
+      g("Starfield", "Xbox", { installed: false, sizeBytes: 125 * 1024 ** 3 }),
+      g("Wallpaper Engine", "Steam", { hidden: true, sizeBytes: 2 * 1024 ** 3 }),
     ];
     if (mockHandle._fav) games.forEach(x => { if (mockHandle._fav[x.id] !== undefined) x.favorite = mockHandle._fav[x.id]; });
+    if (mockHandle._hidden) games.forEach(x => { if (mockHandle._hidden[x.id] !== undefined) x.hidden = mockHandle._hidden[x.id]; });
     handleHostMessage({
       type: "state",
       games,
@@ -1338,7 +1569,7 @@ function mockHandle(msg) {
       settings: S.settings || {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
-        deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8,
+        deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
         leftClickButton: "A", rightClickButton: "B",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
       },
@@ -1360,6 +1591,13 @@ function mockHandle(msg) {
     const cur = (S.games.find(g => g.id === msg.id) || {}).favorite;
     mockHandle._fav[msg.id] = !cur;
     pushState();
+  } else if (msg.cmd === "toggleHidden") {
+    mockHandle._hidden = mockHandle._hidden || {};
+    const cur = (S.games.find(g => g.id === msg.id) || {}).hidden;
+    mockHandle._hidden[msg.id] = !cur;
+    pushState();
+  } else if (msg.cmd === "addManual") {
+    toast("(preview) would open the file picker");
   } else if (msg.cmd === "createCollection") {
     mockCollections.push({ id: "c" + (mockCollections.length + 1), name: msg.name, gameIds: msg.gameId ? [msg.gameId] : [] });
     pushState();

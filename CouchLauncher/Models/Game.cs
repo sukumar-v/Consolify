@@ -18,5 +18,6 @@ public class Game
     public bool Installed { get; set; } = true;
     public bool Manual { get; set; }
     public bool Favorite { get; set; }
+    public bool Hidden { get; set; }                 // kept out of the library, listed under Hidden
     public bool PreferDirectLaunch { get; set; } // user chose an exe to bypass the store launcher
 }

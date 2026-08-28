@@ -136,6 +136,18 @@ public class UiBridge
                 _keyboard.Hide();
                 break;
 
+            case "toggleHidden":
+            {
+                var id = msg["id"]?.GetValue<string>();
+                var game = id is null ? null : _library.Find(id);
+                if (game is null) break;
+                game.Hidden = !game.Hidden;
+                _library.Save();
+                PushState();
+                Push(new { type = "toast", message = game.Hidden ? $"{game.Title} hidden" : $"{game.Title} restored to the library" });
+                break;
+            }
+
             case "toggleFavorite":
             {
                 var id = msg["id"]?.GetValue<string>();
@@ -270,7 +282,7 @@ public class UiBridge
             Title = "Choose the game executable",
             Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*"
         };
-        if (dlg.ShowDialog(_window) != true) return;
+        if (!ShowDialog(dlg)) return;
 
         var exe = dlg.FileName;
         var game = new Game
@@ -291,12 +303,20 @@ public class UiBridge
             Title = "Choose cover art (optional — press Cancel to skip)",
             Filter = "Images (*.jpg;*.jpeg;*.png;*.webp)|*.jpg;*.jpeg;*.png;*.webp"
         };
-        if (art.ShowDialog(_window) == true)
+        if (ShowDialog(art))
             game.CoverFile = CopyCover(art.FileName, game.Id);
 
         _library.AddManual(game);
         PushState();
         Push(new { type = "toast", message = $"Added {game.Title}" });
+    }
+
+    /// <summary>Show a modal dialog with always-on-top suspended, so it can't open behind the launcher.</summary>
+    private bool ShowDialog(Microsoft.Win32.CommonDialog dlg)
+    {
+        _window.BeginModalDialog();
+        try { return dlg.ShowDialog(_window) == true; }
+        finally { _window.EndModalDialog(); }
     }
 
     private void PickExe(string id)
@@ -310,7 +330,7 @@ public class UiBridge
         };
         if (game.InstallDir is not null && Directory.Exists(game.InstallDir))
             dlg.InitialDirectory = game.InstallDir;
-        if (dlg.ShowDialog(_window) != true) return;
+        if (!ShowDialog(dlg)) return;
 
         game.ExePath = dlg.FileName;
         if (game.Platform is "Steam" or "Epic") game.PreferDirectLaunch = true;
@@ -328,7 +348,7 @@ public class UiBridge
             Title = $"Choose cover art for {game.Title}",
             Filter = "Images (*.jpg;*.jpeg;*.png;*.webp)|*.jpg;*.jpeg;*.png;*.webp"
         };
-        if (art.ShowDialog(_window) != true) return;
+        if (!ShowDialog(art)) return;
         game.CoverFile = CopyCover(art.FileName, game.Id);
         _library.Save();
         PushState();
@@ -367,6 +387,8 @@ public class UiBridge
 
     public void PushBattery(byte type, byte level) =>
         Push(new { type = "battery", batteryType = type, level });
+
+    public void PushInputMode(string mode) => Push(new { type = "inputMode", mode });
 
     public void PushGameState() =>
         Push(new { type = "game", running = _launcher.GameRunning, id = _launcher.RunningGameId });

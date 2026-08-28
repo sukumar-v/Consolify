@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly VirtualKeyboardService _keyboard;
     private readonly GameLaunchService _launcher;
     private readonly GamepadService _gamepad;
+    private readonly CursorService _cursor;
     private UiBridge? _bridge;
     private IntPtr _hwnd;
     private bool _suppressRefocus;
@@ -30,6 +31,7 @@ public partial class MainWindow : Window
         _library.Load();
 
         _keyboard = new VirtualKeyboardService(_settings);
+        _cursor = new CursorService(_settings);
         _launcher = new GameLaunchService(_displays, _settings, _library);
         _gamepad = new GamepadService(_settings,
             isLauncherForeground: () => NativeMethods.GetForegroundWindow() == _hwnd,
@@ -42,11 +44,16 @@ public partial class MainWindow : Window
         _gamepad.KeyboardToggleRequested += () => Dispatcher.BeginInvoke(() => _keyboard.Toggle());
         _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(ToggleMinimize);
         _gamepad.BatteryChanged += (type, level) => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(type, level));
+        _gamepad.InputModeChanged += mode => Dispatcher.BeginInvoke(() =>
+        {
+            _cursor.SetPadMode(mode == "pad");
+            _bridge?.PushInputMode(mode);
+        });
 
         SourceInitialized += OnSourceInitialized;
         Loaded += async (_, _) => await InitWebViewAsync();
         Deactivated += OnDeactivated;
-        Closed += (_, _) => _gamepad.Dispose();
+        Closed += (_, _) => { _gamepad.Dispose(); _cursor.Dispose(); };
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -119,6 +126,24 @@ public partial class MainWindow : Window
         NativeMethods.SetForegroundWindow(_hwnd);
         _bridge?.PushGameState();
         _bridge?.PushState(); // refresh playtime/last-played shown in the UI
+    }
+
+    /// <summary>
+    /// Drop always-on-top around a modal file dialog. Without this the dialog opens *behind* the
+    /// full-screen launcher and looks like nothing happened.
+    /// </summary>
+    public void BeginModalDialog()
+    {
+        _suppressRefocus = true;
+        Topmost = false;
+    }
+
+    public void EndModalDialog()
+    {
+        _suppressRefocus = false;
+        if (!_windowed) Topmost = true;
+        Activate();
+        NativeMethods.SetForegroundWindow(_hwnd);
     }
 
     /// <summary>Back+Start gamepad combo: park the launcher so the desktop is usable, and bring it back.</summary>
