@@ -56,8 +56,9 @@ function activeFilterCount() {
   return F.platforms.size + F.status.size + (F.fav ? 1 : 0);
 }
 
-/* input mode: "pad" hides the pointer and ignores hover; "pointer" is stick or real mouse */
-let inputMode = "pointer";
+/* input mode: "pad" hides the pointer and ignores hover; "pointer" is stick or real mouse.
+   Starts on "pad" so the launcher boots couch-first with a visible highlight. */
+let inputMode = "pad";
 
 function setInputMode(mode) {
   if (inputMode === mode) return;
@@ -826,8 +827,8 @@ function renderCollections() {
 
     legend.innerHTML = `
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
+      <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
       <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
-      <div class="legend-item"><div class="btn-badge">B</div><span>Collections</span></div>
       <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
   }
 }
@@ -1269,8 +1270,8 @@ function renderFilter() {
     filterLevel === "filter" ? "FILTER" : filterLevel === "sort" ? "SORT" : "FILTER & SORT";
 
   const footHtml = filterLevel === null
-    ? foot(["A", "Open"], ["Y", "Reset all"], ["B", "Close"])
-    : foot(["A", filterLevel === "sort" ? "Choose" : "Toggle"], ["Y", "Reset all"], ["B", "Back"]);
+    ? foot(["A", "Open"], ["B", "Close"], ["Y", "Reset all"])
+    : foot(["A", filterLevel === "sort" ? "Choose" : "Toggle"], ["B", "Back"], ["Y", "Reset all"]);
 
   renderMenu($("filterList"), $("filterFoot"), rows, filterIdx, footHtml,
     (i) => { if (filterIdx !== i) { filterIdx = i; renderFilter(); } },
@@ -1570,8 +1571,13 @@ function cycleSection(dir) {
 
 /* ============================== input routing ============================== */
 
+const DIRECTIONS = new Set(["Up", "Down", "Left", "Right"]);
+
 function handleInput(btn, src) {
   if (inputOpen) return; // the text field (and the touch keyboard's own pad support) owns input
+  // Only a direction hands control back to the pad. A face button must never re-arm a
+  // highlight the pointer has cleared, so A over empty space does nothing.
+  if (DIRECTIONS.has(btn)) setInputMode("pad");
   if (confirmState) { confirmInput(btn); return; }
   if (wolOpen) { wolInput(btn); return; }
   if (filterOpen) { filterInput(btn); return; }
@@ -1602,8 +1608,7 @@ window.addEventListener("keydown", (e) => {
   const btn = KEYMAP[e.code];
   if (!btn) return;
   e.preventDefault();
-  setInputMode("pad");   // keyboard drives like a D-pad: get the pointer out of the way
-  handleInput(btn, "kb");
+  handleInput(btn, "kb");   // handleInput switches to pad mode on directions only
 });
 
 /* ============================== host messages ============================== */
@@ -1649,7 +1654,10 @@ function handleHostMessage(m) {
       handleInput(m.button, "pad");
       break;
     case "inputMode":
-      setInputMode(m.mode);
+      // Only the host can tell us the stick moved the cursor. Pad mode is decided locally,
+      // from directional input alone, so a face button can never re-arm a highlight the
+      // pointer has cleared.
+      if (m.mode === "pointer") setInputMode("pointer");
       break;
     case "padConnected":
       S.padConnected = m.connected;

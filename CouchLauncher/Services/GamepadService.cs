@@ -40,6 +40,7 @@ public class GamepadService : IDisposable
     public bool Connected { get; private set; }
 
     private const double MaxSpeedPxPerSec = 1400;
+    private const double MaxScrollNotchesPerSec = 18;
     private const int RepeatDelayMs = 380, RepeatIntervalMs = 115;
 
     public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameRunning)
@@ -61,7 +62,7 @@ public class GamepadService : IDisposable
     private void PollLoop()
     {
         ushort prevButtons = 0;
-        double fracX = 0, fracY = 0;
+        double fracX = 0, fracY = 0, scrollAccum = 0;
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false;
@@ -157,8 +158,12 @@ public class GamepadService : IDisposable
             bool toggleReleasedAsTap = (released & toggleMask) != 0 && !toggleFired && toggleDownAt >= 0;
             if ((released & toggleMask) != 0) toggleDownAt = -1;
 
-            // Any button press means the user is driving with the pad, not the pointer.
-            if (pressed != 0) SetInputMode("pad");
+            // Only D-pad navigation means "the pad is driving". A face button must not re-arm a
+            // highlight the pointer has cleared, or pressing A over empty space would activate
+            // whatever was last hovered.
+            const ushort dpadMask = NativeMethods.XINPUT_GAMEPAD_DPAD_UP | NativeMethods.XINPUT_GAMEPAD_DPAD_DOWN
+                                  | NativeMethods.XINPUT_GAMEPAD_DPAD_LEFT | NativeMethods.XINPUT_GAMEPAD_DPAD_RIGHT;
+            if ((pressed & dpadMask) != 0) SetInputMode("pad");
 
             // ---- launcher UI navigation ----
             if (launcherFg)
@@ -229,10 +234,24 @@ public class GamepadService : IDisposable
                 }
                 else { fracX = 0; fracY = 0; }
 
-                // right stick Y -> scroll wheel (helps in browsers / launchers)
+                // Right stick -> scroll wheel. Accumulated per elapsed time exactly like the
+                // cursor above: the previous "emit while (now % 96 < 12)" gate depended on a poll
+                // landing inside a 12ms window every 96ms, so with ~8ms polls plus jitter whole
+                // cycles emitted nothing and the scroll stuttered. Rate now scales with deflection.
                 double ry = state.Gamepad.sThumbRY / 32767.0;
-                if (Math.Abs(ry) > 0.45 && now % 96 < 12)
-                    SendWheel((int)(ry * 120));
+                double rmag = Math.Abs(ry);
+                if (rmag > s.Deadzone)
+                {
+                    double t = Math.Min((rmag - s.Deadzone) / (1 - s.Deadzone), 1.0);
+                    scrollAccum += Math.Sign(ry) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * dt;
+                    int notches = (int)scrollAccum;
+                    if (notches != 0)
+                    {
+                        scrollAccum -= notches;
+                        SendWheel(notches * 120);   // WHEEL_DELTA per notch
+                    }
+                }
+                else scrollAccum = 0;
             }
 
             prevButtons = buttons;
