@@ -487,6 +487,27 @@ function sortGames(list) {
 /** Games eligible for the library: everything the user hasn't hidden. */
 function visibleGames() { return S.games.filter(g => !g.hidden); }
 
+/* Continue carousel geometry: 300px tile + 28px gap, inside the 1920 stage less 80px gutters. */
+const CONTINUE_MAX = 12;
+const CONT_STEP = 328;
+const CONT_VIEWPORT = 1760;
+let contScroll = 0;   // index of the leftmost visible tile
+
+/** Slide the carousel the minimum distance needed to keep the focused tile on screen. */
+function updateContinueScroll() {
+  const track = $("continueTrack");
+  if (!track) return;
+  const perView = Math.max(1, Math.floor((CONT_VIEWPORT + 28) / CONT_STEP));
+  const maxScroll = Math.max(0, contItems.length - perView);
+
+  if (focus.zone === "cont") {
+    if (focus.col < contScroll) contScroll = focus.col;
+    else if (focus.col > contScroll + perView - 1) contScroll = focus.col - perView + 1;
+  }
+  contScroll = Math.max(0, Math.min(contScroll, maxScroll));
+  track.style.transform = `translateX(${-contScroll * CONT_STEP}px)`;
+}
+
 function libraryData() {
   let filtered = visibleGames();
   if (F.platforms.size) filtered = filtered.filter(g => F.platforms.has(g.platform));
@@ -499,7 +520,7 @@ function libraryData() {
   const cont = visibleGames()
     .filter(g => g.lastPlayed && g.installed)
     .sort((a, b) => new Date(b.lastPlayed) - new Date(a.lastPlayed))
-    .slice(0, 5);
+    .slice(0, CONTINUE_MAX);
 
   // The "add a game" tile always trails the grid so it's reachable without a menu.
   const items = [...sortGames(filtered), { __add: true }];
@@ -530,9 +551,13 @@ function renderLibrary() {
   $("titleCount").textContent = `${S.games.length} TITLE${S.games.length === 1 ? "" : "S"}`;
   $("gridLabel").textContent = filterSummary(total);
 
-  // Continue row (landscape banner art)
+  // Continue carousel (landscape banner art)
   const rowEl = $("continueRow");
   rowEl.innerHTML = "";
+  const track = document.createElement("div");
+  track.className = "continue-track";
+  track.id = "continueTrack";
+  rowEl.appendChild(track);
   $("continueSection").style.display = cont.length ? "" : "none";
   cont.forEach((g, i) => {
     const item = document.createElement("div");
@@ -552,7 +577,7 @@ function renderLibrary() {
       focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true);
     });
     item.addEventListener("click", () => { focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true); libraryAccept("A"); });
-    rowEl.appendChild(item);
+    track.appendChild(item);
   });
 
   // Grid
@@ -629,6 +654,7 @@ function updateLibraryFocus(noScroll) {
   document.querySelectorAll("#continueRow .cont-item").forEach((el, i) => {
     el.classList.toggle("focused", show && contFocused && i === focus.col);
   });
+  updateContinueScroll();
 
   const scroller = $("gridScroll");
   document.querySelectorAll("#gridScroll .grid-row").forEach((rowEl, r) => {
@@ -670,11 +696,12 @@ function libraryNav(btn) {
     const dir = btn === "Down" ? 1 : -1;
     const zi = Math.max(0, Math.min(zones.length - 1, zoneIndex() + dir));
     const z = zones[zi];
-    const xCenter = focus.zone === "cont" ? focus.col * 328 + 150
+    // Positions are on-screen, so the carousel offset has to be folded in both ways.
+    const xCenter = focus.zone === "cont" ? (focus.col - contScroll) * CONT_STEP + 150
                   : focus.zone === "grid" ? focus.col * 223 + 100 : 0;
     if (z === "tabs") { focus = { zone: "tabs", row: 0, col: 0 }; }
     else if (z === "cont") {
-      const col = focus.zone === "tabs" ? 0 : Math.round((xCenter - 150) / 328);
+      const col = focus.zone === "tabs" ? contScroll : contScroll + Math.round((xCenter - 150) / CONT_STEP);
       focus = { zone: "cont", row: 0, col: Math.max(0, Math.min(contItems.length - 1, col)) };
     } else {
       const r = parseInt(z.slice(4), 10);
@@ -1430,7 +1457,7 @@ function manageItems() {
     },
   });
   items.push({
-    label: "Choose executable (launch directly)…", icon: "file",
+    label: "Choose executable…", icon: "file",
     sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "Bypass the store launcher",
     action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
   });
@@ -1705,9 +1732,15 @@ function mockHandle(msg) {
       g("Salt & Tide", "GOG", { playtimeMinutes: 2820, sessions: 30, favorite: true, lastPlayed: new Date(now - 3 * 86400000).toISOString(), sizeBytes: 12 * 1024 ** 3 }),
       g("Foundry Nine", "Manual", { playtimeMinutes: 360, sessions: 5, lastPlayed: new Date(now - 4 * 86400000).toISOString(), sizeBytes: 8 * 1024 ** 3 }),
       g("Cassette Run", "Steam", { playtimeMinutes: 180, sessions: 3, lastPlayed: new Date(now - 5 * 86400000).toISOString(), sizeBytes: 4 * 1024 ** 3 }),
-      g("Nightpost", "Steam"), g("Umber Fields", "Steam"), g("The Quiet Shore", "Epic"),
-      g("Vector Bloom", "Steam"), g("Marrow", "GOG"), g("Halden Court", "Manual"),
-      g("Tin Orchard", "Epic"), g("Paper Lanterns", "Epic"), g("Ninefold", "Manual"),
+      // enough recently-played entries to exercise the Continue carousel
+      g("Nightpost", "Steam", { playtimeMinutes: 95, sessions: 2, lastPlayed: new Date(now - 6 * 86400000).toISOString() }),
+      g("Umber Fields", "Steam", { playtimeMinutes: 210, sessions: 4, lastPlayed: new Date(now - 7 * 86400000).toISOString() }),
+      g("The Quiet Shore", "Epic", { playtimeMinutes: 140, sessions: 3, lastPlayed: new Date(now - 8 * 86400000).toISOString() }),
+      g("Vector Bloom", "Steam", { playtimeMinutes: 60, sessions: 1, lastPlayed: new Date(now - 9 * 86400000).toISOString() }),
+      g("Marrow", "GOG", { playtimeMinutes: 480, sessions: 7, lastPlayed: new Date(now - 10 * 86400000).toISOString() }),
+      g("Halden Court", "Manual", { playtimeMinutes: 30, sessions: 1, lastPlayed: new Date(now - 11 * 86400000).toISOString() }),
+      g("Tin Orchard", "Epic", { playtimeMinutes: 75, sessions: 2, lastPlayed: new Date(now - 12 * 86400000).toISOString() }),
+      g("Paper Lanterns", "Epic"), g("Ninefold", "Manual"),
       g("Bellwether", "GOG"),
       g("Iron Compass", "Steam", { installed: false, sizeBytes: 42 * 1024 ** 3 }),
       g("Low Country", "GOG", { installed: false, sizeBytes: 18 * 1024 ** 3 }),
