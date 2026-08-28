@@ -59,26 +59,66 @@ public class DisplayService
 
         _savedPrimaryDevice ??= displays.FirstOrDefault(d => d.IsPrimary)?.DeviceName;
 
+        // Preferred path: the modern CCD API. ChangeDisplaySettingsEx below still exists as a
+        // fallback, but on current Windows 11 it answers CDS_SET_PRIMARY with
+        // DISP_CHANGE_RESTART and applies nothing, so it can no longer be relied on.
+        int ccd = Ccd.SetPrimary(deviceName);
+        if (ccd == 0)
+        {
+            Log.Info($"SetPrimary({deviceName}) via CCD -> ok");
+            return true;
+        }
+        Log.Info($"SetPrimary({deviceName}) via CCD failed ({ccd}); falling back to ChangeDisplaySettingsEx");
+
         int dx = target.X, dy = target.Y;
+        bool allOk = true;
         foreach (var d in displays)
         {
             var dm = NewDevMode();
-            if (!NativeMethods.EnumDisplaySettings(d.DeviceName, NativeMethods.ENUM_CURRENT_SETTINGS, ref dm)) continue;
-            dm.dmPositionX -= dx;
-            dm.dmPositionY -= dy;
-            dm.dmFields |= NativeMethods.DM_POSITION;
+            if (!NativeMethods.EnumDisplaySettings(d.DeviceName, NativeMethods.ENUM_CURRENT_SETTINGS, ref dm))
+            {
+                Log.Info($"SetPrimary: EnumDisplaySettings failed for {d.DeviceName}");
+                allOk = false;
+                continue;
+            }
+            dm.dmPositionX = d.X - dx;
+            dm.dmPositionY = d.Y - dy;
+            // Position ONLY. Carrying over the mode bits EnumDisplaySettings returns (resolution,
+            // bit depth, refresh, fixed output) asks the driver for a full mode set.
+            dm.dmFields = NativeMethods.DM_POSITION;
 
             uint flags = NativeMethods.CDS_UPDATEREGISTRY | NativeMethods.CDS_NORESET;
             if (d.DeviceName.Equals(deviceName, StringComparison.OrdinalIgnoreCase))
                 flags |= NativeMethods.CDS_SET_PRIMARY;
 
-            NativeMethods.ChangeDisplaySettingsEx(d.DeviceName, ref dm, IntPtr.Zero, flags, IntPtr.Zero);
+            int one = NativeMethods.ChangeDisplaySettingsEx(d.DeviceName, ref dm, IntPtr.Zero, flags, IntPtr.Zero);
+            if (one != 0)
+            {
+                Log.Info($"SetPrimary: {d.DeviceName} -> {DispChangeName(one)}");
+                allOk = false;
+            }
         }
 
         int rc = NativeMethods.ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
-        Log.Info($"SetPrimary({deviceName}) -> {rc}");
-        return rc == 0; // DISP_CHANGE_SUCCESSFUL
+        Log.Info($"SetPrimary({deviceName}) legacy apply -> {DispChangeName(rc)}, perDisplayOk={allOk}");
+
+        // Trust what the OS actually reports, not the return code.
+        return GetDisplay(deviceName)?.IsPrimary == true;
     }
+
+    private static string DispChangeName(int code) => code switch
+    {
+        0 => "SUCCESSFUL",
+        -1 => "RESTART",
+        -2 => "FAILED",
+        -3 => "BADMODE",
+        -4 => "NOTUPDATED",
+        -5 => "BADFLAGS",
+        -6 => "BADPARAM",
+        1 => "BADDUALVIEW",
+        _ => $"UNKNOWN({code})"
+    };
+
 
     /// <summary>Restore the primary display saved by the last SetPrimary call.</summary>
     public void RestorePrimary()
