@@ -21,7 +21,7 @@ public class GamepadService : IDisposable
 {
     private readonly SettingsStore _settings;
     private readonly Func<bool> _isLauncherForeground;
-    private readonly Func<bool> _isGameRunning;
+    private readonly Func<bool> _isGameFocused;
     private Thread? _thread;
     private volatile bool _running;
 
@@ -43,11 +43,11 @@ public class GamepadService : IDisposable
     private const double MaxScrollNotchesPerSec = 18;
     private const int RepeatDelayMs = 380, RepeatIntervalMs = 115;
 
-    public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameRunning)
+    public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused)
     {
         _settings = settings;
         _isLauncherForeground = isLauncherForeground;
-        _isGameRunning = isGameRunning;
+        _isGameFocused = isGameFocused;
     }
 
     public void Start()
@@ -115,9 +115,11 @@ public class GamepadService : IDisposable
             }
 
             var s = _settings.Settings;
-            bool gameRunning = _isGameRunning();
-            bool launcherFg = !gameRunning && _isLauncherForeground();
-            bool serviceActive = !gameRunning || s.GamepadMouseDuringGame;
+            // Only a FOCUSED game silences the pad. While it runs in the background the gamepad
+            // mouse and keyboard toggle stay available for the desktop.
+            bool gameFocused = _isGameFocused();
+            bool launcherFg = _isLauncherForeground();
+            bool serviceActive = !gameFocused || s.GamepadMouseDuringGame;
 
             ushort buttons = state.Gamepad.wButtons;
             ushort pressed = (ushort)(buttons & ~prevButtons);

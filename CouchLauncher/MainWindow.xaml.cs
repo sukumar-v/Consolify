@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         _launcher = new GameLaunchService(_displays, _settings, _library);
         _gamepad = new GamepadService(_settings,
             isLauncherForeground: () => NativeMethods.GetForegroundWindow() == _hwnd,
-            isGameRunning: () => _launcher.GameRunning);
+            isGameFocused: () => _launcher.IsGameForeground());
 
         _launcher.GameStarted += _ => Dispatcher.Invoke(OnGameStarted);
         _launcher.GameExited += _ => Dispatcher.Invoke(OnGameExited);

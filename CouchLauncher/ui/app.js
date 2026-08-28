@@ -1110,7 +1110,7 @@ function settingsRows() {
   rows.push({ section: "GAMEPAD" });
   rows.push(toggleRow("Gamepad mouse", "Left stick moves the cursor; right stick scrolls",
     () => s.gamepadMouseEnabled, v => set(() => s.gamepadMouseEnabled = v)));
-  rows.push(toggleRow("Stay active while a game runs", "Keep the gamepad-mouse alive in games (off avoids fighting native controller support)",
+  rows.push(toggleRow("Stay active while a game is focused", "The gamepad-mouse always works when a game is running but not focused; this keeps it alive inside the game too (off avoids fighting native controller support)",
     () => s.gamepadMouseDuringGame, v => set(() => s.gamepadMouseDuringGame = v)));
   rows.push(sliderRow("Stick deadzone", () => s.deadzone, 0.05, 0.40, 0.01, v => set(() => s.deadzone = v), v => v.toFixed(2)));
   rows.push(sliderRow("Cursor sensitivity", () => s.sensitivity, 0.2, 3.0, 0.1, v => set(() => s.sensitivity = v), v => v.toFixed(1) + "×"));

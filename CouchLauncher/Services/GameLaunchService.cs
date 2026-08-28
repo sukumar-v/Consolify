@@ -23,6 +23,10 @@ public class GameLaunchService
     public bool GameRunning { get; private set; }
     public string? RunningGameId { get; private set; }
 
+    private string? _runningInstallDir;
+    private readonly Dictionary<uint, bool> _pidCache = new();
+    private readonly object _pidGate = new();
+
     public event Action<Game>? GameStarted;
     public event Action<Game>? GameExited;
 
@@ -46,6 +50,10 @@ public class GameLaunchService
         var s = _settings.Settings;
         bool switchedPrimary = false;
         var started = DateTime.Now;
+        var monitorCts = new CancellationTokenSource();
+
+        _runningInstallDir = game.InstallDir;
+        lock (_pidGate) _pidCache.Clear();
 
         try
         {
@@ -62,6 +70,11 @@ public class GameLaunchService
             Process? tracked = StartGame(game);
             GameStarted?.Invoke(game);
 
+            // One monitor for the whole session, covering every process the game spawns.
+            if (s.RepositionGameWindow && s.TvDeviceName is not null)
+                _ = Task.Run(() => MonitorGameWindows(s.TvDeviceName, monitorCts.Token));
+
+
             // URI launches (Steam/Epic) return the store client, not the game — find the real process.
             if (tracked is null && game.InstallDir is not null)
                 tracked = await WaitForProcessFromDir(game.InstallDir, TimeSpan.FromSeconds(120));
@@ -74,12 +87,6 @@ public class GameLaunchService
                 while (tracked is not null)
                 {
                     Log.Info($"Tracking game process {tracked.ProcessName} (pid {tracked.Id}) for {game.Title}");
-
-                    if (s.RepositionGameWindow && s.TvDeviceName is not null)
-                    {
-                        var current = tracked;
-                        _ = Task.Run(() => RepositionOntoTv(current, s.TvDeviceName));
-                    }
 
                     await tracked.WaitForExitAsync();
                     tracked = game.InstallDir is not null
@@ -99,6 +106,11 @@ public class GameLaunchService
         }
         finally
         {
+            monitorCts.Cancel();
+            monitorCts.Dispose();
+            _runningInstallDir = null;
+            lock (_pidGate) _pidCache.Clear();
+
             if (switchedPrimary) _displays.RestorePrimary();
 
             var minutes = (DateTime.Now - started).TotalMinutes;
@@ -185,42 +197,84 @@ public class GameLaunchService
         finally { NativeMethods.CloseHandle(h); }
     }
 
-    /// <summary>For ~30s after launch, move any visible top-level window of the game onto the TV.</summary>
-    private void RepositionOntoTv(Process game, string tvDeviceName)
+    /// <summary>
+    /// True when the foreground window belongs to the running game. Used to gate the gamepad
+    /// mouse: it must keep working when the game is merely running in the background.
+    /// </summary>
+    public bool IsGameForeground()
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        bool moved = false;
+        if (!GameRunning) return false;
+        var hwnd = NativeMethods.GetForegroundWindow();
+        if (hwnd == IntPtr.Zero) return false;
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+        return PidBelongsToGame(pid);
+    }
 
-        while (!moved && DateTime.UtcNow < deadline && !game.HasExited)
+    /// <summary>Is this pid one of the game's own processes (launcher, chained exe, game)?</summary>
+    private bool PidBelongsToGame(uint pid)
+    {
+        var dir = _runningInstallDir;
+        if (dir is null || pid == 0) return false;
+        lock (_pidGate)
         {
-            var tv = _displays.GetDisplay(tvDeviceName);
-            if (tv is null) return;
-
-            NativeMethods.EnumWindows((hwnd, _) =>
-            {
-                NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
-                if (pid != game.Id) return true;
-                if (!NativeMethods.IsWindowVisible(hwnd)) return true;
-                var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
-                if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
-                if (!NativeMethods.GetWindowRect(hwnd, out var r)) return true;
-                if (r.Right - r.Left < 200 || r.Bottom - r.Top < 150) return true; // splash/tooltip windows
-
-                int cx = (r.Left + r.Right) / 2, cy = (r.Top + r.Bottom) / 2;
-                bool onTv = cx >= tv.X && cx < tv.X + tv.Width && cy >= tv.Y && cy < tv.Y + tv.Height;
-                if (!onTv)
-                {
-                    int w = Math.Min(r.Right - r.Left, tv.Width);
-                    int h = Math.Min(r.Bottom - r.Top, tv.Height);
-                    NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, tv.X, tv.Y, w, h,
-                        NativeMethods.SWP_NOZORDER | NativeMethods.SWP_SHOWWINDOW);
-                    Log.Info($"Moved game window {hwnd} onto {tvDeviceName}");
-                }
-                moved = true;
-                return false;
-            }, IntPtr.Zero);
-
-            if (!moved) Thread.Sleep(1000);
+            if (_pidCache.TryGetValue(pid, out var known)) return known;
+            var path = GetProcessPath((int)pid);
+            var prefix = dir.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            bool belongs = path is not null
+                && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+            _pidCache[pid] = belongs;
+            return belongs;
         }
+    }
+
+    /// <summary>
+    /// Keeps the game on the TV for the whole session, not just the first window it opens.
+    /// Games routinely put a launcher or config dialog on another display, and once the user
+    /// clicks it the game itself then opens there, so a one-shot nudge at startup is not enough.
+    /// Only windows whose centre has drifted off the TV are touched, so a game already sitting
+    /// correctly (including exclusive fullscreen) is left alone.
+    /// </summary>
+    private async Task MonitorGameWindows(string tvDeviceName, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var tv = _displays.GetDisplay(tvDeviceName);
+                if (tv is not null) EnforceOnTv(tv);
+            }
+            catch (Exception ex) { Log.Info($"Window monitor: {ex.Message}"); }
+
+            try { await Task.Delay(1500, ct); }
+            catch (TaskCanceledException) { return; }
+        }
+    }
+
+    private void EnforceOnTv(DisplayInfo tv)
+    {
+        NativeMethods.EnumWindows((hwnd, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+            if (!PidBelongsToGame(pid)) return true;
+
+            var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
+            if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
+            if (!NativeMethods.GetWindowRect(hwnd, out var r)) return true;
+
+            int w0 = r.Right - r.Left, h0 = r.Bottom - r.Top;
+            if (w0 < 200 || h0 < 150) return true;                  // splash / tooltip
+            if (r.Left <= -30000 || r.Top <= -30000) return true;   // minimized
+
+            int cx = (r.Left + r.Right) / 2, cy = (r.Top + r.Bottom) / 2;
+            bool onTv = cx >= tv.X && cx < tv.X + tv.Width && cy >= tv.Y && cy < tv.Y + tv.Height;
+            if (onTv) return true;
+
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, tv.X, tv.Y,
+                Math.Min(w0, tv.Width), Math.Min(h0, tv.Height),
+                NativeMethods.SWP_NOZORDER | NativeMethods.SWP_SHOWWINDOW);
+            Log.Info($"Moved game window {hwnd} (pid {pid}) onto {tv.DeviceName}");
+            return true;   // keep scanning: a game can own more than one stray window
+        }, IntPtr.Zero);
     }
 }
