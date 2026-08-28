@@ -68,7 +68,98 @@ function setInputMode(mode) {
 /** Hover should only move focus when the pointer is actually the active input. */
 function hoverEnabled() { return inputMode === "pointer"; }
 
-window.addEventListener("mousemove", () => setInputMode("pointer"));
+/* Whether the pointer currently rests on something selectable. In pointer mode with the
+   cursor over empty space nothing is highlighted and A does nothing, so the pointer can
+   never "arm" a stale item. The index is still remembered, so picking the D-pad back up
+   resumes from the last selected item. */
+let pointerOnItem = false;
+const FOCUSABLE_SEL = ".cont-item, .grid-item, .tab, .set-row, .ov-row, .coll-card, .pill-btn";
+
+/** Should a focus highlight be painted at all right now? */
+function focusVisible() { return inputMode === "pad" || pointerOnItem; }
+
+function setPointerOnItem(on) {
+  if (pointerOnItem === on) return;
+  pointerOnItem = on;
+  repaintFocus();
+}
+
+/** Re-apply focus styling for whatever screen/overlay is currently up. */
+function repaintFocus() {
+  if (filterOpen) renderFilter();
+  else if (gameMenu) renderGameMenu();
+  else if (collectOpen) renderCollect();
+  else if (manageOpen) renderManage();
+  else if (confirmState) renderConfirm();
+  else if (view === "library") updateLibraryFocus(true);
+  else if (view === "collections") renderCollections();
+  else if (view === "detail") updateDetailFocus();
+  else if (view === "settings") renderSettings();
+}
+
+window.addEventListener("mousemove", (e) => {
+  setInputMode("pointer");
+  setPointerOnItem(!!(e.target instanceof Element && e.target.closest(FOCUSABLE_SEL)));
+});
+
+// A click on an item always counts as being on it, even without a preceding move.
+window.addEventListener("mousedown", (e) => {
+  if (e.target instanceof Element && e.target.closest(FOCUSABLE_SEL)) setPointerOnItem(true);
+}, true);
+
+/**
+ * Scroll a focused element into view. `scrollIntoView({block:"nearest"})` stops as soon as
+ * the element's box is visible, which clips the focus ring/scale of the first and last rows
+ * against the container padding — so snap fully to the ends instead.
+ */
+function revealIn(scroller, el, isFirst, isLast) {
+  if (!scroller || !el) return;
+  if (isFirst) scroller.scrollTo({ top: 0, behavior: "smooth" });
+  else if (isLast) scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+  else el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/**
+ * Shared renderer for every overlay menu, so the game options, manage, collection and
+ * confirm menus all read like the filter menu. Items are
+ * { cat } headers or { label, sub, checked, radio, danger, summary, action }.
+ */
+function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
+  listEl.innerHTML = "";
+  const focusable = items.map((r, i) => r.cat ? -1 : i).filter(i => i >= 0);
+  items.forEach((r, i) => {
+    if (r.cat) {
+      const c = document.createElement("div");
+      c.className = "ov-cat";
+      c.textContent = r.cat;
+      listEl.appendChild(c);
+      return;
+    }
+    const el = document.createElement("div");
+    el.className = "ov-row" + (i === idx && focusVisible() ? " focused" : "") + (r.danger ? " danger" : "");
+    let right = "";
+    if (r.summary !== undefined) right = `<div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
+    else if (r.checked !== undefined) right = `<span class="ov-check${r.checked ? "" : " off"}">${r.checked ? (r.star ? "★" : r.radio ? "●" : "✓") : "○"}</span>`;
+    else if (r.sub) right = `<span class="ov-sub">${esc(r.sub)}</span>`;
+    el.innerHTML = `<span>${esc(r.label ?? r.name)}</span>${right}`;
+    el.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(i); });
+    el.addEventListener("click", () => onClick(i));
+    listEl.appendChild(el);
+  });
+  if (footEl) footEl.innerHTML = footHtml;
+
+  const focusedEl = listEl.querySelector(".ov-row.focused");
+  if (focusedEl) {
+    revealIn(listEl, focusedEl, idx === focusable[0], idx === focusable[focusable.length - 1]);
+  }
+}
+
+/** Standard footer hints. */
+function foot(...pairs) {
+  return pairs.map(([btn, label]) =>
+    `<div class="legend-item"><div class="btn-badge${btn === "A" ? " btn-a" : ""}">${btn}</div><span>${esc(label)}</span></div>`
+  ).join("");
+}
 
 /* collections screen */
 let collMode = "list";                   // list | grid
@@ -410,13 +501,6 @@ function renderLibrary() {
     art.className = "cont-art";
     applyArt(g, art, bannerUrl(g));
 
-    const maxPt = Math.max(...cont.map(x => x.playtimeMinutes || 0), 1);
-    const pct = Math.max(4, Math.round((g.playtimeMinutes || 0) / maxPt * 100));
-    const track = document.createElement("div");
-    track.className = "cont-progress-track";
-    track.innerHTML = `<div class="cont-progress" style="width:${pct}%"></div>`;
-    art.appendChild(track);
-
     const meta = document.createElement("div");
     meta.className = "cont-meta";
     meta.innerHTML = `<div class="cont-title">${esc(g.title)}</div><div class="cont-sub">${esc(shortMeta(g))}</div>`;
@@ -495,22 +579,24 @@ function clampFocus() {
 }
 
 function updateLibraryFocus(noScroll) {
+  const show = focusVisible();
   const tabs = document.querySelectorAll("#screen-library [data-tabbar] .tab");
-  tabs.forEach((t, i) => t.classList.toggle("focused", focus.zone === "tabs" && i === tabIdx));
+  tabs.forEach((t, i) => t.classList.toggle("focused", show && focus.zone === "tabs" && i === tabIdx));
 
   const contFocused = focus.zone === "cont";
   $("continueSection").classList.toggle("zone-dim", !contFocused && contItems.length > 0);
   document.querySelectorAll("#continueRow .cont-item").forEach((el, i) => {
-    el.classList.toggle("focused", contFocused && i === focus.col);
+    el.classList.toggle("focused", show && contFocused && i === focus.col);
   });
 
+  const scroller = $("gridScroll");
   document.querySelectorAll("#gridScroll .grid-row").forEach((rowEl, r) => {
     const rowFocused = focus.zone === "grid" && r === focus.row;
     rowEl.classList.toggle("zone-dim", !rowFocused);
     rowEl.querySelectorAll(".grid-item").forEach((el, c) => {
       const f = rowFocused && c === focus.col;
-      el.classList.toggle("focused", f);
-      if (f && !noScroll) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.classList.toggle("focused", show && f);
+      if (show && f && !noScroll) revealIn(scroller, el, r === 0, r === gridRows.length - 1);
     });
   });
 
@@ -560,6 +646,7 @@ function libraryNav(btn) {
 }
 
 function libraryAccept(btn) {
+  if (!focusVisible()) return;   // pointer is over empty space: nothing is armed
   if (focus.zone === "tabs") {
     if (btn !== "A") return;
     const target = TAB_DEFS[tabIdx].id;
@@ -635,7 +722,7 @@ function renderCollections() {
     listEl.innerHTML = "";
     cols.forEach((c, i) => {
       const card = document.createElement("div");
-      card.className = "coll-card" + (i === collListIdx ? " focused" : "");
+      card.className = "coll-card" + (i === collListIdx && focusVisible() ? " focused" : "");
 
       const thumbs = c.games.slice(0, 6).map(g => {
         const url = coverUrl(g);
@@ -657,7 +744,7 @@ function renderCollections() {
     });
 
     const focused = listEl.querySelector(".coll-card.focused");
-    if (focused) focused.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (focused) revealIn(listEl, focused, collListIdx === 0, collListIdx === cols.length - 1);
 
     const delHint = cols[collListIdx] && cols[collListIdx].custom
       ? `<div class="legend-item"><div class="btn-badge">X</div><span>Delete collection</span></div>` : "";
@@ -715,13 +802,15 @@ function renderCollections() {
 }
 
 function updateCollFocus(noScroll) {
+  const show = focusVisible();
+  const scroller = $("collGridScroll");
   document.querySelectorAll("#collGridScroll .grid-row").forEach((rowEl, r) => {
     const rowFocused = r === collFocus.row;
     rowEl.classList.toggle("zone-dim", !rowFocused);
     rowEl.querySelectorAll(".grid-item").forEach((el, c) => {
       const f = rowFocused && c === collFocus.col;
-      el.classList.toggle("focused", f);
-      if (f && !noScroll) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.classList.toggle("focused", show && f);
+      if (show && f && !noScroll) revealIn(scroller, el, r === 0, r === collGridRows.length - 1);
     });
   });
   setBackdrop(focusedGame());
@@ -740,7 +829,7 @@ function collectionsInput(btn) {
     switch (btn) {
       case "Up": collListIdx = Math.max(0, collListIdx - 1); renderCollections(); break;
       case "Down": collListIdx = Math.min(cols.length - 1, collListIdx + 1); renderCollections(); break;
-      case "A": if (cols[collListIdx]) openCollectionGrid(cols[collListIdx].id); break;
+      case "A": if (focusVisible() && cols[collListIdx]) openCollectionGrid(cols[collListIdx].id); break;
       case "X": {
         const c = cols[collListIdx];
         if (c && c.custom) {
@@ -768,8 +857,8 @@ function collectionsInput(btn) {
       case "Down":
         if (collFocus.row < collGridRows.length - 1) { collFocus.row++; collFocus.col = Math.min(collFocus.col, collGridRows[collFocus.row].length - 1); updateCollFocus(); }
         break;
-      case "A": if (g) { if (g.installed) launchGame(g); else toast(`${g.title} is not installed`); } break;
-      case "Y": if (g) openGameMenu(g.id, "collections"); break;
+      case "A": if (focusVisible() && g) { if (g.installed) launchGame(g); else toast(`${g.title} is not installed`); } break;
+      case "Y": if (focusVisible() && g) openGameMenu(g.id, "collections"); break;
       case "B": collMode = "list"; renderCollections(); break;
     }
   }
@@ -829,8 +918,9 @@ const DETAIL_BTNS = ["play", "collect", "manage"];
 
 function updateDetailFocus() {
   detailBtn = Math.max(0, Math.min(detailBtn, DETAIL_BTNS.length - 1));
+  const show = focusVisible();
   document.querySelectorAll("#detailActions .pill-btn").forEach(el => {
-    el.classList.toggle("focused", el.dataset.act === DETAIL_BTNS[detailBtn]);
+    el.classList.toggle("focused", show && el.dataset.act === DETAIL_BTNS[detailBtn]);
   });
 }
 
@@ -847,7 +937,7 @@ function detailInput(btn) {
   switch (btn) {
     case "Left": detailBtn--; updateDetailFocus(); break;
     case "Right": detailBtn++; updateDetailFocus(); break;
-    case "A": detailActivate(); break;
+    case "A": if (focusVisible()) detailActivate(); break;
     case "X": if (g) send({ cmd: "toggleFavorite", id: g.id }); break;
     case "B": switchView(detailReturn); break;
   }
@@ -989,7 +1079,7 @@ function renderSettings() {
     fi++;
     const idx = fi;
     const el = document.createElement("div");
-    el.className = "set-row" + (idx === settingsIdx ? " focused" : "");
+    el.className = "set-row" + (idx === settingsIdx && focusVisible() ? " focused" : "");
 
     let right = "";
     if (r.type === "toggle") {
@@ -1015,7 +1105,7 @@ function renderSettings() {
   });
 
   const focused = scroll.querySelector(".set-row.focused");
-  if (focused) focused.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (focused) revealIn(scroll, focused, settingsIdx === 0, settingsIdx === focusables.length - 1);
 }
 
 function settingsInput(btn) {
@@ -1026,7 +1116,7 @@ function settingsInput(btn) {
     case "Down": settingsIdx = Math.min(rows.length - 1, settingsIdx + 1); renderSettings(); break;
     case "Left": if (row && row.adjust) row.adjust(-1); break;
     case "Right": if (row && row.adjust) row.adjust(1); break;
-    case "A": if (row) { if (row.action) row.action(); else if (row.adjust) row.adjust(1); } break;
+    case "A": if (focusVisible() && row) { if (row.action) row.action(); else if (row.adjust) row.adjust(1); } break;
     case "B": switchView("library"); break;
   }
 }
@@ -1113,40 +1203,13 @@ function renderFilter() {
   $("filterTitle").textContent =
     filterLevel === "filter" ? "FILTER" : filterLevel === "sort" ? "SORT" : "FILTER & SORT";
 
-  const list = $("filterList");
-  list.innerHTML = "";
-  rows.forEach((r, i) => {
-    if (r.cat) {
-      const c = document.createElement("div");
-      c.className = "ov-cat";
-      c.textContent = r.cat;
-      list.appendChild(c);
-      return;
-    }
-    const el = document.createElement("div");
-    el.className = "ov-row" + (i === filterIdx ? " focused" : "");
-    if (r.open) {
-      el.innerHTML = `<span>${esc(r.name)}</span><div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
-    } else {
-      const mark = r.radio ? "●" : "✓";
-      el.innerHTML = `<span>${esc(r.label)}</span><span class="ov-check${r.checked ? "" : " off"}">${r.checked ? mark : "○"}</span>`;
-    }
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && filterIdx !== i) { filterIdx = i; renderFilter(); } });
-    el.addEventListener("click", () => { filterIdx = i; filterActivate(); });
-    list.appendChild(el);
-  });
+  const footHtml = filterLevel === null
+    ? foot(["A", "Open"], ["Y", "Reset all"], ["B", "Close"])
+    : foot(["A", filterLevel === "sort" ? "Choose" : "Toggle"], ["Y", "Reset all"], ["B", "Back"]);
 
-  const foot = $("filterFoot");
-  foot.innerHTML = filterLevel === null
-    ? `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>
-       <div class="legend-item"><div class="btn-badge">Y</div><span>Reset all</span></div>
-       <div class="legend-item"><div class="btn-badge">B</div><span>Close</span></div>`
-    : `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>${filterLevel === "sort" ? "Choose" : "Toggle"}</span></div>
-       <div class="legend-item"><div class="btn-badge">Y</div><span>Reset all</span></div>
-       <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>`;
-
-  const focusedEl = list.querySelector(".ov-row.focused");
-  if (focusedEl) focusedEl.scrollIntoView({ block: "nearest" });
+  renderMenu($("filterList"), $("filterFoot"), rows, filterIdx, footHtml,
+    (i) => { if (filterIdx !== i) { filterIdx = i; renderFilter(); } },
+    (i) => { filterIdx = i; filterActivate(); });
 }
 
 function filterActivate() {
@@ -1165,7 +1228,7 @@ function filterInput(btn) {
   switch (btn) {
     case "Up": filterIdx = focusable[Math.max(0, pos - 1)]; renderFilter(); break;
     case "Down": filterIdx = focusable[Math.min(focusable.length - 1, pos + 1)]; renderFilter(); break;
-    case "A": case "Right": filterActivate(); break;
+    case "A": case "Right": if (focusVisible()) filterActivate(); break;
     case "Y": resetFilters(); applyFilter(); toast("Filters and sort reset"); break;
     case "Left": case "B":
       if (filterLevel) { filterLevel = null; filterIdx = 0; renderFilter(); }
@@ -1193,7 +1256,7 @@ function closeGameMenu() {
 function gameMenuItems() {
   if (!gameMenu) return [];
   const g = gameById(gameMenu.gameId);
-  if (!g) return [{ label: "Close", action: closeGameMenu }];
+  if (!g) return [];
   const items = [
     { label: "View game", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
     { label: g.favorite ? "Remove from favorites" : "Add to favorites", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
@@ -1206,7 +1269,6 @@ function gameMenuItems() {
     label: "Remove from library", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeGameMenu(); },
   });
-  items.push({ label: "Close", action: closeGameMenu });
   return items;
 }
 
@@ -1214,16 +1276,12 @@ function renderGameMenu() {
   if (!gameMenu) return;
   const g = gameById(gameMenu.gameId);
   $("gameMenuTitle").textContent = (g ? g.title : "GAME").toUpperCase();
-  const list = $("gameMenuList");
-  list.innerHTML = "";
-  gameMenuItems().forEach((it, i) => {
-    const el = document.createElement("div");
-    el.className = "quick-item" + (i === gameMenu.idx ? " focused" : "") + (it.danger ? " danger" : "");
-    el.innerHTML = `<span>${esc(it.label)}</span>${it.sub ? `<span class="quick-sub">${esc(it.sub)}</span>` : ""}`;
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && gameMenu.idx !== i) { gameMenu.idx = i; renderGameMenu(); } });
-    el.addEventListener("click", () => it.action());
-    list.appendChild(el);
-  });
+  const items = gameMenuItems();
+  gameMenu.idx = Math.max(0, Math.min(gameMenu.idx, items.length - 1));
+  renderMenu($("gameMenuList"), $("gameMenuFoot"), items, gameMenu.idx,
+    foot(["A", "Select"], ["B", "Back"]),
+    (i) => { if (gameMenu.idx !== i) { gameMenu.idx = i; renderGameMenu(); } },
+    (i) => items[i].action());
 }
 
 function gameMenuInput(btn) {
@@ -1231,7 +1289,7 @@ function gameMenuInput(btn) {
   switch (btn) {
     case "Up": gameMenu.idx = Math.max(0, gameMenu.idx - 1); renderGameMenu(); break;
     case "Down": gameMenu.idx = Math.min(items.length - 1, gameMenu.idx + 1); renderGameMenu(); break;
-    case "A": items[gameMenu.idx].action(); break;
+    case "A": if (focusVisible() && items[gameMenu.idx]) items[gameMenu.idx].action(); break;
     case "B": case "Y": closeGameMenu(); break;
   }
 }
@@ -1261,7 +1319,6 @@ function collectItems() {
       openInput("NEW COLLECTION NAME", "", name => send({ cmd: "createCollection", name, gameId: g.id }));
     },
   });
-  items.push({ label: "Done", action: closeCollect });
   return items;
 }
 
@@ -1274,18 +1331,12 @@ function openCollect(gameId) {
 function closeCollect() { collectOpen = false; $("overlay-collect").classList.remove("active"); }
 
 function renderCollect() {
-  const list = $("collectList");
-  list.innerHTML = "";
-  collectItems().forEach((it, i) => {
-    const el = document.createElement("div");
-    el.className = "quick-item" + (i === collectIdx ? " focused" : "");
-    const check = it.checked === undefined ? "" :
-      `<span class="ov-check${it.checked ? "" : " off"}">${it.star ? "★" : "✓"}</span>`;
-    el.innerHTML = `<span>${esc(it.label)}</span>${check}`;
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && collectIdx !== i) { collectIdx = i; renderCollect(); } });
-    el.addEventListener("click", () => it.action());
-    list.appendChild(el);
-  });
+  const items = collectItems();
+  collectIdx = Math.max(0, Math.min(collectIdx, items.length - 1));
+  renderMenu($("collectList"), $("collectFoot"), items, collectIdx,
+    foot(["A", "Toggle"], ["B", "Back"]),
+    (i) => { if (collectIdx !== i) { collectIdx = i; renderCollect(); } },
+    (i) => items[i].action());
 }
 
 function collectInput(btn) {
@@ -1293,7 +1344,7 @@ function collectInput(btn) {
   switch (btn) {
     case "Up": collectIdx = Math.max(0, collectIdx - 1); renderCollect(); break;
     case "Down": collectIdx = Math.min(items.length - 1, collectIdx + 1); renderCollect(); break;
-    case "A": items[collectIdx].action(); break;
+    case "A": if (focusVisible() && items[collectIdx]) items[collectIdx].action(); break;
     case "B": closeCollect(); break;
   }
 }
@@ -1302,7 +1353,7 @@ function collectInput(btn) {
 
 function manageItems() {
   const g = gameById(detailGameId);
-  if (!g) return [{ label: "Back", action: closeManage }];
+  if (!g) return [];
   const items = [];
   items.push({
     label: "Set launch arguments", sub: g.args || "e.g. --launcher-skip",
@@ -1323,7 +1374,6 @@ function manageItems() {
     label: "Remove from library", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeManage(); switchView(detailReturn); },
   });
-  items.push({ label: "Back", action: closeManage });
   return items;
 }
 
@@ -1331,16 +1381,12 @@ function openManage() { manageOpen = true; manageIdx = 0; renderManage(); $("ove
 function closeManage() { manageOpen = false; $("overlay-manage").classList.remove("active"); }
 
 function renderManage() {
-  const list = $("manageList");
-  list.innerHTML = "";
-  manageItems().forEach((it, i) => {
-    const el = document.createElement("div");
-    el.className = "quick-item" + (i === manageIdx ? " focused" : "") + (it.danger ? " danger" : "");
-    el.innerHTML = `<span>${esc(it.label)}</span>${it.sub ? `<span class="quick-sub">${esc(it.sub)}</span>` : ""}`;
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && manageIdx !== i) { manageIdx = i; renderManage(); } });
-    el.addEventListener("click", () => it.action());
-    list.appendChild(el);
-  });
+  const items = manageItems();
+  manageIdx = Math.max(0, Math.min(manageIdx, items.length - 1));
+  renderMenu($("manageList"), $("manageFoot"), items, manageIdx,
+    foot(["A", "Select"], ["B", "Back"]),
+    (i) => { if (manageIdx !== i) { manageIdx = i; renderManage(); } },
+    (i) => items[i].action());
 }
 
 function manageInput(btn) {
@@ -1348,7 +1394,7 @@ function manageInput(btn) {
   switch (btn) {
     case "Up": manageIdx = Math.max(0, manageIdx - 1); renderManage(); break;
     case "Down": manageIdx = Math.min(items.length - 1, manageIdx + 1); renderManage(); break;
-    case "A": items[manageIdx].action(); break;
+    case "A": if (focusVisible() && items[manageIdx]) items[manageIdx].action(); break;
     case "B": closeManage(); break;
   }
 }
@@ -1356,32 +1402,26 @@ function manageInput(btn) {
 /* ============================== confirm overlay ============================== */
 
 function renderConfirm() {
+  if (!confirmState) return;
   $("confirmTitle").textContent = confirmState.title;
-  const list = $("confirmList");
-  list.innerHTML = "";
-  ["Yes, delete", "Cancel"].forEach((label, i) => {
-    const el = document.createElement("div");
-    el.className = "quick-item" + (i === confirmIdx ? " focused" : "") + (i === 0 ? " danger" : "");
-    el.innerHTML = `<span>${label}</span>`;
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && confirmIdx !== i) { confirmIdx = i; renderConfirm(); } });
-    el.addEventListener("click", () => confirmChoose(i));
-    list.appendChild(el);
-  });
+  const items = [{ label: confirmState.yesLabel || "Yes, delete", danger: true }];
+  confirmIdx = 0;
+  renderMenu($("confirmList"), $("confirmFoot"), items, confirmIdx,
+    foot(["A", "Confirm"], ["B", "Cancel"]),
+    () => {}, () => confirmChoose(true));
 }
 
-function confirmChoose(i) {
+function confirmChoose(yes) {
   const st = confirmState;
   confirmState = null;
   $("overlay-confirm").classList.remove("active");
-  if (i === 0 && st) st.onYes();
+  if (yes && st) st.onYes();
 }
 
 function confirmInput(btn) {
   switch (btn) {
-    case "Up": confirmIdx = Math.max(0, confirmIdx - 1); renderConfirm(); break;
-    case "Down": confirmIdx = Math.min(1, confirmIdx + 1); renderConfirm(); break;
-    case "A": confirmChoose(confirmIdx); break;
-    case "B": confirmChoose(1); break;
+    case "A": if (focusVisible()) confirmChoose(true); break;
+    case "B": confirmChoose(false); break;
   }
 }
 

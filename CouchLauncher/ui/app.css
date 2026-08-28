@@ -86,11 +86,6 @@ html, body {
   transition: opacity 200ms linear;
 }
 .zone-dim .cont-art { opacity: 0.55; }
-.cont-progress-track {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 5px;
-  background: rgba(255,255,255,0.14);
-}
-.cont-progress { height: 100%; background: #F0A253; }
 .cont-meta {
   display: flex; flex-direction: column; gap: 3px; min-height: 50px;
   transition: opacity 180ms linear;
@@ -414,10 +409,13 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .ov-scroll::-webkit-scrollbar { display: none; }
 .ov-foot {
   display: flex; align-items: center; gap: 32px;
-  padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07);
+  margin-top: 10px; padding-top: 26px;
+  border-top: 1px solid rgba(255,255,255,0.07);
 }
 .ov-foot .legend-item > span { font-size: 19px; }
 .ov-foot .btn-badge { width: 34px; height: 34px; font-size: 17px; }
+.ov-sub { font-size: 17px; color: rgba(246,245,243,0.4); font-weight: 400; }
+.ov-row.danger { color: #E97A6C; }
 .ov-summary { font-size: 20px; color: rgba(246,245,243,0.5); }
 .menu-card { width: 640px; }
 
