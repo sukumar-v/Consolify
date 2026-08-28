@@ -119,10 +119,47 @@ function revealIn(scroller, el, isFirst, isLast) {
   else el.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+/*
+ * Menu icons — inline stroke SVG on a 24x24 grid. Drawn rather than pulled from a font or
+ * emoji so they stay crisp at 10-foot distance, inherit currentColor (muted normally, accent
+ * when focused) and add nothing to load.
+ */
+const ICONS = {
+  filter: '<path d="M3 4h18l-7 8.5V20l-4-2v-5.5L3 4z"/>',
+  sort: '<path d="M4 6h10M4 12h7M4 18h4"/><path d="M17 5v14M20.5 15.5 17 19l-3.5-3.5"/>',
+  sortAsc: '<path d="M4 6h4M4 12h8M4 18h12"/><path d="M18 5v14M21 16l-3 3-3-3"/>',
+  sortDesc: '<path d="M4 6h12M4 12h8M4 18h4"/><path d="M18 5v14M21 16l-3 3-3-3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  timer: '<path d="M10 2h4M12 8v6l4 2"/><circle cx="12" cy="14" r="8"/>',
+  chevronsDown: '<path d="m7 6 5 5 5-5M7 13l5 5 5-5"/>',
+  chevronsUp: '<path d="m7 18 5-5 5 5M7 11l5-5 5 5"/>',
+  gamepad: '<path d="M7 11h4M9 9v4M15.5 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="5"/>',
+  checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  download: '<path d="M12 3v11M8 10.5l4 4 4-4M4 20h16"/>',
+  star: '<path d="M12 3l2.7 5.5 6 .9-4.35 4.2 1.03 6L12 16.8 6.62 19.6l1.03-6L3.3 9.4l6-.9L12 3z"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M10.7 5.7A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15 15 0 0 1-2 2.8M6.5 6.9A14.6 14.6 0 0 0 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.3-1.1"/><path d="m3 3 18 18"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8h.01"/>',
+  folder: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/>',
+  folderPlus: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/><path d="M12 10.5v5M9.5 13h5"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15.5-4.5-4.5L6.5 21"/>',
+  trash: '<path d="M3.5 6.5h17M9 6.5V4h6v2.5M18.5 6.5 17.5 20h-11L5.5 6.5M10 11v5M14 11v5"/>',
+  terminal: '<path d="m5 8 4 4-4 4M12 16h7"/><rect x="2" y="4" width="20" height="16" rx="1.5"/>',
+  file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
+  store: '<path d="M21 12a9 9 0 1 1-2.6-6.35M21 3.5v5h-5"/>',
+};
+
+function iconSvg(name) {
+  const body = ICONS[name];
+  if (!body) return "";
+  return `<svg class="ov-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+         `stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+}
+
 /**
  * Shared renderer for every overlay menu, so the game options, manage, collection and
  * confirm menus all read like the filter menu. Items are
- * { cat } headers or { label, sub, checked, radio, danger, summary, action }.
+ * { cat } headers or { label, icon, sub, checked, radio, danger, summary, action }.
  */
 function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
   listEl.innerHTML = "";
@@ -141,7 +178,7 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
     if (r.summary !== undefined) right = `<div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
     else if (r.checked !== undefined) right = `<span class="ov-check${r.checked ? "" : " off"}">${r.checked ? (r.star ? "★" : r.radio ? "●" : "✓") : "○"}</span>`;
     else if (r.sub) right = `<span class="ov-sub">${esc(r.sub)}</span>`;
-    el.innerHTML = `<span>${esc(r.label ?? r.name)}</span>${right}`;
+    el.innerHTML = `<div class="ov-label">${iconSvg(r.icon)}<span>${esc(r.label ?? r.name)}</span></div>${right}`;
     el.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(i); });
     el.addEventListener("click", () => onClick(i));
     listEl.appendChild(el);
@@ -1152,8 +1189,8 @@ function closeFilter() {
 function filterMenuRows() {
   const n = activeFilterCount();
   return [
-    { name: "Filter", summary: n ? `${n} active` : "All games", open: "filter" },
-    { name: "Sort", summary: SORTS.find(s => s.id === F.sort).label, open: "sort" },
+    { name: "Filter", icon: "filter", summary: n ? `${n} active` : "All games", open: "filter" },
+    { name: "Sort", icon: "sort", summary: SORTS.find(s => s.id === F.sort).label, open: "sort" },
   ];
 }
 
@@ -1161,25 +1198,30 @@ function filterMenuRows() {
 function filterDropdownRows() {
   const rows = [{ cat: "PLATFORM" }];
   PLATFORMS.forEach(p => rows.push({
-    label: p, checked: F.platforms.has(p),
+    label: p, icon: "gamepad", checked: F.platforms.has(p),
     toggle: () => { F.platforms.has(p) ? F.platforms.delete(p) : F.platforms.add(p); },
   }));
   rows.push({ cat: "STATUS" });
   STATUSES.forEach(s => rows.push({
-    label: s, checked: F.status.has(s),
+    label: s, icon: s === "Installed" ? "checkCircle" : "download", checked: F.status.has(s),
     toggle: () => { F.status.has(s) ? F.status.delete(s) : F.status.add(s); },
   }));
   rows.push({ cat: "OTHER" });
   rows.push({
-    label: "Favorites only", checked: F.fav,
+    label: "Favorites only", icon: "star", checked: F.fav,
     toggle: () => { F.fav = !F.fav; },
   });
   return rows;
 }
 
+const SORT_ICONS = {
+  az: "sortAsc", za: "sortDesc", recent: "clock",
+  played: "timer", sizeDesc: "chevronsDown", sizeAsc: "chevronsUp",
+};
+
 function sortDropdownRows() {
   return SORTS.map(s => ({
-    label: s.label, checked: F.sort === s.id, radio: true,
+    label: s.label, icon: SORT_ICONS[s.id], checked: F.sort === s.id, radio: true,
     toggle: () => { F.sort = s.id; },
   }));
 }
@@ -1258,15 +1300,16 @@ function gameMenuItems() {
   const g = gameById(gameMenu.gameId);
   if (!g) return [];
   const items = [
-    { label: "View game", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
-    { label: g.favorite ? "Remove from favorites" : "Add to favorites", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
-    { label: "Add to collection", action: () => { closeGameMenu(); openCollect(g.id); } },
-    { label: "Change cover art", action: () => { closeGameMenu(); send({ cmd: "pickCover", id: g.id }); } },
-    { label: g.hidden ? "Unhide" : "Hide", sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
+    { label: "View game", icon: "info", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
+    { label: g.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
+    { label: "Add to collection", icon: "folderPlus", action: () => { closeGameMenu(); openCollect(g.id); } },
+    { label: "Change cover art", icon: "image", action: () => { closeGameMenu(); send({ cmd: "pickCover", id: g.id }); } },
+    { label: g.hidden ? "Unhide" : "Hide", icon: g.hidden ? "eye" : "eyeOff",
+      sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
       action: () => { send({ cmd: "toggleHidden", id: g.id }); closeGameMenu(); } },
   ];
   if (g.manual) items.push({
-    label: "Remove from library", danger: true,
+    label: "Remove from library", icon: "trash", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeGameMenu(); },
   });
   return items;
@@ -1302,18 +1345,18 @@ function collectItems() {
   const g = gameById(collectTarget);
   if (!g) return [];
   const items = [{
-    label: "Favorites", star: true, checked: g.favorite,
+    label: "Favorites", icon: "star", star: true, checked: g.favorite,
     action: () => { send({ cmd: "toggleFavorite", id: g.id }); },
   }, {
-    label: "Hidden", checked: g.hidden,
+    label: "Hidden", icon: "eyeOff", checked: g.hidden,
     action: () => { send({ cmd: "toggleHidden", id: g.id }); },
   }];
   S.collections.forEach(c => items.push({
-    label: c.name, checked: c.gameIds.includes(g.id),
+    label: c.name, icon: "folder", checked: c.gameIds.includes(g.id),
     action: () => send({ cmd: "toggleInCollection", collectionId: c.id, id: g.id }),
   }));
   items.push({
-    label: "New collection…",
+    label: "New collection…", icon: "folderPlus",
     action: () => {
       closeCollect();
       openInput("NEW COLLECTION NAME", "", name => send({ cmd: "createCollection", name, gameId: g.id }));
@@ -1356,22 +1399,22 @@ function manageItems() {
   if (!g) return [];
   const items = [];
   items.push({
-    label: "Set launch arguments", sub: g.args || "e.g. --launcher-skip",
+    label: "Set launch arguments", icon: "terminal", sub: g.args || "e.g. --launcher-skip",
     action: () => {
       closeManage();
       openInput("LAUNCH ARGUMENTS", g.args || "", v => send({ cmd: "setArgs", id: g.id, args: v }));
     },
   });
   items.push({
-    label: "Choose executable (launch directly)…",
+    label: "Choose executable (launch directly)…", icon: "file",
     sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "Bypass the store launcher",
     action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
   });
   if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
-    items.push({ label: `Launch through ${g.platform} again`, action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
-  items.push({ label: "Change cover art", action: () => { send({ cmd: "pickCover", id: g.id }); closeManage(); } });
+    items.push({ label: `Launch through ${g.platform} again`, icon: "store", action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
+  items.push({ label: "Change cover art", icon: "image", action: () => { send({ cmd: "pickCover", id: g.id }); closeManage(); } });
   if (g.manual) items.push({
-    label: "Remove from library", danger: true,
+    label: "Remove from library", icon: "trash", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeManage(); switchView(detailReturn); },
   });
   return items;
@@ -1404,7 +1447,7 @@ function manageInput(btn) {
 function renderConfirm() {
   if (!confirmState) return;
   $("confirmTitle").textContent = confirmState.title;
-  const items = [{ label: confirmState.yesLabel || "Yes, delete", danger: true }];
+  const items = [{ label: confirmState.yesLabel || "Yes, delete", icon: "trash", danger: true }];
   confirmIdx = 0;
   renderMenu($("confirmList"), $("confirmFoot"), items, confirmIdx,
     foot(["A", "Confirm"], ["B", "Cancel"]),

@@ -416,6 +416,17 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .ov-foot .btn-badge { width: 34px; height: 34px; font-size: 17px; }
 .ov-sub { font-size: 17px; color: rgba(246,245,243,0.4); font-weight: 400; }
 .ov-row.danger { color: #E97A6C; }
+
+/* Menu icons: muted by default, accent on focus — the ring stays the primary focus signal */
+.ov-label { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.ov-label > span { overflow: hidden; text-overflow: ellipsis; }
+.ov-icon {
+  flex: 0 0 auto; width: 25px; height: 25px;
+  color: rgba(246,245,243,0.45);
+  transition: color 180ms linear;
+}
+.ov-row.focused .ov-icon { color: #F0A253; }
+.ov-row.danger .ov-icon { color: #E97A6C; }
 .ov-summary { font-size: 20px; color: rgba(246,245,243,0.5); }
 .menu-card { width: 640px; }
 
