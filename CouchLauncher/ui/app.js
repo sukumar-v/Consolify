@@ -36,6 +36,8 @@ let detailBtn = 0;
 const F = { platforms: new Set(), status: new Set(), fav: false, sort: "az" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
+const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "View + Menu", "LS + RB", "LB + RS", "Off"];
+
 const SORTS = [
   { id: "az", label: "A – Z" },
   { id: "za", label: "Z – A" },
@@ -358,10 +360,16 @@ window.addEventListener("resize", fitStage);
 
 function tickClock() {
   const now = new Date();
-  const t = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  document.querySelectorAll(".clock").forEach(el => el.textContent = t);
+  const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  let h = now.getHours();
+  const suffix = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;                       // 0 and 12 both display as 12
+  const time = `${h}:${String(now.getMinutes()).padStart(2, "0")} ${suffix}`;
+  const date = `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]}`;
+  document.querySelectorAll(".clock").forEach(el => el.textContent = `${date} · ${time}`);
 }
-setInterval(tickClock, 15000);
+setInterval(tickClock, 10000);
 
 /* Battery indicator: only shown for controllers that actually run on a battery
    (wireless pads report ALKALINE/NIMH); wired pads and no-pad show nothing. */
@@ -494,19 +502,55 @@ const CONT_VIEWPORT = 1760;
 let contScroll = 0;   // index of the leftmost visible tile
 
 /** Slide the carousel the minimum distance needed to keep the focused tile on screen. */
-function updateContinueScroll() {
+function contPerView() { return Math.max(1, Math.floor((CONT_VIEWPORT + 28) / CONT_STEP)); }
+function contMaxScroll() { return Math.max(0, contItems.length - contPerView()); }
+
+/**
+ * Slide the carousel the minimum distance needed to keep the focused tile on screen.
+ * `follow` is false for hover: letting the mouse drag the carousel makes tiles slide out
+ * from under the cursor, which fires another hover and runs away.
+ */
+function updateContinueScroll(follow) {
   const track = $("continueTrack");
   if (!track) return;
-  const perView = Math.max(1, Math.floor((CONT_VIEWPORT + 28) / CONT_STEP));
-  const maxScroll = Math.max(0, contItems.length - perView);
+  const perView = contPerView();
 
-  if (focus.zone === "cont") {
+  if (follow && focus.zone === "cont") {
     if (focus.col < contScroll) contScroll = focus.col;
     else if (focus.col > contScroll + perView - 1) contScroll = focus.col - perView + 1;
   }
-  contScroll = Math.max(0, Math.min(contScroll, maxScroll));
+  contScroll = Math.max(0, Math.min(contScroll, contMaxScroll()));
   track.style.transform = `translateX(${-contScroll * CONT_STEP}px)`;
 }
+
+/* Right stick horizontal -> carousel. The host turns stick X into real HWHEEL events, so this
+   also means a horizontal-scrolling mouse or trackpad drives the carousel. */
+let hWheelAccum = 0;
+
+function overlayOpen() {
+  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!confirmState || wolOpen;
+}
+
+window.addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical intent: let it scroll normally
+  if (overlayOpen() || view !== "library") return;
+  if (focus.zone !== "cont" || !contItems.length) return;
+
+  hWheelAccum += e.deltaX;
+  let moved = false;
+  while (Math.abs(hWheelAccum) >= 120) {
+    const dir = Math.sign(hWheelAccum);
+    hWheelAccum -= dir * 120;
+    const next = Math.max(0, Math.min(contItems.length - 1, focus.col + dir));
+    if (next === focus.col) { hWheelAccum = 0; break; }   // already at an end
+    focus.col = next;
+    moved = true;
+  }
+  if (moved) {
+    setInputMode("pad");   // the stick is navigating, so show the highlight it is moving
+    updateLibraryFocus();
+  }
+}, { passive: true });
 
 function libraryData() {
   let filtered = visibleGames();
@@ -654,7 +698,7 @@ function updateLibraryFocus(noScroll) {
   document.querySelectorAll("#continueRow .cont-item").forEach((el, i) => {
     el.classList.toggle("focused", show && contFocused && i === focus.col);
   });
-  updateContinueScroll();
+  updateContinueScroll(!noScroll);
 
   const scroller = $("gridScroll");
   document.querySelectorAll("#gridScroll .grid-row").forEach((rowEl, r) => {
@@ -1076,10 +1120,8 @@ function settingsRows() {
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
   rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Couch Launcher exits",
     () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
-  rows.push({
-    name: "Minimize / restore launcher", hint: "Press View + Menu (Back + Start) together at any time",
-    type: "static", value: "VIEW + MENU",
-  });
+  rows.push(cycleRow("Minimize / restore combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
+    "Hold both buttons together to park the launcher and bring it back. Avoid View + Menu if Steam Big Picture is bound to it"));
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
@@ -1457,7 +1499,7 @@ function manageItems() {
     },
   });
   items.push({
-    label: "Choose executable…", icon: "file",
+    label: "Change executable", icon: "file",
     sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "Bypass the store launcher",
     action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
   });
@@ -1764,6 +1806,7 @@ function mockHandle(msg) {
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
         leftClickButton: "A", rightClickButton: "B",
+        minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
       },
       displays: [

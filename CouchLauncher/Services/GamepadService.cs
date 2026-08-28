@@ -62,7 +62,7 @@ public class GamepadService : IDisposable
     private void PollLoop()
     {
         ushort prevButtons = 0;
-        double fracX = 0, fracY = 0, scrollAccum = 0;
+        double fracX = 0, fracY = 0, scrollAccum = 0, hScrollAccum = 0;
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false;
@@ -131,18 +131,18 @@ public class GamepadService : IDisposable
                 continue;
             }
 
-            // ---- Back+Start combo: minimize / restore the launcher ----
-            const ushort comboMask = NativeMethods.XINPUT_GAMEPAD_START | NativeMethods.XINPUT_GAMEPAD_BACK;
-            if ((buttons & comboMask) == comboMask)
+            // ---- minimize / restore combo (configurable; LS+RS by default) ----
+            ushort comboMask = ComboMask(s.MinimizeCombo);
+            if (comboMask != 0 && (buttons & comboMask) == comboMask)
             {
                 if (!comboLatched)
                 {
                     comboLatched = true;
-                    toggleDownAt = -1; toggleFired = true; // swallow the keyboard chord / Start tap
+                    toggleDownAt = -1; toggleFired = true; // swallow any chord/tap in the combo
                     MinimizeToggleRequested?.Invoke();
                 }
             }
-            else if ((buttons & comboMask) == 0)
+            else if (comboMask == 0 || (buttons & comboMask) == 0)
             {
                 comboLatched = false;
             }
@@ -234,24 +234,23 @@ public class GamepadService : IDisposable
                 }
                 else { fracX = 0; fracY = 0; }
 
-                // Right stick -> scroll wheel. Accumulated per elapsed time exactly like the
-                // cursor above: the previous "emit while (now % 96 < 12)" gate depended on a poll
-                // landing inside a 12ms window every 96ms, so with ~8ms polls plus jitter whole
-                // cycles emitted nothing and the scroll stuttered. Rate now scales with deflection.
+                // Right stick -> scroll wheel, vertical or horizontal. Accumulated per elapsed
+                // time exactly like the cursor above: the old "emit while (now % 96 < 12)" gate
+                // depended on a poll landing inside a 12ms window every 96ms, so with ~8ms polls
+                // plus jitter whole cycles emitted nothing and the scroll stuttered.
                 double ry = state.Gamepad.sThumbRY / 32767.0;
-                double rmag = Math.Abs(ry);
-                if (rmag > s.Deadzone)
+                double rx = state.Gamepad.sThumbRX / 32767.0;
+                // Whichever axis is pushed further wins, so a diagonal nudge never scrolls both ways.
+                if (Math.Abs(ry) >= Math.Abs(rx))
                 {
-                    double t = Math.Min((rmag - s.Deadzone) / (1 - s.Deadzone), 1.0);
-                    scrollAccum += Math.Sign(ry) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * dt;
-                    int notches = (int)scrollAccum;
-                    if (notches != 0)
-                    {
-                        scrollAccum -= notches;
-                        SendWheel(notches * 120);   // WHEEL_DELTA per notch
-                    }
+                    hScrollAccum = 0;
+                    scrollAccum = StickScroll(ry, s.Deadzone, dt, scrollAccum, n => SendWheel(n * 120));
                 }
-                else scrollAccum = 0;
+                else
+                {
+                    scrollAccum = 0;
+                    hScrollAccum = StickScroll(rx, s.Deadzone, dt, hScrollAccum, n => SendHWheel(n * 120));
+                }
             }
 
             prevButtons = buttons;
@@ -282,6 +281,36 @@ public class GamepadService : IDisposable
         or NativeMethods.XINPUT_GAMEPAD_DPAD_DOWN or NativeMethods.XINPUT_GAMEPAD_DPAD_LEFT
         or NativeMethods.XINPUT_GAMEPAD_DPAD_RIGHT;
 
+    /// <summary>
+    /// One axis of stick-driven scrolling: rescales past the deadzone, accumulates notches per
+    /// elapsed time and emits whole notches. Returns the carried-over remainder.
+    /// </summary>
+    private static double StickScroll(double axis, double deadzone, double dt, double accum, Action<int> emit)
+    {
+        double mag = Math.Abs(axis);
+        if (mag <= deadzone) return 0;
+        double t = Math.Min((mag - deadzone) / (1 - deadzone), 1.0);
+        accum += Math.Sign(axis) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * dt;
+        int notches = (int)accum;
+        if (notches != 0)
+        {
+            accum -= notches;
+            emit(notches);
+        }
+        return accum;
+    }
+
+    /// <summary>Mask for a "A + B" style combo string; 0 when disabled or unparseable.</summary>
+    public static ushort ComboMask(string? combo)
+    {
+        if (string.IsNullOrWhiteSpace(combo) || combo.Equals("Off", StringComparison.OrdinalIgnoreCase))
+            return 0;
+        ushort mask = 0;
+        foreach (var part in combo.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            mask |= ButtonMask(part);
+        return mask;
+    }
+
     public static ushort ButtonMask(string name) => name switch
     {
         "A" => NativeMethods.XINPUT_GAMEPAD_A,
@@ -300,6 +329,16 @@ public class GamepadService : IDisposable
     private static void SendClick(uint flag)
     {
         var input = new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dwFlags = flag } };
+        NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
+    }
+
+    private static void SendHWheel(int delta)
+    {
+        var input = new NativeMethods.INPUT
+        {
+            type = NativeMethods.INPUT_MOUSE,
+            mi = new NativeMethods.MOUSEINPUT { dwFlags = NativeMethods.MOUSEEVENTF_HWHEEL, mouseData = unchecked((uint)delta) }
+        };
         NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
     }
 

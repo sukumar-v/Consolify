@@ -246,6 +246,7 @@ public class UiBridge
         t.AccelExponent = Math.Clamp(s.AccelExponent, 1.0, 3.0);
         t.LeftClickButton = s.LeftClickButton;
         t.RightClickButton = s.RightClickButton;
+        t.MinimizeCombo = s.MinimizeCombo;
         t.KeyboardToggleButton = s.KeyboardToggleButton;
         t.KeyboardToggleHoldMs = Math.Clamp(s.KeyboardToggleHoldMs, 200, 2000);
         t.KeyboardApp = s.KeyboardApp;

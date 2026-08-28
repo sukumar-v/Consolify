@@ -22,6 +22,8 @@ public class AppSettings
     // Button bindings (used outside the launcher UI; inside it A/B/Y/X/MENU follow the on-screen legend)
     public string LeftClickButton { get; set; } = "A";
     public string RightClickButton { get; set; } = "B";
+    /// <summary>Gamepad combo that minimizes/restores the launcher, e.g. "LS + RS". "Off" disables it.</summary>
+    public string MinimizeCombo { get; set; } = "LS + RS";
     public string KeyboardToggleButton { get; set; } = "Start";
     public int KeyboardToggleHoldMs { get; set; } = 600;
     public string KeyboardApp { get; set; } = "TabTip"; // TabTip | Osk
