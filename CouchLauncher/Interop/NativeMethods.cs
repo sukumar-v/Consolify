@@ -297,6 +297,77 @@ internal static class NativeMethods
         catch (EntryPointNotFoundException) { return false; }
     }
 
+
+    // ---- Window control (radial power menu) ----
+
+    public const int SW_MINIMIZE = 6;
+    public const int SW_RESTORE = 9;
+    public const int SW_SHOW = 5;
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetShellWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr LoadLibrary(string lpFileName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetProcAddress(IntPtr hModule, IntPtr ordinal);
+
+    // ---- Guide button ----
+    // XInput's public API deliberately hides the Guide/PS button. Ordinal 100 of the XInput DLLs
+    // is the long-standing undocumented XInputGetStateEx, which reports it as bit 0x0400. If the
+    // export is missing we fall back to the documented call and the Guide bit simply never sets.
+    public const ushort XINPUT_GAMEPAD_GUIDE = 0x0400;
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int XInputGetStateExFn(int dwUserIndex, out XINPUT_STATE pState);
+
+    private static XInputGetStateExFn? _getStateEx;
+    private static bool _exProbed;
+
+    public static bool GuideSupported
+    {
+        get { ProbeStateEx(); return _getStateEx is not null; }
+    }
+
+    private static void ProbeStateEx()
+    {
+        if (_exProbed) return;
+        _exProbed = true;
+        foreach (var dll in new[] { "xinput1_4.dll", "xinput1_3.dll" })
+        {
+            var h = LoadLibrary(dll);
+            if (h == IntPtr.Zero) continue;
+            var p = GetProcAddress(h, new IntPtr(100));
+            if (p == IntPtr.Zero) continue;
+            _getStateEx = Marshal.GetDelegateForFunctionPointer<XInputGetStateExFn>(p);
+            return;
+        }
+    }
+
+    /// <summary>State including the Guide bit when the extended export exists.</summary>
+    public static int XInputGetStateAny(int userIndex, out XINPUT_STATE state)
+    {
+        ProbeStateEx();
+        if (_getStateEx is not null)
+        {
+            try { return _getStateEx(userIndex, out state); }
+            catch { _getStateEx = null; }
+        }
+        return XInputGetState(userIndex, out state);
+    }
     private static bool _xinput14Missing;
 
     public static int XInputGetState(int userIndex, out XINPUT_STATE state)

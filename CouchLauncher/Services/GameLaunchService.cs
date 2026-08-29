@@ -210,6 +210,14 @@ public class GameLaunchService
         return PidBelongsToGame(pid);
     }
 
+    /// <summary>Does this window belong to the running game? Used by the in-game menu.</summary>
+    public bool OwnsWindow(IntPtr hwnd)
+    {
+        if (!GameRunning || hwnd == IntPtr.Zero) return false;
+        NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+        return PidBelongsToGame(pid);
+    }
+
     /// <summary>Is this pid one of the game's own processes (launcher, chained exe, game)?</summary>
     private bool PidBelongsToGame(uint pid)
     {

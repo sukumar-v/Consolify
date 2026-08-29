@@ -26,10 +26,11 @@ public class UiBridge
     private readonly LibraryScanner _scanner;
     private readonly GameLaunchService _launcher;
     private readonly VirtualKeyboardService _keyboard;
+    private readonly WindowService _windows;
     private bool _scanning;
 
     public UiBridge(MainWindow window, CoreWebView2 core, SettingsStore settings, LibraryStore library,
-        DisplayService displays, LibraryScanner scanner, GameLaunchService launcher, VirtualKeyboardService keyboard)
+        DisplayService displays, LibraryScanner scanner, GameLaunchService launcher, VirtualKeyboardService keyboard, WindowService windows)
     {
         _window = window;
         _core = core;
@@ -39,6 +40,7 @@ public class UiBridge
         _scanner = scanner;
         _launcher = launcher;
         _keyboard = keyboard;
+        _windows = windows;
     }
 
     public void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -123,6 +125,66 @@ public class UiBridge
                 PushState();
                 break;
             }
+
+            // ---- radial power menu / in-game menu ----
+
+            case "listWindows":
+                Push(new { type = "windows", windows = _windows.ListWindows(), displays = _displays.GetDisplays() });
+                break;
+
+            case "windowAction":
+            {
+                var act = msg["action"]?.GetValue<string>();
+                var handle = msg["handle"]?.GetValue<long>() ?? (long)_window.OverlayTarget;
+                var h = new IntPtr(handle);
+                switch (act)
+                {
+                    case "close": _windows.Close(h); break;
+                    case "minimize": _windows.Minimize(h); break;
+                    case "focus": _windows.Focus(h); _window.CloseOverlay(false); break;
+                    case "moveToTv":
+                        if (_settings.Settings.TvDeviceName is { } tv) _windows.MoveToDisplay(h, tv);
+                        break;
+                    case "moveNext": _windows.MoveToNextDisplay(h); break;
+                }
+                Push(new { type = "toast", message = ActionToast(act) });
+                break;
+            }
+
+            case "shortcut":
+                if (msg["id"]?.GetValue<string>() is { } sid) { _windows.RunShortcut(sid); _window.CloseOverlay(false); }
+                break;
+
+            case "power":
+                if (msg["action"]?.GetValue<string>() is { } pact) _windows.Power(pact);
+                break;
+
+            case "closeOverlay":
+                _window.CloseOverlay(msg["refocus"]?.GetValue<bool>() ?? true);
+                break;
+
+            case "goHome":
+                _window.GoHome();
+                break;
+
+            case "closeGame":
+            {
+                // Politely close every visible window the running game owns.
+                int n = 0;
+                foreach (var w in _windows.ListWindows())
+                {
+                    var h = new IntPtr(w.Handle);
+                    if (!_launcher.OwnsWindow(h)) continue;
+                    _windows.Close(h);
+                    n++;
+                }
+                Push(new { type = "toast", message = n > 0 ? "Closing game…" : "No game window to close" });
+                break;
+            }
+
+            case "resumeGame":
+                _window.CloseOverlay(true);
+                break;
 
             case "toggleKeyboard":
                 _keyboard.Toggle();
@@ -388,6 +450,26 @@ public class UiBridge
 
     public void PushBattery(byte type, byte level) =>
         Push(new { type = "battery", batteryType = type, level });
+
+    private static string ActionToast(string? act) => act switch
+    {
+        "close" => "Closing window…",
+        "minimize" => "Window minimized",
+        "moveToTv" => "Moved to the TV",
+        "moveNext" => "Moved to the next display",
+        _ => "Done"
+    };
+
+    public void PushOverlay(string mode, string targetTitle) =>
+        Push(new
+        {
+            type = "overlay",
+            mode,
+            targetTitle,
+            windows = _windows.ListWindows(),
+            displays = _displays.GetDisplays(),
+            runningGameId = _launcher.RunningGameId
+        });
 
     public void PushInputMode(string mode) => Push(new { type = "inputMode", mode });
 

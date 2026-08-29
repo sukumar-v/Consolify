@@ -29,8 +29,10 @@ public class GamepadService : IDisposable
     public event Action<string>? UiEvent;
     /// <summary>Raised when the keyboard-toggle chord is held.</summary>
     public event Action? KeyboardToggleRequested;
-    /// <summary>Raised when Back+Start are pressed together (minimize/restore the launcher).</summary>
+    /// <summary>Combo tapped: minimize/restore, or the in-game menu while a game runs.</summary>
     public event Action? MinimizeToggleRequested;
+    /// <summary>Combo held: open the radial power menu.</summary>
+    public event Action? RadialRequested;
     /// <summary>"pad" when the D-pad/buttons drive navigation, "pointer" when the stick moves the cursor.</summary>
     public event Action<string>? InputModeChanged;
     /// <summary>type: 0 none/wired, 2 alkaline, 3 NiMH; level: 0 empty .. 3 full.</summary>
@@ -42,6 +44,8 @@ public class GamepadService : IDisposable
     private const double MaxSpeedPxPerSec = 1400;
     private const double MaxScrollNotchesPerSec = 18;
     private const int RepeatDelayMs = 380, RepeatIntervalMs = 115;
+    private const int RadialHoldMs = 450;      // combo held this long opens the radial menu
+    private const byte TriggerThreshold = 40;  // analog triggers count as "pressed" past this
 
     public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused)
     {
@@ -65,7 +69,8 @@ public class GamepadService : IDisposable
         double fracX = 0, fracY = 0, scrollAccum = 0, hScrollAccum = 0;
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
-        bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false;
+        bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, comboFired = false;
+        long comboDownAt = -1;
         var sw = Stopwatch.StartNew();
         long lastTick = sw.ElapsedMilliseconds;
         long nextBatteryPoll = 0;
@@ -89,7 +94,7 @@ public class GamepadService : IDisposable
 
             NativeMethods.XINPUT_STATE state;
             int rc = 1;
-            try { rc = NativeMethods.XInputGetState(0, out state); }
+            try { rc = NativeMethods.XInputGetStateAny(0, out state); }
             catch (DllNotFoundException) { break; }
 
             if (rc != 0)
@@ -133,20 +138,24 @@ public class GamepadService : IDisposable
                 continue;
             }
 
-            // ---- minimize / restore combo (configurable; LS+RS by default) ----
-            ushort comboMask = ComboMask(s.MinimizeCombo);
-            if (comboMask != 0 && (buttons & comboMask) == comboMask)
+            // ---- minimize / radial combo: tap = minimize or in-game menu, hold = radial ----
+            bool comboNow = ComboPressed(state.Gamepad, s.MinimizeCombo);
+            if (comboNow && !comboLatched)
             {
-                if (!comboLatched)
-                {
-                    comboLatched = true;
-                    toggleDownAt = -1; toggleFired = true; // swallow any chord/tap in the combo
-                    MinimizeToggleRequested?.Invoke();
-                }
+                comboLatched = true;
+                comboDownAt = now;
+                comboFired = false;
+                toggleDownAt = -1; toggleFired = true;   // swallow any keyboard chord inside the combo
             }
-            else if (comboMask == 0 || (buttons & comboMask) == 0)
+            if (comboNow && !comboFired && now - comboDownAt >= RadialHoldMs)
+            {
+                comboFired = true;
+                RadialRequested?.Invoke();
+            }
+            if (!comboNow && comboLatched)
             {
                 comboLatched = false;
+                if (!comboFired) MinimizeToggleRequested?.Invoke();
             }
 
             // ---- keyboard toggle chord (hold) ----
@@ -302,6 +311,34 @@ public class GamepadService : IDisposable
         return accum;
     }
 
+    /// <summary>
+    /// Is the whole combo held? Handles face/shoulder/stick buttons, the analog triggers, and the
+    /// Guide button (which only reports through the extended XInput export).
+    /// </summary>
+    internal static bool ComboPressed(in NativeMethods.XINPUT_GAMEPAD pad, string? combo)
+    {
+        if (string.IsNullOrWhiteSpace(combo) || combo.Equals("Off", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        foreach (var part in combo.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (part.Equals("LT", StringComparison.OrdinalIgnoreCase))
+            {
+                if (pad.bLeftTrigger < TriggerThreshold) return false;
+            }
+            else if (part.Equals("RT", StringComparison.OrdinalIgnoreCase))
+            {
+                if (pad.bRightTrigger < TriggerThreshold) return false;
+            }
+            else
+            {
+                ushort m = ButtonMask(part);
+                if (m == 0 || (pad.wButtons & m) == 0) return false;
+            }
+        }
+        return true;
+    }
+
     /// <summary>Mask for a "A + B" style combo string; 0 when disabled or unparseable.</summary>
     public static ushort ComboMask(string? combo)
     {
@@ -325,7 +362,8 @@ public class GamepadService : IDisposable
         "RB" => NativeMethods.XINPUT_GAMEPAD_RIGHT_SHOULDER,
         "LS" => NativeMethods.XINPUT_GAMEPAD_LEFT_THUMB,
         "RS" => NativeMethods.XINPUT_GAMEPAD_RIGHT_THUMB,
-        _ => NativeMethods.XINPUT_GAMEPAD_A
+        "Guide" or "Xbox" or "PS" => NativeMethods.XINPUT_GAMEPAD_GUIDE,
+        _ => 0    // unknown name matches nothing rather than silently meaning A
     };
 
     private static void SendClick(uint flag)

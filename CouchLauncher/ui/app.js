@@ -36,7 +36,7 @@ let detailBtn = 0;
 const F = { platforms: new Set(), status: new Set(), fav: false, sort: "az" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
-const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "View + Menu", "LS + RB", "LB + RS", "Off"];
+const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
 
 const SORTS = [
   { id: "az", label: "A – Z" },
@@ -587,8 +587,29 @@ function filterSummary(total) {
 
 /* ============================== library render ============================== */
 
+/** The running game shown as a banner above Continue, so it is the first thing focus lands on. */
+function renderPlaying() {
+  const sec = $("playingSection");
+  const g = S.gameRunning ? gameById(S.runningGameId) : null;
+  if (!g) { sec.style.display = "none"; return; }
+
+  sec.style.display = "";
+  const art = $("playingArt");
+  art.className = "playing-art";
+  art.innerHTML = "";
+  art.style.background = "";
+  applyArt(g, art, bannerUrl(g));
+  $("playingName").textContent = g.title;
+  $("playingMeta").textContent = (g.platform + " · RUNNING").toUpperCase();
+
+  const card = $("playingCard");
+  card.onmouseenter = () => { if (hoverEnabled()) { focus = { zone: "playing", row: 0, col: 0 }; updateLibraryFocus(true); } };
+  card.onclick = () => { focus = { zone: "playing", row: 0, col: 0 }; updateLibraryFocus(true); send({ cmd: "resumeGame" }); };
+}
+
 function renderLibrary() {
   const { cont, rows, total } = libraryData();
+  renderPlaying();
   contItems = cont;
   gridRows = rows;
 
@@ -655,6 +676,7 @@ function renderLibrary() {
 
 function focusedGame() {
   if (view === "detail") return gameById(detailGameId);
+  if (view === "library" && focus.zone === "playing") return gameById(S.runningGameId);
   if (view === "collections") {
     if (collMode === "grid") return (collGridRows[collFocus.row] || [])[collFocus.col] || null;
     return null;
@@ -690,6 +712,8 @@ function clampFocus() {
 
 function updateLibraryFocus(noScroll) {
   const show = focusVisible();
+  const playingCard = $("playingCard");
+  if (playingCard) playingCard.classList.toggle("focused", show && focus.zone === "playing");
   const tabs = document.querySelectorAll("#screen-library [data-tabbar] .tab");
   tabs.forEach((t, i) => t.classList.toggle("focused", show && focus.zone === "tabs" && i === tabIdx));
 
@@ -718,18 +742,20 @@ function updateLibraryFocus(noScroll) {
 
 function libraryNav(btn) {
   const zones = ["tabs"];
+  if (S.gameRunning && gameById(S.runningGameId)) zones.push("playing");
   if (contItems.length) zones.push("cont");
   for (let i = 0; i < gridRows.length; i++) zones.push("grid" + i);
 
   const zoneIndex = () => {
-    if (focus.zone === "tabs") return 0;
-    if (focus.zone === "cont") return 1;
+    if (focus.zone === "tabs" || focus.zone === "playing" || focus.zone === "cont")
+      return zones.indexOf(focus.zone);
     return zones.indexOf("grid" + focus.row);
   };
 
   if (btn === "Left" || btn === "Right") {
     const dir = btn === "Right" ? 1 : -1;
     if (focus.zone === "tabs") tabIdx = Math.max(0, Math.min(TAB_DEFS.length - 1, tabIdx + dir));
+    else if (focus.zone === "playing") { /* single card: nothing to move to */ }
     else if (focus.zone === "cont") focus.col = Math.max(0, Math.min(contItems.length - 1, focus.col + dir));
     else focus.col = Math.max(0, Math.min(gridRows[focus.row].length - 1, focus.col + dir));
     updateLibraryFocus();
@@ -744,6 +770,7 @@ function libraryNav(btn) {
     const xCenter = focus.zone === "cont" ? (focus.col - contScroll) * CONT_STEP + 150
                   : focus.zone === "grid" ? focus.col * 223 + 100 : 0;
     if (z === "tabs") { focus = { zone: "tabs", row: 0, col: 0 }; }
+    else if (z === "playing") { focus = { zone: "playing", row: 0, col: 0 }; }
     else if (z === "cont") {
       const col = focus.zone === "tabs" ? contScroll : contScroll + Math.round((xCenter - 150) / CONT_STEP);
       focus = { zone: "cont", row: 0, col: Math.max(0, Math.min(contItems.length - 1, col)) };
@@ -759,6 +786,13 @@ function libraryNav(btn) {
 
 function libraryAccept(btn) {
   if (!focusVisible()) return;   // pointer is over empty space: nothing is armed
+  if (focus.zone === "playing") {
+    const g = gameById(S.runningGameId);
+    if (!g) return;
+    if (btn === "A") send({ cmd: "resumeGame" });
+    else if (btn === "Y") openGameMenu(g.id, "library");
+    return;
+  }
   if (focus.zone === "tabs") {
     if (btn !== "A") return;
     const target = TAB_DEFS[tabIdx].id;
@@ -1120,8 +1154,18 @@ function settingsRows() {
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
   rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Couch Launcher exits",
     () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
-  rows.push(cycleRow("Minimize / restore combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
-    "Hold both buttons together to park the launcher and bring it back. Avoid View + Menu if Steam Big Picture is bound to it"));
+  rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
+    "Tap to minimize or restore the launcher (in-game menu while a game runs); hold to open the power menu"));
+  if (s.minimizeCombo === "Guide") rows.push({
+    name: "Disable Steam's Guide shortcut", danger: true,
+    hint: "Steam grabs the Guide button by default and will open Big Picture over this menu. In Steam go to Settings, then Controller, and turn off the Guide button chord / Steam button shortcuts",
+    type: "static", value: "ACTION NEEDED",
+  });
+  if (s.minimizeCombo === "View + Menu") rows.push({
+    name: "View + Menu collides with Steam", danger: true,
+    hint: "Steam binds View + Menu (Back + Start) to Big Picture. Pick another combo or unbind it in Steam",
+    type: "static", value: "ACTION NEEDED",
+  });
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
@@ -1392,6 +1436,7 @@ function gameMenuItems() {
   if (!gameMenu) return [];
   const g = gameById(gameMenu.gameId);
   if (!g) return [];
+  const running = S.gameRunning && S.runningGameId === g.id;
   const items = [
     { label: "View game", icon: "info", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
     { label: g.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
@@ -1401,6 +1446,18 @@ function gameMenuItems() {
       sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
       action: () => { send({ cmd: "toggleHidden", id: g.id }); closeGameMenu(); } },
   ];
+  if (running) {
+    items.unshift({ label: "Resume game", icon: "info", sub: "Back to the running game",
+      action: () => { closeGameMenu(); send({ cmd: "resumeGame" }); } });
+    items.push({ label: "Close game", icon: "trash", danger: true,
+      action: () => {
+        closeGameMenu();
+        confirmState = { title: "CLOSE THE GAME?", yesLabel: "Yes, close it",
+                         onYes: () => send({ cmd: "closeGame" }) };
+        renderConfirm();
+        $("overlay-confirm").classList.add("active");
+      } });
+  }
   if (g.manual) items.push({
     label: "Remove from library", icon: "trash", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeGameMenu(); },
@@ -1648,6 +1705,9 @@ function handleInput(btn, src) {
   // highlight the pointer has cleared, so A over empty space does nothing.
   if (DIRECTIONS.has(btn)) setInputMode("pad");
   if (confirmState) { confirmInput(btn); return; }
+  if (radialSub) { radialSubInput(btn); return; }
+  if (radialOpen) { radialInput(btn); return; }
+  if (ingameOpen) { ingameInput(btn); return; }
   if (wolOpen) { wolInput(btn); return; }
   if (filterOpen) { filterInput(btn); return; }
   if (gameMenu) { gameMenuInput(btn); return; }
@@ -1722,6 +1782,17 @@ function handleHostMessage(m) {
     case "pad":
       handleInput(m.button, "pad");
       break;
+    case "overlay":
+      overlayTargetTitle = m.targetTitle || "";
+      hostWindows = m.windows || [];
+      if (m.runningGameId !== undefined) S.runningGameId = m.runningGameId;
+      if (m.mode === "radial") openRadial(m.targetTitle);
+      else if (m.mode === "ingame") openIngame();
+      break;
+    case "windows":
+      hostWindows = m.windows || [];
+      if (radialSub === "windows") renderRadialSub();
+      break;
     case "inputMode":
       // Only the host can tell us the stick moved the cursor. Pad mode is decided locally,
       // from directional input alone, so a face button can never re-arm a highlight the
@@ -1741,6 +1812,7 @@ function handleHostMessage(m) {
     case "game":
       S.gameRunning = m.running;
       S.runningGameId = m.id;
+      renderLibrary();
       break;
     case "toast":
       toast(m.message);
@@ -1751,6 +1823,12 @@ function handleHostMessage(m) {
 if (HOST) HOST.addEventListener("message", (e) => handleHostMessage(e.data));
 
 /* ============================== mock (browser preview only) ============================== */
+
+const mockWindows = [
+  { handle: 1, title: "Cyberpunk 2077", processName: "Cyberpunk2077", minimized: false, display: "" },
+  { handle: 2, title: "Steam", processName: "steam", minimized: false, display: "" },
+  { handle: 3, title: "Downloads - File Explorer", processName: "explorer", minimized: true, display: "" },
+];
 
 const mockCollections = [
   { id: "c1", name: "Cozy evenings", gameIds: ["gog:salttide", "manual:foundrynine"] },
@@ -1796,7 +1874,8 @@ function mockHandle(msg) {
       g("Wallpaper Engine", "Steam", { hidden: true, sizeBytes: 2 * 1024 ** 3 }),
     ];
     if (mockHandle._fav) games.forEach(x => { if (mockHandle._fav[x.id] !== undefined) x.favorite = mockHandle._fav[x.id]; });
-    if (mockHandle._hidden) games.forEach(x => { if (mockHandle._hidden[x.id] !== undefined) x.hidden = mockHandle._hidden[x.id]; });
+    if (mockHandle._running) { S.gameRunning = true; S.runningGameId = mockHandle._running; }
+  if (mockHandle._hidden) games.forEach(x => { if (mockHandle._hidden[x.id] !== undefined) x.hidden = mockHandle._hidden[x.id]; });
     handleHostMessage({
       type: "state",
       games,
@@ -1845,6 +1924,20 @@ function mockHandle(msg) {
     const i = mockCollections.findIndex(x => x.id === msg.id);
     if (i >= 0) mockCollections.splice(i, 1);
     pushState();
+  } else if (msg.cmd === "listWindows") {
+    handleHostMessage({ type: "windows", windows: mockWindows });
+  } else if (msg.cmd === "windowAction") {
+    toast("(preview) window " + msg.action);
+  } else if (msg.cmd === "shortcut") {
+    toast("(preview) shortcut " + msg.id);
+  } else if (msg.cmd === "power") {
+    toast("(preview) power " + msg.action);
+  } else if (msg.cmd === "closeOverlay" || msg.cmd === "resumeGame" || msg.cmd === "goHome") {
+    /* host-side window juggling; nothing to do in the browser preview */
+  } else if (msg.cmd === "closeGame") {
+    mockHandle._running = null;
+    handleHostMessage({ type: "game", running: false, id: null });
+    toast("(preview) game closed");
   } else if (msg.cmd === "rescan") {
     handleHostMessage({ type: "scanning", busy: true });
     setTimeout(() => handleHostMessage({ type: "scanning", busy: false }), 1500);

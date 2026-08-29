@@ -32,6 +32,21 @@
     </header>
 
     <div class="lib-body">
+      <section class="lib-section playing-section" id="playingSection" style="display:none">
+        <div class="section-head">
+          <div class="section-title">Playing</div>
+          <div class="section-label mono">RUNNING NOW</div>
+        </div>
+        <div class="playing-card" id="playingCard">
+          <div class="playing-art" id="playingArt"></div>
+          <div class="playing-info">
+            <div class="playing-name" id="playingName">—</div>
+            <div class="playing-meta mono" id="playingMeta"></div>
+            <div class="playing-hint"><span class="btn-badge btn-a">A</span><span>Resume</span><span class="btn-badge">Y</span><span>Options</span></div>
+          </div>
+        </div>
+      </section>
+
       <section class="lib-section" id="continueSection">
         <div class="section-head">
           <div class="section-title">Continue</div>
@@ -186,6 +201,37 @@
     </div>
   </div>
 
+  <!-- ============ RADIAL POWER MENU ============ -->
+  <div class="overlay" id="overlay-radial">
+    <div class="radial-wrap">
+      <div class="radial-title mono">POWER MENU</div>
+      <div class="radial" id="radialRing"></div>
+      <div class="radial-center">
+        <div class="radial-sel" id="radialSelName">—</div>
+        <div class="radial-target mono" id="radialTarget"></div>
+      </div>
+      <div class="ov-foot radial-foot" id="radialFoot"></div>
+    </div>
+  </div>
+
+  <!-- ============ RADIAL SUBMENU ============ -->
+  <div class="overlay" id="overlay-radialsub">
+    <div class="quick-card menu-card">
+      <div class="quick-title mono" id="radialSubTitle">MENU</div>
+      <div class="ov-scroll" id="radialSubList"></div>
+      <div class="ov-foot" id="radialSubFoot"></div>
+    </div>
+  </div>
+
+  <!-- ============ IN-GAME MENU ============ -->
+  <div class="overlay" id="overlay-ingame">
+    <div class="quick-card menu-card">
+      <div class="quick-title mono" id="ingameTitle">PLAYING</div>
+      <div class="ov-scroll" id="ingameList"></div>
+      <div class="ov-foot" id="ingameFoot"></div>
+    </div>
+  </div>
+
   <!-- ============ TEXT INPUT ============ -->
   <div class="overlay" id="overlay-input">
     <div class="quick-card">
@@ -208,5 +254,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="radial.js"></script>
 </body>
 </html>

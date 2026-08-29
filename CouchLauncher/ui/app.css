@@ -460,3 +460,68 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   padding: 30px 0;
 }
 .empty-note b { color: #F0A253; font-weight: 600; }
+
+/* ---- Playing section (shown while a game is running) ---- */
+.playing-card {
+  position: relative; display: flex; align-items: center; gap: 34px;
+  height: 210px; padding: 0 34px 0 0; border-radius: 18px; overflow: hidden;
+  background: #101012; border: 1px solid rgba(255,255,255,0.07);
+  transform-origin: center left;
+  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+}
+.playing-card.focused {
+  transform: scale(1.01);
+  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+}
+.playing-art {
+  width: 374px; height: 100%; flex: 0 0 auto;
+  background-color: #141417; background-size: cover; background-position: center;
+}
+.playing-info { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.playing-name { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
+.playing-meta { font-size: 17px; letter-spacing: 0.14em; color: #F0A253; }
+.playing-hint { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
+.playing-hint > span:not(.btn-badge) { font-size: 20px; color: rgba(246,245,243,0.7); margin-right: 14px; }
+.playing-hint .btn-badge { width: 34px; height: 34px; font-size: 17px; }
+/* ---- radial power menu ---- */
+.radial-wrap {
+  position: relative; width: 880px; height: 880px;
+  display: flex; align-items: center; justify-content: center;
+}
+.radial-title {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  font-size: 15px; letter-spacing: 0.18em; color: rgba(246,245,243,0.42);
+}
+.radial { position: absolute; inset: 0; }
+.radial-item {
+  position: absolute; width: 196px; height: 112px; margin: -56px 0 0 -98px;
+  border-radius: 16px; background: #101012;
+  border: 1px solid rgba(255,255,255,0.07);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+}
+.radial-item.focused {
+  background: #141417; transform: scale(1.06);
+  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+}
+.radial-item .ov-icon { width: 34px; height: 34px; }
+.radial-item.focused .ov-icon { color: #F0A253; }
+.radial-item span { font-size: 19px; font-weight: 500; color: rgba(246,245,243,0.82); }
+.radial-item.danger .ov-icon, .radial-item.danger span { color: #E97A6C; }
+
+.radial-center {
+  position: relative; width: 300px; text-align: center;
+  display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+}
+.radial-sel { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+.radial-target {
+  font-size: 16px; letter-spacing: 0.1em; color: rgba(246,245,243,0.42);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.radial-foot {
+  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  border-top: none; padding-top: 0; margin-top: 0; white-space: nowrap;
+}
+
+/* the radial needs more contrast than a list menu, since it floats over the whole screen */
+#overlay-radial { background: rgba(8,8,10,0.90); }

@@ -18,6 +18,9 @@ public partial class MainWindow : Window
     private readonly GameLaunchService _launcher;
     private readonly GamepadService _gamepad;
     private readonly CursorService _cursor;
+    private readonly WindowService _windows;
+    private bool _overlayWasMinimized;
+    private IntPtr _overlayTarget;
     private UiBridge? _bridge;
     private IntPtr _hwnd;
     private bool _suppressRefocus;
@@ -32,6 +35,7 @@ public partial class MainWindow : Window
 
         _keyboard = new VirtualKeyboardService(_settings);
         _cursor = new CursorService(_settings);
+        _windows = new WindowService(_displays);
         _launcher = new GameLaunchService(_displays, _settings, _library);
         _gamepad = new GamepadService(_settings,
             isLauncherForeground: () => NativeMethods.GetForegroundWindow() == _hwnd,
@@ -42,7 +46,8 @@ public partial class MainWindow : Window
         _gamepad.UiEvent += name => Dispatcher.BeginInvoke(() => _bridge?.PushPadEvent(name));
         _gamepad.ConnectedChanged += c => Dispatcher.BeginInvoke(() => _bridge?.PushPadConnected(c));
         _gamepad.KeyboardToggleRequested += () => Dispatcher.BeginInvoke(() => _keyboard.Toggle());
-        _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(ToggleMinimize);
+        _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(OnComboTap);
+        _gamepad.RadialRequested += () => Dispatcher.BeginInvoke(() => ShowOverlay("radial"));
         _gamepad.BatteryChanged += (type, level) => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(type, level));
         _gamepad.InputModeChanged += mode => Dispatcher.BeginInvoke(() =>
         {
@@ -59,6 +64,7 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         _hwnd = new WindowInteropHelper(this).Handle;
+        _windows.SetOwnWindow(_hwnd);
         PositionOnTargetDisplay();
         _gamepad.Start();
     }
@@ -103,7 +109,7 @@ public partial class MainWindow : Window
         core.SetVirtualHostNameToFolderMapping("couch.ui", uiDir, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("couch.data", Paths.DataDir, CoreWebView2HostResourceAccessKind.Allow);
 
-        _bridge = new UiBridge(this, core, _settings, _library, _displays, _scanner, _launcher, _keyboard);
+        _bridge = new UiBridge(this, core, _settings, _library, _displays, _scanner, _launcher, _keyboard, _windows);
         core.WebMessageReceived += _bridge.OnWebMessageReceived;
 
         core.Navigate("https://couch.ui/index.html");
@@ -149,7 +155,6 @@ public partial class MainWindow : Window
     /// <summary>Back+Start gamepad combo: park the launcher so the desktop is usable, and bring it back.</summary>
     public void ToggleMinimize()
     {
-        if (_launcher.GameRunning) return;
         if (WindowState == WindowState.Minimized)
         {
             WindowState = WindowState.Normal;
@@ -161,6 +166,62 @@ public partial class MainWindow : Window
         {
             WindowState = WindowState.Minimized;
         }
+    }
+
+    /// <summary>
+    /// Combo tapped. While a game is running this raises the in-game menu instead of minimizing,
+    /// so the pad can reach "close game" and "home" without touching a keyboard.
+    /// </summary>
+    private void OnComboTap()
+    {
+        if (_launcher.GameRunning) ShowOverlay("ingame");
+        else ToggleMinimize();
+    }
+
+    /// <summary>
+    /// Bring the launcher forward showing one of the overlay menus. The window the user was on is
+    /// captured first, because showing ourselves steals the foreground and the radial menu's
+    /// actions all apply to that window.
+    /// </summary>
+    public void ShowOverlay(string mode)
+    {
+        _overlayWasMinimized = WindowState == WindowState.Minimized;
+        var fg = NativeMethods.GetForegroundWindow();
+        if (fg != _hwnd) _overlayTarget = fg;
+
+        _suppressRefocus = false;
+        WindowState = WindowState.Normal;
+        PositionOnTargetDisplay();
+        Activate();
+        NativeMethods.SetForegroundWindow(_hwnd);
+
+        _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget));
+    }
+
+    /// <summary>Dismiss an overlay, putting the launcher back where it was.</summary>
+    public void CloseOverlay(bool refocusTarget)
+    {
+        bool goBack = _overlayWasMinimized || _launcher.GameRunning;
+        if (goBack)
+        {
+            _suppressRefocus = true;
+            Topmost = false;
+            WindowState = WindowState.Minimized;
+            if (refocusTarget && _overlayTarget != IntPtr.Zero) _windows.Focus(_overlayTarget);
+        }
+    }
+
+    /// <summary>The window the radial menu acts on (whatever was in front when it opened).</summary>
+    public IntPtr OverlayTarget => _overlayTarget;
+
+    /// <summary>Leave the game running and show the launcher properly (the "Home" action).</summary>
+    public void GoHome()
+    {
+        _suppressRefocus = false;
+        WindowState = WindowState.Normal;
+        PositionOnTargetDisplay();
+        Activate();
+        NativeMethods.SetForegroundWindow(_hwnd);
     }
 
     private async void OnDeactivated(object? sender, EventArgs e)
