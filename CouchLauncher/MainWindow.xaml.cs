@@ -10,7 +10,6 @@ namespace CouchLauncher;
 public partial class MainWindow : Window
 {
     private readonly bool _windowed;
-    private readonly bool _opaque;
     private readonly SettingsStore _settings = new();
     private readonly LibraryStore _library = new();
     private readonly DisplayService _displays = new();
@@ -27,20 +26,17 @@ public partial class MainWindow : Window
     private IntPtr _hwnd;
     private bool _suppressRefocus;
 
-    public MainWindow(bool windowed, bool opaque)
+    public MainWindow(bool windowed)
     {
         _windowed = windowed;
-        _opaque = opaque;
         InitializeComponent();
 
-        // A transparent window is what lets the radial menu dim the desktop or game behind it
-        // instead of the launcher covering it. WebView2 under WPF AllowsTransparency is known to
-        // render nothing on some driver/runtime combinations, so --opaque is the escape hatch.
-        if (!_opaque)
-        {
-            AllowsTransparency = true;
-            Background = System.Windows.Media.Brushes.Transparent;
-        }
+        // NOT AllowsTransparency. It made the radial menu float over the desktop, but WPF
+        // implements it as a layered window (WS_EX_LAYERED) and the hosted WebView2 then never
+        // receives mouse or wheel messages at all — no hover, no clicks, no scrolling, with only
+        // the gamepad's own bridge still working. Verified side by side against the same build:
+        // opaque highlights the tile under the pointer, layered does not. The overlay menus paint
+        // their own dark wash instead, which at the opacity they use looks near enough the same.
 
         _settings.Load();
         _library.Load();
@@ -118,7 +114,8 @@ public partial class MainWindow : Window
         await WebView.EnsureCoreWebView2Async(env);
 
         var core = WebView.CoreWebView2;
-        if (!_opaque) WebView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
+        // Match the page so there is never a flash of the WebView2 default white on startup.
+        WebView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x08, 0x08, 0x0A);
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsStatusBarEnabled = false;

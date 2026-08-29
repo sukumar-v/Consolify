@@ -29,7 +29,7 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        var window = new MainWindow(e.Args.Contains("--windowed"), e.Args.Contains("--opaque"));
+        var window = new MainWindow(e.Args.Contains("--windowed"));
         MainWindow = window;
         window.Show();
     }

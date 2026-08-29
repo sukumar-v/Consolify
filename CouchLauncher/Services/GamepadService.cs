@@ -59,7 +59,11 @@ public class GamepadService : IDisposable
     private const double MaxSpeedPxPerSec = 1400;
     private const double MaxScrollNotchesPerSec = 18;
     private const int RepeatDelayMs = 380, RepeatIntervalMs = 115;
-    private const int DoubleTapMs = 320;       // second combo tap within this window opens the radial
+    // Second combo tap within this window opens the radial. Measured from the first press, and
+    // the combo is two buttons (LS+RS by default), so the budget has to cover holding the first
+    // tap, releasing BOTH buttons, and pressing again. 320ms did not: most double taps missed,
+    // and the deferred single tap then opened the launcher instead.
+    private const int DoubleTapMs = 550;
     private const byte TriggerThreshold = 40;  // analog triggers count as "pressed" past this
 
     public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused)
@@ -221,7 +225,10 @@ public class GamepadService : IDisposable
                 comboLatched = false;
             }
 
-            if (pendingTap && lastComboTapAt >= 0 && now - lastComboTapAt > DoubleTapMs)
+            // Wait for the combo to be let go before acting on a single tap. Firing mid-hold
+            // meant that holding the buttons down past the window minimized the launcher under
+            // your thumbs, and it also stole the press that was meant to be the second tap.
+            if (pendingTap && !comboNow && lastComboTapAt >= 0 && now - lastComboTapAt > DoubleTapMs)
             {
                 pendingTap = false;
                 lastComboTapAt = -1;

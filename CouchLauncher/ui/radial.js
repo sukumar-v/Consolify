@@ -13,17 +13,21 @@ let ingameOpen = false, ingameIdx = 0;
 let overlayTargetTitle = "";
 let hostWindows = [];
 
-/* Switching to a window also drags it onto the TV, so there is no separate "move" spoke.
-   The first spoke is what the stick points at when the menu opens, so it must be a safe
-   one -- "Close window" sits last. */
+/* Spokes are laid out clockwise from the top, so with six of them the index IS the clock
+   position: 0 top, 1 top-right, 2 lower-right, 3 bottom, 4 lower-left, 5 top-left. */
 const RADIAL_ITEMS = [
-  { id: "windows",     label: "Switch window", icon: "folder" },
+  { id: "close",       label: "Close window",  icon: "trash", danger: true },  // top
+  { id: "windows",     label: "Switch window", icon: "folder" },               // top-right
   { id: "shortcuts",   label: "Shortcuts",     icon: "terminal" },
   { id: "keyboard",    label: "Keyboard",      icon: "file" },
   { id: "centerMouse", label: "Center mouse",  icon: "info" },
-  { id: "suspend",     label: "Suspend",       icon: "eyeOff" },
-  { id: "close",       label: "Close window",  icon: "trash", danger: true },
+  { id: "sleep",       label: "Sleep",         icon: "eyeOff" },               // top-left
 ];
+
+/* Where the highlight sits before the stick has been pushed anywhere. Deliberately NOT spoke
+   0: that one closes a window, and A on a menu you have only just opened should not be able
+   to destroy something by default. */
+const RADIAL_HOME = 1;
 
 const SHORTCUTS = [
   { id: "taskManager",     label: "Task Manager",     icon: "terminal" },
@@ -31,7 +35,7 @@ const SHORTCUTS = [
   { id: "settings",        label: "Windows Settings", icon: "store" },
   { id: "displaySettings", label: "Display Settings", icon: "gamepad" },
   { id: "volume",          label: "Volume Mixer",     icon: "chevronsUp" },
-  // Distinct from Suspend, which only blanks the screen: this hands the session to the Windows
+  // Distinct from Sleep, which only blanks the screen: this hands the session to the Windows
   // lock screen, which the pad cannot drive at all.
   { id: "lock",            label: "Lock PC",          icon: "eyeOff" },
 ];
@@ -48,7 +52,7 @@ function closeAllMenus() {
 /* ============================== radial ============================== */
 
 function openRadial(targetTitle) {
-  radialOpen = true; radialIdx = 0; radialSub = null;
+  radialOpen = true; radialIdx = RADIAL_HOME; radialSub = null;
   overlayTargetTitle = targetTitle || "";
   setOverlayMode(true);
   closeAllMenus();
@@ -94,7 +98,7 @@ function radialActivate() {
     case "close":     send({ cmd: "windowAction", action: "close" });    closeRadial(false); break;
     case "keyboard":  send({ cmd: "toggleKeyboard" });                   closeRadial(true);  break;
     // Blanks the TV and parks the pad; any button brings it back, so it needs no confirm step.
-    case "suspend":   send({ cmd: "suspend" });                          closeRadial(false); break;
+    case "sleep":     send({ cmd: "suspend" });                          closeRadial(false); break;
     case "centerMouse":
       // host re-centres the pointer and closes the overlay; do not refocus the old window
       send({ cmd: "centerMouse" });
@@ -190,7 +194,7 @@ function ingameItems() {
       action: () => { hideIngame(); send({ cmd: "resumeGame" }); } },
     { label: "Home", icon: "folder", sub: "Leave it running and open the library",
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
-    { label: "Windows menu", icon: "store", sub: "Switch windows, keyboard, suspend",
+    { label: "Windows menu", icon: "store", sub: "Switch windows, keyboard, sleep",
       action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
     // No confirm step: drop the overlay and land back on the library. Leaving the transparent
     // overlay window up over a closing game looks like nothing happened at all.

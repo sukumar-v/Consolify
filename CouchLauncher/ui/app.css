@@ -500,10 +500,16 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
 }
+/* Known cosmetic artifact: against the near-black menu WebView2 rasterizes this glow with a
+   faint 1px rim at the blur's outer bound. It tracks the blur radius and survives removing the
+   scale, so it is the shadow's own raster edge, not the compositing layer -- both were tried.
+   The same glow on the grid tiles is invisible because it sits over lit artwork. Left at the
+   design's values rather than distorting the focus treatment to chase it. */
 .radial-item.focused {
   background: #141417; transform: scale(1.06);
   box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
 }
+
 .radial-item .ov-icon { width: 34px; height: 34px; }
 .radial-item.focused .ov-icon { color: #F0A253; }
 .radial-item span { font-size: 19px; font-weight: 500; color: rgba(246,245,243,0.82); }
@@ -529,16 +535,12 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 /* ---- overlay mode: the launcher floats over whatever is behind it ----
    The WPF window is AllowsTransparency, so a transparent body lets the desktop or game show
    through; only the menu and its dim wash are painted. */
-/* The root element paints too, so BOTH html and body must go transparent or the window
-   shows an opaque black rectangle instead of the desktop behind it. */
-html.overlay-mode, body.overlay-mode { background: transparent; cursor: none; }
+/* The window itself is opaque -- see the note in MainWindow: a transparent (layered) WPF
+   window costs the WebView2 every mouse and wheel message. So overlay mode paints its own
+   solid ground rather than letting the desktop through, and only hides the library behind it. */
+html.overlay-mode, body.overlay-mode { background: #08080A; cursor: none; }
 body.overlay-mode #backdrop { display: none; }
 body.overlay-mode .screen { display: none !important; }
-/* Translucent, not clear: a bright desktop or game frame behind the menu washed out the
-   cards enough that the spokes were hard to read. Enough shows through to say "this is
-   floating over something", nothing more. */
-body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.93); }
-body.overlay-mode .overlay { background: rgba(8,8,10,0.93); }
 body.overlay-mode * { cursor: none !important; }
 
 /* Inline warning inside a settings row, so the row grows instead of spawning a second one */
