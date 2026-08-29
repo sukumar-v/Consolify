@@ -329,7 +329,7 @@ public class GamepadService : IDisposable
                         // Moving the stick brings the pointer back.
                         SetInputMode("pointer");
                         NativeMethods.GetCursorPos(out var p);
-                        NativeMethods.SetCursorPos(p.X + dx, p.Y + dy);
+                        NativeMethods.MoveCursorTo(p.X + dx, p.Y + dy);
                     }
                 }
                 else { fracX = 0; fracY = 0; }

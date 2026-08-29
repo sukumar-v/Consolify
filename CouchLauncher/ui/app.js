@@ -118,8 +118,20 @@ function repaintFocus() {
 }
 
 window.addEventListener("mousemove", (e) => {
+  const wasPad = inputMode === "pad";
   setInputMode("pointer");
   setPointerOnItem(!!(e.target instanceof Element && e.target.closest(FOCUSABLE_SEL)));
+
+  // Boundary events fire before the mousemove that caused them, so the mouseenter for the item
+  // the pointer just arrived on ran while hover was still disabled and its handler ignored it.
+  // Nothing would highlight until the pointer left the item and came back. Replay it against
+  // whatever is under the cursor now — re-queried, because switching modes repaints and the
+  // node from the event may already be detached.
+  if (wasPad) {
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const item = under && under.closest(FOCUSABLE_SEL);
+    if (item) item.dispatchEvent(new MouseEvent("mouseenter"));
+  }
 });
 
 // A click on an item always counts as being on it, even without a preceding move.
@@ -1468,13 +1480,7 @@ function gameMenuItems() {
     items.unshift({ label: "Resume game", icon: "info", sub: "Back to the running game",
       action: () => { closeGameMenu(); send({ cmd: "resumeGame" }); } });
     items.push({ label: "Close game", icon: "trash", danger: true,
-      action: () => {
-        closeGameMenu();
-        confirmState = { title: "CLOSE THE GAME?", yesLabel: "Yes, close it",
-                         onYes: () => send({ cmd: "closeGame" }) };
-        renderConfirm();
-        $("overlay-confirm").classList.add("active");
-      } });
+      action: () => { closeGameMenu(); send({ cmd: "closeGame" }); } });
   }
   if (g.manual) items.push({
     label: "Remove from library", icon: "trash", danger: true,

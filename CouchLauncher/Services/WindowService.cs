@@ -116,7 +116,7 @@ public class WindowService
     {
         var d = _displays.GetDisplay(deviceName) ?? _displays.GetDisplays().FirstOrDefault(x => x.IsPrimary);
         if (d is null) return;
-        NativeMethods.SetCursorPos(d.X + d.Width / 2, d.Y + d.Height / 2);
+        NativeMethods.MoveCursorTo(d.X + d.Width / 2, d.Y + d.Height / 2);
         Log.Info($"Radial: centred cursor on {d.DeviceName}");
     }
 

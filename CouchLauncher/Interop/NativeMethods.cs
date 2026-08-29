@@ -218,6 +218,14 @@ internal static class NativeMethods
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
     public const uint MOUSEEVENTF_HWHEEL = 0x1000;
+    public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int index);
+
+    public const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77;
+    public const int SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct MOUSEINPUT
@@ -240,6 +248,42 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    /// <summary>
+    /// Put the pointer at an absolute screen position as *injected mouse input*, not with
+    /// SetCursorPos. SetCursorPos only relocates the cursor; applications are not reliably told
+    /// it moved, and WebView2 in particular fired no DOM mousemove for it — so the stick pushed
+    /// a pointer around the launcher that never highlighted anything it passed over. SendInput
+    /// goes in at the driver level, so the move is indistinguishable from a real mouse.
+    /// Absolute coordinates (rather than a relative delta) keep the pointer exactly where the
+    /// caller asked, unaffected by the user's pointer-speed and acceleration settings.
+    /// </summary>
+    public static void MoveCursorTo(int x, int y)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if (vw <= 1 || vh <= 1) { SetCursorPos(x, y); return; }
+
+        // The absolute range is 0..65535 across the whole virtual desktop, and the mapping
+        // truncates, so aim at the middle of the target pixel to avoid drifting a pixel short.
+        int nx = (int)(((x - vx) * 65535.0 + 32767.0) / (vw - 1));
+        int ny = (int)(((y - vy) * 65535.0 + 32767.0) / (vh - 1));
+
+        var input = new[]
+        {
+            new INPUT
+            {
+                type = INPUT_MOUSE,
+                mi = new MOUSEINPUT
+                {
+                    dx = Math.Clamp(nx, 0, 65535),
+                    dy = Math.Clamp(ny, 0, 65535),
+                    dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                },
+            },
+        };
+        SendInput(1, input, Marshal.SizeOf<INPUT>());
+    }
 
     // ---- XInput ----
 

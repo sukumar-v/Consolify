@@ -4,7 +4,7 @@
  * Radial power menu and in-game menu.
  *
  * Loaded after app.js and shares its globals ($, send, esc, iconSvg, foot, renderMenu,
- * focusVisible, hoverEnabled, confirmState, renderConfirm, switchView, gameById, S).
+ * focusVisible, hoverEnabled, setOverlayMode, switchView, gameById, S).
  */
 
 let radialOpen = false, radialIdx = 0;
@@ -93,17 +93,8 @@ function radialActivate() {
   switch (it.id) {
     case "close":     send({ cmd: "windowAction", action: "close" });    closeRadial(false); break;
     case "keyboard":  send({ cmd: "toggleKeyboard" });                   closeRadial(true);  break;
-    case "suspend":
-      // Blanks the TV and parks the pad; any button brings it back. Confirmed anyway, because
-      // a screen that goes black on a stray flick of the stick reads as a crash.
-      confirmState = {
-        title: "SUSPEND THIS PC?",
-        yesLabel: "Yes, suspend",
-        onYes: () => { send({ cmd: "suspend" }); closeRadial(false); },
-      };
-      renderConfirm();
-      $("overlay-confirm").classList.add("active");
-      break;
+    // Blanks the TV and parks the pad; any button brings it back, so it needs no confirm step.
+    case "suspend":   send({ cmd: "suspend" });                          closeRadial(false); break;
     case "centerMouse":
       // host re-centres the pointer and closes the overlay; do not refocus the old window
       send({ cmd: "centerMouse" });
@@ -201,18 +192,10 @@ function ingameItems() {
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
     { label: "Windows menu", icon: "store", sub: "Switch windows, keyboard, suspend",
       action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
+    // No confirm step: drop the overlay and land back on the library. Leaving the transparent
+    // overlay window up over a closing game looks like nothing happened at all.
     { label: "Close game", icon: "trash", danger: true,
-      action: () => {
-        confirmState = {
-          title: "CLOSE THE GAME?",
-          yesLabel: "Yes, close it",
-          // Drop the overlay and land back on the library. Leaving the transparent overlay
-          // window up over a closing game looks like nothing happened at all.
-          onYes: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "closeGame" }); },
-        };
-        renderConfirm();
-        $("overlay-confirm").classList.add("active");
-      } },
+      action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "closeGame" }); } },
   ];
 }
 
