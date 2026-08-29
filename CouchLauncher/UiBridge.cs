@@ -163,6 +163,10 @@ public class UiBridge
                 _window.CloseOverlay(msg["refocus"]?.GetValue<bool>() ?? true);
                 break;
 
+            case "setRadialActive":
+                _window.SetRadialActive(msg["active"]?.GetValue<bool>() ?? false);
+                break;
+
             case "goHome":
                 _window.GoHome();
                 break;
@@ -470,6 +474,8 @@ public class UiBridge
             displays = _displays.GetDisplays(),
             runningGameId = _launcher.RunningGameId
         });
+
+    public void PushStick(double x, double y) => Push(new { type = "stick", x, y });
 
     public void PushInputMode(string mode) => Push(new { type = "inputMode", mode });
 

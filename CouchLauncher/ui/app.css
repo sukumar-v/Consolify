@@ -237,7 +237,7 @@ html, body {
 }
 .set-row {
   position: relative;
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 40px;
   min-height: 84px; padding: 0 36px; border-radius: 14px;
   background: #101012; border: 1px solid rgba(255,255,255,0.07);
   flex: 0 0 auto;
@@ -249,8 +249,8 @@ html, body {
 }
 .set-name { font-size: 24px; font-weight: 500; }
 .set-hint { font-size: 17px; color: rgba(246,245,243,0.42); margin-top: 3px; }
-.set-left { display: flex; flex-direction: column; padding: 16px 0; }
-.set-value { display: flex; align-items: center; gap: 22px; font-size: 24px; color: rgba(246,245,243,0.85); }
+.set-left { display: flex; flex-direction: column; padding: 18px 0; min-width: 0; }
+.set-value { display: flex; align-items: center; gap: 22px; font-size: 24px; color: rgba(246,245,243,0.85); flex: 0 0 auto; }
 .set-value .arrow { color: rgba(246,245,243,0.35); font-size: 20px; }
 .set-row.focused .set-value .arrow { color: #F0A253; }
 .set-toggle-on { color: #F0A253; font-weight: 600; }
@@ -525,3 +525,22 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 
 /* the radial needs more contrast than a list menu, since it floats over the whole screen */
 #overlay-radial { background: rgba(8,8,10,0.90); }
+
+/* ---- overlay mode: the launcher floats over whatever is behind it ----
+   The WPF window is AllowsTransparency, so a transparent body lets the desktop or game show
+   through; only the menu and its dim wash are painted. */
+body.overlay-mode { background: transparent; cursor: none; }
+body.overlay-mode #backdrop { display: none; }
+body.overlay-mode .screen { display: none !important; }
+body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.62); }
+body.overlay-mode .overlay { background: rgba(8,8,10,0.62); }
+body.overlay-mode * { cursor: none !important; }
+
+/* Inline warning inside a settings row, so the row grows instead of spawning a second one */
+.set-warn {
+  margin-top: 12px; padding: 14px 18px;
+  border-left: 3px solid #E97A6C; border-radius: 6px;
+  background: rgba(233,122,108,0.08);
+  font-size: 17px; line-height: 1.55; color: rgba(246,245,243,0.72);
+  max-width: 1180px; white-space: normal;
+}

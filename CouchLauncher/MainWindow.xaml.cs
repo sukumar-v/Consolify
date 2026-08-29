@@ -10,6 +10,7 @@ namespace CouchLauncher;
 public partial class MainWindow : Window
 {
     private readonly bool _windowed;
+    private readonly bool _opaque;
     private readonly SettingsStore _settings = new();
     private readonly LibraryStore _library = new();
     private readonly DisplayService _displays = new();
@@ -25,10 +26,20 @@ public partial class MainWindow : Window
     private IntPtr _hwnd;
     private bool _suppressRefocus;
 
-    public MainWindow(bool windowed)
+    public MainWindow(bool windowed, bool opaque)
     {
         _windowed = windowed;
+        _opaque = opaque;
         InitializeComponent();
+
+        // A transparent window is what lets the radial menu dim the desktop or game behind it
+        // instead of the launcher covering it. WebView2 under WPF AllowsTransparency is known to
+        // render nothing on some driver/runtime combinations, so --opaque is the escape hatch.
+        if (!_opaque)
+        {
+            AllowsTransparency = true;
+            Background = System.Windows.Media.Brushes.Transparent;
+        }
 
         _settings.Load();
         _library.Load();
@@ -47,7 +58,8 @@ public partial class MainWindow : Window
         _gamepad.ConnectedChanged += c => Dispatcher.BeginInvoke(() => _bridge?.PushPadConnected(c));
         _gamepad.KeyboardToggleRequested += () => Dispatcher.BeginInvoke(() => _keyboard.Toggle());
         _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(OnComboTap);
-        _gamepad.RadialRequested += () => Dispatcher.BeginInvoke(() => ShowOverlay("radial"));
+        _gamepad.RadialRequested += () => Dispatcher.BeginInvoke(() => _ = ShowOverlay("radial"));
+        _gamepad.StickDirection += (x, y) => Dispatcher.BeginInvoke(() => _bridge?.PushStick(x, y));
         _gamepad.BatteryChanged += (type, level) => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(type, level));
         _gamepad.InputModeChanged += mode => Dispatcher.BeginInvoke(() =>
         {
@@ -98,6 +110,7 @@ public partial class MainWindow : Window
         await WebView.EnsureCoreWebView2Async(env);
 
         var core = WebView.CoreWebView2;
+        if (!_opaque) WebView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
@@ -174,7 +187,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnComboTap()
     {
-        if (_launcher.GameRunning) ShowOverlay("ingame");
+        if (_launcher.GameRunning) _ = ShowOverlay("ingame");
         else ToggleMinimize();
     }
 
@@ -183,24 +196,30 @@ public partial class MainWindow : Window
     /// captured first, because showing ourselves steals the foreground and the radial menu's
     /// actions all apply to that window.
     /// </summary>
-    public void ShowOverlay(string mode)
+    public async Task ShowOverlay(string mode)
     {
         _overlayWasMinimized = WindowState == WindowState.Minimized;
         var fg = NativeMethods.GetForegroundWindow();
         if (fg != _hwnd) _overlayTarget = fg;
 
+        // Tell the UI to go transparent-overlay FIRST. Script keeps running while the window is
+        // minimized, so by the time we show it the library is already hidden and only the menu
+        // is painted -- otherwise the launcher flashes up before the overlay appears.
+        _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget));
+        await Task.Delay(90);
+
+        _gamepad.RadialActive = mode == "radial";
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
         PositionOnTargetDisplay();
         Activate();
         NativeMethods.SetForegroundWindow(_hwnd);
-
-        _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget));
     }
 
     /// <summary>Dismiss an overlay, putting the launcher back where it was.</summary>
     public void CloseOverlay(bool refocusTarget)
     {
+        _gamepad.RadialActive = false;
         bool goBack = _overlayWasMinimized || _launcher.GameRunning;
         if (goBack)
         {
@@ -210,6 +229,9 @@ public partial class MainWindow : Window
             if (refocusTarget && _overlayTarget != IntPtr.Zero) _windows.Focus(_overlayTarget);
         }
     }
+
+    /// <summary>Radial opened from the in-game menu and back again.</summary>
+    public void SetRadialActive(bool active) => _gamepad.RadialActive = active;
 
     /// <summary>The window the radial menu acts on (whatever was in front when it opened).</summary>
     public IntPtr OverlayTarget => _overlayTarget;

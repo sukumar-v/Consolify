@@ -38,6 +38,11 @@ public class GamepadService : IDisposable
     /// <summary>type: 0 none/wired, 2 alkaline, 3 NiMH; level: 0 empty .. 3 full.</summary>
     public event Action<byte, byte>? BatteryChanged;
     public event Action<bool>? ConnectedChanged;
+    /// <summary>Left-stick direction while the radial menu is up (x right, y up, normalized).</summary>
+    public event Action<double, double>? StickDirection;
+
+    /// <summary>While set, the stick points at radial spokes instead of moving the cursor.</summary>
+    public volatile bool RadialActive;
 
     public bool Connected { get; private set; }
 
@@ -73,7 +78,7 @@ public class GamepadService : IDisposable
         long comboDownAt = -1;
         var sw = Stopwatch.StartNew();
         long lastTick = sw.ElapsedMilliseconds;
-        long nextBatteryPoll = 0;
+        long nextBatteryPoll = 0, nextStickPush = 0;
         var lastBattery = (type: (byte)255, level: (byte)255);
         int missCount = 0;
         string inputMode = "pointer";
@@ -130,15 +135,10 @@ public class GamepadService : IDisposable
             ushort pressed = (ushort)(buttons & ~prevButtons);
             ushort released = (ushort)(prevButtons & ~buttons);
 
-            if (!serviceActive)
-            {
-                prevButtons = buttons;
-                if (leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
-                if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
-                continue;
-            }
-
-            // ---- minimize / radial combo: tap = minimize or in-game menu, hold = radial ----
+            // ---- menu combo ----
+            // Evaluated BEFORE the serviceActive gate below: inside a focused game the rest of
+            // the pad is deliberately silent, but this combo is the only way back out, so it has
+            // to keep working there.
             bool comboNow = ComboPressed(state.Gamepad, s.MinimizeCombo);
             if (comboNow && !comboLatched)
             {
@@ -156,6 +156,13 @@ public class GamepadService : IDisposable
             {
                 comboLatched = false;
                 if (!comboFired) MinimizeToggleRequested?.Invoke();
+            }
+            if (!serviceActive)
+            {
+                prevButtons = buttons;
+                if (leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
+                if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
+                continue;
             }
 
             // ---- keyboard toggle chord (hold) ----
@@ -220,8 +227,20 @@ public class GamepadService : IDisposable
                 }
             }
 
-            // ---- left stick -> cursor (both in launcher and on desktop) ----
-            if (s.GamepadMouseEnabled)
+            // ---- left stick ----
+            if (RadialActive)
+            {
+                // The radial owns the stick: it points at a spoke instead of dragging the
+                // pointer around, and the cursor is hidden while it is up.
+                double rnx = state.Gamepad.sThumbLX / 32767.0;
+                double rny = state.Gamepad.sThumbLY / 32767.0;
+                if (Math.Sqrt(rnx * rnx + rny * rny) > 0.55 && now >= nextStickPush)
+                {
+                    nextStickPush = now + 60;
+                    StickDirection?.Invoke(rnx, rny);
+                }
+            }
+            else if (s.GamepadMouseEnabled)
             {
                 double nx = state.Gamepad.sThumbLX / 32767.0;
                 double ny = state.Gamepad.sThumbLY / 32767.0;

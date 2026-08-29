@@ -8,6 +8,6 @@
         ShowInTaskbar="False"
         Background="#08080A">
     <Grid>
-        <wv2:WebView2 x:Name="WebView" DefaultBackgroundColor="#FF08080A"/>
+        <wv2:WebView2 x:Name="WebView"/>
     </Grid>
 </Window>

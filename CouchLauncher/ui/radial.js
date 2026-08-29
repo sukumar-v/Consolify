@@ -54,6 +54,7 @@ function closeAllMenus() {
 function openRadial(targetTitle) {
   radialOpen = true; radialIdx = 0; radialSub = null;
   overlayTargetTitle = targetTitle || "";
+  setOverlayMode(true);
   closeAllMenus();
   renderRadial();
   $("overlay-radial").classList.add("active");
@@ -63,6 +64,7 @@ function closeRadial(refocus) {
   radialOpen = false; radialSub = null;
   $("overlay-radial").classList.remove("active");
   $("overlay-radialsub").classList.remove("active");
+  setOverlayMode(false);
   send({ cmd: "closeOverlay", refocus: refocus !== false });
 }
 
@@ -181,6 +183,7 @@ function radialSubInput(btn) {
 
 function openIngame() {
   ingameOpen = true; ingameIdx = 0;
+  setOverlayMode(true);
   closeAllMenus();
   renderIngame();
   $("overlay-ingame").classList.add("active");
@@ -189,6 +192,7 @@ function openIngame() {
 function hideIngame() {
   ingameOpen = false;
   $("overlay-ingame").classList.remove("active");
+  setOverlayMode(false);
 }
 
 function ingameItems() {
@@ -197,9 +201,9 @@ function ingameItems() {
     { label: "Resume game", icon: "info", sub: "Back to what you were playing",
       action: () => { hideIngame(); send({ cmd: "resumeGame" }); } },
     { label: "Home", icon: "folder", sub: "Leave it running and open the library",
-      action: () => { hideIngame(); switchView("library"); send({ cmd: "goHome" }); } },
+      action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
     { label: "Power menu", icon: "store",
-      action: () => { hideIngame(); openRadial(g ? g.title : ""); } },
+      action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
     { label: "Close game", icon: "trash", danger: true,
       action: () => {
         confirmState = {

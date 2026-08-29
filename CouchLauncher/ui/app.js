@@ -1154,18 +1154,22 @@ function settingsRows() {
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
   rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Couch Launcher exits",
     () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
+  const comboWarn =
+    s.minimizeCombo === "Guide" ?
+      "Windows and Steam both grab this button. Disable BOTH: (1) Windows — Settings > Gaming > " +
+      "Xbox Game Bar, turn off \u201COpen Xbox Game Bar using this button on a controller\u201D. " +
+      "(2) Steam — Settings > Controller > uncheck \u201CEnable Steam Input\u201D for the pad, or in " +
+      "Big Picture go to Settings > Controller > Guide Button Chord Layout and clear it. Steam must " +
+      "be fully restarted afterwards."
+    : s.minimizeCombo === "View + Menu" ?
+      "Steam binds View + Menu (Back + Start) to open Big Picture. Disable it in Steam: Settings > " +
+      "Controller > Guide Button Chord Layout, or turn off Steam Input for this controller. Restart " +
+      "Steam afterwards."
+    : null;
+
   rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
-    "Tap to minimize or restore the launcher (in-game menu while a game runs); hold to open the power menu"));
-  if (s.minimizeCombo === "Guide") rows.push({
-    name: "Disable Steam's Guide shortcut", danger: true,
-    hint: "Steam grabs the Guide button by default and will open Big Picture over this menu. In Steam go to Settings, then Controller, and turn off the Guide button chord / Steam button shortcuts",
-    type: "static", value: "ACTION NEEDED",
-  });
-  if (s.minimizeCombo === "View + Menu") rows.push({
-    name: "View + Menu collides with Steam", danger: true,
-    hint: "Steam binds View + Menu (Back + Start) to Big Picture. Pick another combo or unbind it in Steam",
-    type: "static", value: "ACTION NEEDED",
-  });
+    "Tap to minimize or restore the launcher (in-game menu while a game runs); hold to open the power menu",
+    comboWarn));
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
@@ -1223,9 +1227,9 @@ function sliderRow(name, get, min, max, step, setV, fmt) {
   };
 }
 
-function cycleRow(name, options, get, setV, hint) {
+function cycleRow(name, options, get, setV, hint, warn) {
   return {
-    name, hint, type: "select", value: get(),
+    name, hint, warn, type: "select", value: get(),
     adjust: (dir) => {
       const i = (options.indexOf(get()) + dir + options.length) % options.length;
       setV(options[i]);
@@ -1271,7 +1275,7 @@ function renderSettings() {
       right = `<span class="mono" style="font-size:18px;letter-spacing:0.1em;color:rgba(246,245,243,0.6)">${esc(r.value)}</span>`;
     }
 
-    el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}</div><div class="set-value">${right}</div>`;
+    el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${esc(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
 
     el.addEventListener("mouseenter", () => { if (hoverEnabled() && settingsIdx !== idx) { settingsIdx = idx; renderSettings(); } });
     el.addEventListener("click", () => { settingsIdx = idx; const row = settingsRows().filter(x => !x.section)[idx]; if (row.action) row.action(); else if (row.adjust) row.adjust(1); });
@@ -1676,6 +1680,19 @@ function wolInput(btn) {
   }
 }
 
+/* ---- overlay mode: transparent window floating over the desktop or a game ---- */
+function setOverlayMode(on) {
+  document.body.classList.toggle("overlay-mode", on);
+  if (on) setInputMode("pad");   // the pointer has no business here
+}
+
+/** Nearest radial spoke for a stick vector (y is up from the pad, down in screen space). */
+function stickToSpoke(x, y, count) {
+  const ang = Math.atan2(-y, x) * 180 / Math.PI;      // screen-space degrees
+  const step = 360 / count;
+  return ((Math.round((ang + 90) / step) % count) + count) % count;
+}
+
 /* ============================== view switching ============================== */
 
 function switchView(v) {
@@ -1784,6 +1801,7 @@ function handleHostMessage(m) {
       break;
     case "overlay":
       overlayTargetTitle = m.targetTitle || "";
+      setOverlayMode(true);
       hostWindows = m.windows || [];
       if (m.runningGameId !== undefined) S.runningGameId = m.runningGameId;
       if (m.mode === "radial") openRadial(m.targetTitle);
@@ -1792,6 +1810,12 @@ function handleHostMessage(m) {
     case "windows":
       hostWindows = m.windows || [];
       if (radialSub === "windows") renderRadialSub();
+      break;
+    case "stick":
+      if (radialOpen && !radialSub) {
+        const i = stickToSpoke(m.x, m.y, RADIAL_ITEMS.length);
+        if (i !== radialIdx) { radialIdx = i; renderRadial(); }
+      }
       break;
     case "inputMode":
       // Only the host can tell us the stick moved the cursor. Pad mode is decided locally,
