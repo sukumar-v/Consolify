@@ -21,6 +21,7 @@ const RADIAL_ITEMS = [
   { id: "windows",   label: "Switch window", icon: "folder" },
   { id: "shortcuts", label: "Shortcuts",     icon: "terminal" },
   { id: "keyboard",  label: "Keyboard",      icon: "file" },
+  { id: "centerMouse", label: "Center mouse", icon: "info" },
   { id: "power",     label: "Power",         icon: "store", danger: true },
 ];
 
@@ -100,6 +101,15 @@ function radialActivate() {
     case "moveTv":    send({ cmd: "windowAction", action: "moveToTv" }); closeRadial(true);  break;
     case "moveNext":  send({ cmd: "windowAction", action: "moveNext" }); closeRadial(true);  break;
     case "keyboard":  send({ cmd: "toggleKeyboard" });                   closeRadial(true);  break;
+    case "centerMouse":
+      // host re-centres the pointer and closes the overlay; do not refocus the old window
+      send({ cmd: "centerMouse" });
+      radialOpen = false; radialSub = null;
+      $("overlay-radial").classList.remove("active");
+      $("overlay-radialsub").classList.remove("active");
+      setOverlayMode(false);
+      setInputMode("pointer");
+      break;
     case "windows":   openRadialSub("windows"); break;
     case "shortcuts": openRadialSub("shortcuts"); break;
     case "power":     openRadialSub("power"); break;
@@ -236,4 +246,12 @@ function ingameInput(btn) {
     case "A": if (focusVisible() && items[ingameIdx]) items[ingameIdx].action(); break;
     case "B": hideIngame(); send({ cmd: "resumeGame" }); break;
   }
+}
+/** Host asked us to tear down any overlay menu (e.g. the combo was tapped while one was open). */
+function dismissOverlays() {
+  radialOpen = false; radialSub = null; ingameOpen = false;
+  ["overlay-radial", "overlay-radialsub", "overlay-ingame"]
+    .forEach(id => $(id).classList.remove("active"));
+  closeAllMenus();
+  setOverlayMode(false);
 }

@@ -49,7 +49,7 @@ public class GamepadService : IDisposable
     private const double MaxSpeedPxPerSec = 1400;
     private const double MaxScrollNotchesPerSec = 18;
     private const int RepeatDelayMs = 380, RepeatIntervalMs = 115;
-    private const int RadialHoldMs = 450;      // combo held this long opens the radial menu
+    private const int DoubleTapMs = 320;       // second combo tap within this window opens the radial
     private const byte TriggerThreshold = 40;  // analog triggers count as "pressed" past this
 
     public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused)
@@ -74,8 +74,8 @@ public class GamepadService : IDisposable
         double fracX = 0, fracY = 0, scrollAccum = 0, hScrollAccum = 0;
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
-        bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, comboFired = false;
-        long comboDownAt = -1;
+        bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, pendingTap = false;
+        long lastComboTapAt = -1;
         var sw = Stopwatch.StartNew();
         long lastTick = sw.ElapsedMilliseconds;
         long nextBatteryPoll = 0, nextStickPush = 0;
@@ -139,23 +139,38 @@ public class GamepadService : IDisposable
             // Evaluated BEFORE the serviceActive gate below: inside a focused game the rest of
             // the pad is deliberately silent, but this combo is the only way back out, so it has
             // to keep working there.
+            //
+            // Tap = minimize/restore (or the in-game menu), double tap = power menu. The single
+            // tap is held back until the double-tap window closes, otherwise a quick double tap
+            // would minimize and restore the launcher on the way to opening the radial.
             bool comboNow = ComboPressed(state.Gamepad, s.MinimizeCombo);
             if (comboNow && !comboLatched)
             {
                 comboLatched = true;
-                comboDownAt = now;
-                comboFired = false;
                 toggleDownAt = -1; toggleFired = true;   // swallow any keyboard chord inside the combo
+
+                if (lastComboTapAt >= 0 && now - lastComboTapAt <= DoubleTapMs)
+                {
+                    lastComboTapAt = -1;
+                    pendingTap = false;
+                    RadialRequested?.Invoke();
+                }
+                else
+                {
+                    lastComboTapAt = now;
+                    pendingTap = true;
+                }
             }
-            if (comboNow && !comboFired && now - comboDownAt >= RadialHoldMs)
-            {
-                comboFired = true;
-                RadialRequested?.Invoke();
-            }
-            if (!comboNow && comboLatched)
+            else if (!comboNow)
             {
                 comboLatched = false;
-                if (!comboFired) MinimizeToggleRequested?.Invoke();
+            }
+
+            if (pendingTap && lastComboTapAt >= 0 && now - lastComboTapAt > DoubleTapMs)
+            {
+                pendingTap = false;
+                lastComboTapAt = -1;
+                MinimizeToggleRequested?.Invoke();
             }
             if (!serviceActive)
             {

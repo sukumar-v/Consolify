@@ -1682,6 +1682,7 @@ function wolInput(btn) {
 
 /* ---- overlay mode: transparent window floating over the desktop or a game ---- */
 function setOverlayMode(on) {
+  document.documentElement.classList.toggle("overlay-mode", on);
   document.body.classList.toggle("overlay-mode", on);
   if (on) setInputMode("pad");   // the pointer has no business here
 }
@@ -1810,6 +1811,9 @@ function handleHostMessage(m) {
     case "windows":
       hostWindows = m.windows || [];
       if (radialSub === "windows") renderRadialSub();
+      break;
+    case "dismiss":
+      dismissOverlays();
       break;
     case "stick":
       if (radialOpen && !radialSub) {

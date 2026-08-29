@@ -529,7 +529,9 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 /* ---- overlay mode: the launcher floats over whatever is behind it ----
    The WPF window is AllowsTransparency, so a transparent body lets the desktop or game show
    through; only the menu and its dim wash are painted. */
-body.overlay-mode { background: transparent; cursor: none; }
+/* The root element paints too, so BOTH html and body must go transparent or the window
+   shows an opaque black rectangle instead of the desktop behind it. */
+html.overlay-mode, body.overlay-mode { background: transparent; cursor: none; }
 body.overlay-mode #backdrop { display: none; }
 body.overlay-mode .screen { display: none !important; }
 body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.62); }

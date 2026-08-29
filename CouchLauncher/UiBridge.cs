@@ -163,6 +163,11 @@ public class UiBridge
                 _window.CloseOverlay(msg["refocus"]?.GetValue<bool>() ?? true);
                 break;
 
+            case "centerMouse":
+                if (_settings.Settings.TvDeviceName is { } tvc) _windows.CenterCursorOn(tvc);
+                _window.CloseOverlay(false);
+                break;
+
             case "setRadialActive":
                 _window.SetRadialActive(msg["active"]?.GetValue<bool>() ?? false);
                 break;
@@ -476,6 +481,9 @@ public class UiBridge
         });
 
     public void PushStick(double x, double y) => Push(new { type = "stick", x, y });
+
+    /// <summary>Tell the UI to tear down whatever overlay menu it has open.</summary>
+    public void PushDismiss() => Push(new { type = "dismiss" });
 
     public void PushInputMode(string mode) => Push(new { type = "inputMode", mode });
 

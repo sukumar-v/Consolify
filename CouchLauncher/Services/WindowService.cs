@@ -124,6 +124,16 @@ public class WindowService
         MoveToDisplay(hwnd, all[(i + 1) % all.Count].DeviceName);
     }
 
+    /// <summary>Park the pointer in the middle of a display — a quick way to retrieve a cursor
+    /// that has wandered onto another monitor.</summary>
+    public void CenterCursorOn(string deviceName)
+    {
+        var d = _displays.GetDisplay(deviceName) ?? _displays.GetDisplays().FirstOrDefault(x => x.IsPrimary);
+        if (d is null) return;
+        NativeMethods.SetCursorPos(d.X + d.Width / 2, d.Y + d.Height / 2);
+        Log.Info($"Radial: centred cursor on {d.DeviceName}");
+    }
+
     public void RunShortcut(string id)
     {
         try

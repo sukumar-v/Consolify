@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly CursorService _cursor;
     private readonly WindowService _windows;
     private bool _overlayWasMinimized;
+    private bool _overlayActive;
     private IntPtr _overlayTarget;
     private UiBridge? _bridge;
     private IntPtr _hwnd;
@@ -138,6 +139,8 @@ public partial class MainWindow : Window
 
     private void OnGameExited()
     {
+        _overlayActive = false;
+        _gamepad.RadialActive = false;
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
         PositionOnTargetDisplay();
@@ -187,6 +190,14 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnComboTap()
     {
+        // A tap while a menu is up dismisses it. Without this the launcher would minimize out
+        // from under an open radial, stranding RadialActive and leaving the stick-mouse dead.
+        if (_overlayActive)
+        {
+            _bridge?.PushDismiss();
+            CloseOverlay(true);
+            return;
+        }
         if (_launcher.GameRunning) _ = ShowOverlay("ingame");
         else ToggleMinimize();
     }
@@ -208,6 +219,7 @@ public partial class MainWindow : Window
         _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget));
         await Task.Delay(90);
 
+        _overlayActive = true;
         _gamepad.RadialActive = mode == "radial";
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
@@ -219,6 +231,7 @@ public partial class MainWindow : Window
     /// <summary>Dismiss an overlay, putting the launcher back where it was.</summary>
     public void CloseOverlay(bool refocusTarget)
     {
+        _overlayActive = false;
         _gamepad.RadialActive = false;
         bool goBack = _overlayWasMinimized || _launcher.GameRunning;
         if (goBack)
