@@ -218,6 +218,30 @@ public class GameLaunchService
         return PidBelongsToGame(pid);
     }
 
+    /// <summary>
+    /// Ask every process in the running game's install directory to quit. This backs up the
+    /// window-by-window close: a game in exclusive fullscreen (or one whose only window is
+    /// owned by a child process) may not appear in the alt-tab enumeration at all, in which case
+    /// closing "every window the game owns" closes nothing and the menu looks like it did nothing.
+    /// Returns how many processes were asked.
+    /// </summary>
+    public int RequestClose()
+    {
+        if (!GameRunning) return 0;
+        int n = 0;
+        foreach (var p in Process.GetProcesses())
+        {
+            try
+            {
+                if (PidBelongsToGame((uint)p.Id) && p.CloseMainWindow()) n++;
+            }
+            catch { /* protected, or exited between the enumeration and the call */ }
+            finally { p.Dispose(); }
+        }
+        Log.Info($"Close game: asked {n} process(es) to quit");
+        return n;
+    }
+
     /// <summary>Is this pid one of the game's own processes (launcher, chained exe, game)?</summary>
     private bool PidBelongsToGame(uint pid)
     {

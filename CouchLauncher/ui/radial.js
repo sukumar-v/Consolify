@@ -8,21 +8,21 @@
  */
 
 let radialOpen = false, radialIdx = 0;
-let radialSub = null, radialSubIdx = 0;     // null | "windows" | "shortcuts" | "power"
+let radialSub = null, radialSubIdx = 0;     // null | "windows" | "shortcuts"
 let ingameOpen = false, ingameIdx = 0;
 let overlayTargetTitle = "";
 let hostWindows = [];
 
+/* Switching to a window also drags it onto the TV, so there is no separate "move" spoke.
+   The first spoke is what the stick points at when the menu opens, so it must be a safe
+   one -- "Close window" sits last. */
 const RADIAL_ITEMS = [
-  { id: "close",     label: "Close window",  icon: "trash", danger: true },
-  { id: "minimize",  label: "Minimize",      icon: "chevronsDown" },
-  { id: "moveTv",    label: "Move to TV",    icon: "gamepad" },
-  { id: "moveNext",  label: "Next display",  icon: "chevronsUp" },
-  { id: "windows",   label: "Switch window", icon: "folder" },
-  { id: "shortcuts", label: "Shortcuts",     icon: "terminal" },
-  { id: "keyboard",  label: "Keyboard",      icon: "file" },
-  { id: "centerMouse", label: "Center mouse", icon: "info" },
-  { id: "power",     label: "Power",         icon: "store", danger: true },
+  { id: "windows",     label: "Switch window", icon: "folder" },
+  { id: "shortcuts",   label: "Shortcuts",     icon: "terminal" },
+  { id: "keyboard",    label: "Keyboard",      icon: "file" },
+  { id: "centerMouse", label: "Center mouse",  icon: "info" },
+  { id: "suspend",     label: "Suspend",       icon: "eyeOff" },
+  { id: "close",       label: "Close window",  icon: "trash", danger: true },
 ];
 
 const SHORTCUTS = [
@@ -31,14 +31,9 @@ const SHORTCUTS = [
   { id: "settings",        label: "Windows Settings", icon: "store" },
   { id: "displaySettings", label: "Display Settings", icon: "gamepad" },
   { id: "volume",          label: "Volume Mixer",     icon: "chevronsUp" },
+  // Distinct from Suspend, which only blanks the screen: this hands the session to the Windows
+  // lock screen, which the pad cannot drive at all.
   { id: "lock",            label: "Lock PC",          icon: "eyeOff" },
-];
-
-const POWER_ITEMS = [
-  { id: "sleep",    label: "Sleep",     icon: "clock" },
-  { id: "signout",  label: "Sign out",  icon: "eyeOff", danger: true },
-  { id: "restart",  label: "Restart",   icon: "store",  danger: true },
-  { id: "shutdown", label: "Shut down", icon: "trash",  danger: true },
 ];
 
 /** Close every transient menu so an overlay never stacks on a stale one. */
@@ -97,10 +92,18 @@ function radialActivate() {
   const it = RADIAL_ITEMS[radialIdx];
   switch (it.id) {
     case "close":     send({ cmd: "windowAction", action: "close" });    closeRadial(false); break;
-    case "minimize":  send({ cmd: "windowAction", action: "minimize" }); closeRadial(false); break;
-    case "moveTv":    send({ cmd: "windowAction", action: "moveToTv" }); closeRadial(true);  break;
-    case "moveNext":  send({ cmd: "windowAction", action: "moveNext" }); closeRadial(true);  break;
     case "keyboard":  send({ cmd: "toggleKeyboard" });                   closeRadial(true);  break;
+    case "suspend":
+      // Blanks the TV and parks the pad; any button brings it back. Confirmed anyway, because
+      // a screen that goes black on a stray flick of the stick reads as a crash.
+      confirmState = {
+        title: "SUSPEND THIS PC?",
+        yesLabel: "Yes, suspend",
+        onYes: () => { send({ cmd: "suspend" }); closeRadial(false); },
+      };
+      renderConfirm();
+      $("overlay-confirm").classList.add("active");
+      break;
     case "centerMouse":
       // host re-centres the pointer and closes the overlay; do not refocus the old window
       send({ cmd: "centerMouse" });
@@ -108,11 +111,10 @@ function radialActivate() {
       $("overlay-radial").classList.remove("active");
       $("overlay-radialsub").classList.remove("active");
       setOverlayMode(false);
-      setInputMode("pointer");
+      setInputMode("pointer");    // tells the host too, so its copy stays in step
       break;
     case "windows":   openRadialSub("windows"); break;
     case "shortcuts": openRadialSub("shortcuts"); break;
-    case "power":     openRadialSub("power"); break;
   }
 }
 
@@ -133,6 +135,8 @@ function radialSubItems() {
     if (!hostWindows.length) return [{ label: "No open windows", icon: "info", action: () => {} }];
     return hostWindows.map(w => ({
       label: w.title, icon: "folder", sub: w.processName,
+      // The host restores the window, drags it onto the TV and focuses it -- switching to a
+      // window you cannot see would be pointless from the couch.
       action: () => { send({ cmd: "windowAction", action: "focus", handle: w.handle }); closeRadial(false); },
     }));
   }
@@ -140,22 +144,6 @@ function radialSubItems() {
     return SHORTCUTS.map(s => ({
       label: s.label, icon: s.icon,
       action: () => { send({ cmd: "shortcut", id: s.id }); closeRadial(false); },
-    }));
-  }
-  if (radialSub === "power") {
-    return POWER_ITEMS.map(p => ({
-      label: p.label, icon: p.icon, danger: p.danger,
-      action: () => {
-        // Sleep is recoverable; the rest end the session, so they get a confirm step.
-        if (p.id === "sleep") { send({ cmd: "power", action: p.id }); closeRadial(false); return; }
-        confirmState = {
-          title: p.label.toUpperCase() + " THIS PC?",
-          yesLabel: "Yes, " + p.label.toLowerCase(),
-          onYes: () => { send({ cmd: "power", action: p.id }); closeRadial(false); },
-        };
-        renderConfirm();
-        $("overlay-confirm").classList.add("active");
-      },
     }));
   }
   return [];
@@ -171,8 +159,7 @@ function openRadialSub(kind) {
 function renderRadialSub() {
   const items = radialSubItems();
   radialSubIdx = Math.max(0, Math.min(radialSubIdx, items.length - 1));
-  $("radialSubTitle").textContent =
-    radialSub === "windows" ? "SWITCH WINDOW" : radialSub === "shortcuts" ? "SHORTCUTS" : "POWER";
+  $("radialSubTitle").textContent = radialSub === "windows" ? "SWITCH WINDOW" : "SHORTCUTS";
   renderMenu($("radialSubList"), $("radialSubFoot"), items, radialSubIdx,
     foot(["A", "Select"], ["B", "Back"]),
     (i) => { if (radialSubIdx !== i) { radialSubIdx = i; renderRadialSub(); } },
@@ -212,14 +199,16 @@ function ingameItems() {
       action: () => { hideIngame(); send({ cmd: "resumeGame" }); } },
     { label: "Home", icon: "folder", sub: "Leave it running and open the library",
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
-    { label: "Power menu", icon: "store",
+    { label: "Windows menu", icon: "store", sub: "Switch windows, keyboard, suspend",
       action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
     { label: "Close game", icon: "trash", danger: true,
       action: () => {
         confirmState = {
           title: "CLOSE THE GAME?",
           yesLabel: "Yes, close it",
-          onYes: () => { hideIngame(); send({ cmd: "closeGame" }); },
+          // Drop the overlay and land back on the library. Leaving the transparent overlay
+          // window up over a closing game looks like nothing happened at all.
+          onYes: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "closeGame" }); },
         };
         renderConfirm();
         $("overlay-confirm").classList.add("active");

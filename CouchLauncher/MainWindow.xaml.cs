@@ -61,6 +61,13 @@ public partial class MainWindow : Window
         _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(OnComboTap);
         _gamepad.RadialRequested += () => Dispatcher.BeginInvoke(() => _ = ShowOverlay("radial"));
         _gamepad.StickDirection += (x, y) => Dispatcher.BeginInvoke(() => _bridge?.PushStick(x, y));
+        _gamepad.WakeRequested += () => Dispatcher.BeginInvoke(() =>
+        {
+            _windows.WakeDisplays();
+            // The wake nudges real mouse input, which would otherwise land the UI back in
+            // pointer mode with nothing highlighted.
+            _gamepad.ResetInputMode();
+        });
         _gamepad.BatteryChanged += (type, level) => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(type, level));
         _gamepad.InputModeChanged += mode => Dispatcher.BeginInvoke(() =>
         {
@@ -140,7 +147,8 @@ public partial class MainWindow : Window
     private void OnGameExited()
     {
         _overlayActive = false;
-        _gamepad.RadialActive = false;
+        _gamepad.MenuOwnsStick = false;
+        _gamepad.ResetInputMode();
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
         PositionOnTargetDisplay();
@@ -177,6 +185,7 @@ public partial class MainWindow : Window
             PositionOnTargetDisplay();
             Activate();
             NativeMethods.SetForegroundWindow(_hwnd);
+            _gamepad.ResetInputMode();
         }
         else
         {
@@ -191,7 +200,7 @@ public partial class MainWindow : Window
     private void OnComboTap()
     {
         // A tap while a menu is up dismisses it. Without this the launcher would minimize out
-        // from under an open radial, stranding RadialActive and leaving the stick-mouse dead.
+        // from under an open radial, stranding MenuOwnsStick and leaving the stick-mouse dead.
         if (_overlayActive)
         {
             _bridge?.PushDismiss();
@@ -220,7 +229,10 @@ public partial class MainWindow : Window
         await Task.Delay(90);
 
         _overlayActive = true;
-        _gamepad.RadialActive = mode == "radial";
+        // Both menus, not just the radial: the in-game list is pad-driven too, and letting the
+        // stick move the cursor underneath it flipped the UI into pointer mode with the pointer
+        // over nothing, which left A dead — the menu looked frozen.
+        _gamepad.MenuOwnsStick = true;
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
         PositionOnTargetDisplay();
@@ -232,7 +244,7 @@ public partial class MainWindow : Window
     public void CloseOverlay(bool refocusTarget)
     {
         _overlayActive = false;
-        _gamepad.RadialActive = false;
+        _gamepad.MenuOwnsStick = false;
         bool goBack = _overlayWasMinimized || _launcher.GameRunning;
         if (goBack)
         {
@@ -244,14 +256,43 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Radial opened from the in-game menu and back again.</summary>
-    public void SetRadialActive(bool active) => _gamepad.RadialActive = active;
+    public void SetRadialActive(bool active) => _gamepad.MenuOwnsStick = active;
+
+    /// <summary>The UI changed input mode by itself; keep the pad service's copy in step.</summary>
+    public void SetInputMode(string mode) => _gamepad.NotifyInputMode(mode);
+
+    /// <summary>
+    /// "Suspend": blank the displays and park the pad, leaving the session (and anything
+    /// downloading or installing) running. Any gamepad button brings it back. This is not sleep —
+    /// suspending the machine from the couch is a one-way trip without Wake-on-LAN, and the lock
+    /// screen is a separate secure session the pad cannot drive at all.
+    /// </summary>
+    public async Task Suspend()
+    {
+        CloseOverlay(false);
+        _bridge?.PushDismiss();
+        // Come back to the launcher, not to a half-focused desktop, when the screens light up.
+        if (!_launcher.GameRunning) GoHome();
+
+        await Task.Delay(250);      // let the overlay tear down before the screen goes dark
+        _gamepad.Suspended = true;
+        _windows.BlankDisplays();
+    }
 
     /// <summary>The window the radial menu acts on (whatever was in front when it opened).</summary>
     public IntPtr OverlayTarget => _overlayTarget;
 
-    /// <summary>Leave the game running and show the launcher properly (the "Home" action).</summary>
+    /// <summary>
+    /// Leave the game running and show the launcher properly — the "Home" action, and where
+    /// "close game" lands too. Clearing the overlay flags matters: without it the host still
+    /// believed a menu was up while the library was on screen, so the next combo tap dismissed a
+    /// menu that wasn't there instead of minimizing.
+    /// </summary>
     public void GoHome()
     {
+        _overlayActive = false;
+        _gamepad.MenuOwnsStick = false;
+        _gamepad.ResetInputMode();
         _suppressRefocus = false;
         WindowState = WindowState.Normal;
         PositionOnTargetDisplay();

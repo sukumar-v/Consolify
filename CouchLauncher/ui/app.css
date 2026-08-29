@@ -534,8 +534,11 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 html.overlay-mode, body.overlay-mode { background: transparent; cursor: none; }
 body.overlay-mode #backdrop { display: none; }
 body.overlay-mode .screen { display: none !important; }
-body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.62); }
-body.overlay-mode .overlay { background: rgba(8,8,10,0.62); }
+/* Translucent, not clear: a bright desktop or game frame behind the menu washed out the
+   cards enough that the spokes were hard to read. Enough shows through to say "this is
+   floating over something", nothing more. */
+body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.93); }
+body.overlay-mode .overlay { background: rgba(8,8,10,0.93); }
 body.overlay-mode * { cursor: none !important; }
 
 /* Inline warning inside a settings row, so the row grows instead of spawning a second one */

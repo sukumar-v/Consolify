@@ -40,9 +40,19 @@ public class GamepadService : IDisposable
     public event Action<bool>? ConnectedChanged;
     /// <summary>Left-stick direction while the radial menu is up (x right, y up, normalized).</summary>
     public event Action<double, double>? StickDirection;
+    /// <summary>A button was pressed while suspended: wake the displays and swallow the press.</summary>
+    public event Action? WakeRequested;
 
-    /// <summary>While set, the stick points at radial spokes instead of moving the cursor.</summary>
-    public volatile bool RadialActive;
+    /// <summary>
+    /// Set while any overlay menu is up. Those menus are pad-driven and hide the cursor, so the
+    /// stick must not drag the pointer around underneath them — it points at radial spokes
+    /// instead. Letting it move the cursor also flipped the UI into pointer mode with the pointer
+    /// over nothing, which left A doing nothing at all.
+    /// </summary>
+    public volatile bool MenuOwnsStick;
+
+    /// <summary>Displays are blanked; the pad is inert until a button wakes them.</summary>
+    public volatile bool Suspended;
 
     public bool Connected { get; private set; }
 
@@ -68,6 +78,28 @@ public class GamepadService : IDisposable
 
     public void Dispose() => _running = false;
 
+    // Mirrors the web UI's own input mode. The two MUST start out agreeing: when this said
+    // "pointer" while the UI booted in "pad", the first stick movement was a no-op here, no
+    // change was ever pushed, and the UI stayed in pad mode — the pointer moved but hovering
+    // highlighted nothing and CSS kept the cursor hidden.
+    private string _inputMode = "pad";
+
+    /// <summary>
+    /// Put the pad back in charge and re-assert it to the UI. Called whenever the launcher comes
+    /// back to the foreground, so the two ends can never drift apart across a game session.
+    /// </summary>
+    public void ResetInputMode()
+    {
+        _inputMode = "pad";
+        InputModeChanged?.Invoke("pad");
+    }
+
+    /// <summary>
+    /// The UI switched modes on its own — opening an overlay, or centring the pointer. Record it
+    /// without echoing back, so the next stick movement is seen as a real change and pushed.
+    /// </summary>
+    public void NotifyInputMode(string mode) => _inputMode = mode;
+
     private void PollLoop()
     {
         ushort prevButtons = 0;
@@ -75,18 +107,18 @@ public class GamepadService : IDisposable
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, pendingTap = false;
+        bool prevTrigger = false;                          // trigger edge, used only while suspended
         long lastComboTapAt = -1;
         var sw = Stopwatch.StartNew();
         long lastTick = sw.ElapsedMilliseconds;
         long nextBatteryPoll = 0, nextStickPush = 0;
         var lastBattery = (type: (byte)255, level: (byte)255);
         int missCount = 0;
-        string inputMode = "pointer";
 
         void SetInputMode(string mode)
         {
-            if (inputMode == mode) return;
-            inputMode = mode;
+            if (_inputMode == mode) return;
+            _inputMode = mode;
             InputModeChanged?.Invoke(mode);
         }
 
@@ -122,6 +154,29 @@ public class GamepadService : IDisposable
                     lastBattery = (bat.BatteryType, bat.BatteryLevel);
                     BatteryChanged?.Invoke(bat.BatteryType, bat.BatteryLevel);
                 }
+            }
+
+            // ---- suspended: the pad only wakes the screen ----
+            // Nothing else may run, and the stick in particular must not move the cursor: any
+            // pointer movement is a wake signal to Windows, so the displays would come straight
+            // back on their own. The waking press is swallowed rather than delivered.
+            if (Suspended)
+            {
+                ushort held = state.Gamepad.wButtons;
+                bool trig = state.Gamepad.bLeftTrigger >= TriggerThreshold
+                         || state.Gamepad.bRightTrigger >= TriggerThreshold;
+                // A fresh press, not merely a held one: the button that confirmed "Suspend" is
+                // often still down when the screens go dark, and a level test would wake them
+                // straight back up on that same press.
+                bool woke = (ushort)(held & ~prevButtons) != 0 || (trig && !prevTrigger);
+                prevButtons = held;
+                prevTrigger = trig;
+                if (woke)
+                {
+                    Suspended = false;
+                    WakeRequested?.Invoke();
+                }
+                continue;
             }
 
             var s = _settings.Settings;
@@ -243,10 +298,10 @@ public class GamepadService : IDisposable
             }
 
             // ---- left stick ----
-            if (RadialActive)
+            if (MenuOwnsStick)
             {
-                // The radial owns the stick: it points at a spoke instead of dragging the
-                // pointer around, and the cursor is hidden while it is up.
+                // An overlay menu owns the stick: it points at a radial spoke instead of dragging
+                // the pointer around, and the cursor is hidden while it is up.
                 double rnx = state.Gamepad.sThumbLX / 32767.0;
                 double rny = state.Gamepad.sThumbLY / 32767.0;
                 if (Math.Sqrt(rnx * rnx + rny * rny) > 0.55 && now >= nextStickPush)

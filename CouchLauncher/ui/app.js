@@ -66,10 +66,24 @@ function setInputMode(mode) {
   if (inputMode === mode) return;
   inputMode = mode;
   document.body.classList.toggle("pad-mode", mode === "pad");
+  // focusVisible() just changed, so whatever is on screen needs its highlight re-painted.
+  // A host-driven switch (the stick moved, or the launcher came back to the foreground)
+  // arrives with no mouse event behind it to trigger that on its own.
+  repaintFocus();
+  // Keep the host's copy in step. It only pushes "pointer" when its own idea of the mode
+  // changes, so a switch we made locally (opening an overlay, centring the pointer) would
+  // otherwise leave it believing we are already in pointer mode -- and the next stick move
+  // would push nothing, stranding the UI in pad mode with the cursor hidden.
+  send({ cmd: "inputMode", mode });
 }
 
+/* Set while a radial/in-game overlay is up. Those menus are pad-driven and hide the cursor,
+   so hovering must not steer them and the highlight must always be painted — otherwise A can
+   land on nothing and the menu looks frozen. */
+let overlayMode = false;
+
 /** Hover should only move focus when the pointer is actually the active input. */
-function hoverEnabled() { return inputMode === "pointer"; }
+function hoverEnabled() { return inputMode === "pointer" && !overlayMode; }
 
 /* Whether the pointer currently rests on something selectable. In pointer mode with the
    cursor over empty space nothing is highlighted and A does nothing, so the pointer can
@@ -79,7 +93,7 @@ let pointerOnItem = false;
 const FOCUSABLE_SEL = ".cont-item, .grid-item, .tab, .set-row, .ov-row, .coll-card, .pill-btn";
 
 /** Should a focus highlight be painted at all right now? */
-function focusVisible() { return inputMode === "pad" || pointerOnItem; }
+function focusVisible() { return overlayMode || inputMode === "pad" || pointerOnItem; }
 
 function setPointerOnItem(on) {
   if (pointerOnItem === on) return;
@@ -1682,9 +1696,15 @@ function wolInput(btn) {
 
 /* ---- overlay mode: transparent window floating over the desktop or a game ---- */
 function setOverlayMode(on) {
+  overlayMode = on;
   document.documentElement.classList.toggle("overlay-mode", on);
   document.body.classList.toggle("overlay-mode", on);
-  if (on) setInputMode("pad");   // the pointer has no business here
+  if (on) {
+    setInputMode("pad");   // the pointer has no business here
+    // Not redundant with the send inside setInputMode: if we were already in pad mode that
+    // call returns early, and the host could still be sitting on a stale "pointer".
+    send({ cmd: "inputMode", mode: "pad" });
+  }
 }
 
 /** Nearest radial spoke for a stick vector (y is up from the pad, down in screen space). */
@@ -1822,10 +1842,10 @@ function handleHostMessage(m) {
       }
       break;
     case "inputMode":
-      // Only the host can tell us the stick moved the cursor. Pad mode is decided locally,
-      // from directional input alone, so a face button can never re-arm a highlight the
-      // pointer has cleared.
-      if (m.mode === "pointer") setInputMode("pointer");
+      // Only the host can tell us the stick moved the cursor, or that the launcher just came
+      // back to the foreground and the pad should be driving again. It never pushes "pad" off
+      // a face button, so this can't re-arm a highlight the pointer has cleared.
+      setInputMode(m.mode);
       break;
     case "padConnected":
       S.padConnected = m.connected;

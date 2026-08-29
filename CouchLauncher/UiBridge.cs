@@ -140,12 +140,15 @@ public class UiBridge
                 switch (act)
                 {
                     case "close": _windows.Close(h); break;
-                    case "minimize": _windows.Minimize(h); break;
-                    case "focus": _windows.Focus(h); _window.CloseOverlay(false); break;
-                    case "moveToTv":
-                        if (_settings.Settings.TvDeviceName is { } tv) _windows.MoveToDisplay(h, tv);
+                    case "focus":
+                        // Switching to a window brings it to the TV with it — the point of picking
+                        // one from the couch is to look at it. A window already there is left
+                        // alone rather than being re-centred for no reason.
+                        if (_settings.Settings.TvDeviceName is { } tv && _windows.DisplayOf(h) != tv)
+                            _windows.MoveToDisplay(h, tv);
+                        _windows.Focus(h);
+                        _window.CloseOverlay(false);
                         break;
-                    case "moveNext": _windows.MoveToNextDisplay(h); break;
                 }
                 Push(new { type = "toast", message = ActionToast(act) });
                 break;
@@ -155,8 +158,8 @@ public class UiBridge
                 if (msg["id"]?.GetValue<string>() is { } sid) { _windows.RunShortcut(sid); _window.CloseOverlay(false); }
                 break;
 
-            case "power":
-                if (msg["action"]?.GetValue<string>() is { } pact) _windows.Power(pact);
+            case "suspend":
+                _ = _window.Suspend();
                 break;
 
             case "closeOverlay":
@@ -172,13 +175,23 @@ public class UiBridge
                 _window.SetRadialActive(msg["active"]?.GetValue<bool>() ?? false);
                 break;
 
+            case "inputMode":
+                if (msg["mode"]?.GetValue<string>() is { } im) _window.SetInputMode(im);
+                break;
+
             case "goHome":
                 _window.GoHome();
                 break;
 
             case "closeGame":
             {
-                // Politely close every visible window the running game owns.
+                // Land on the library first. Asked from the in-game menu, the launcher is a
+                // transparent overlay over the game — leaving it up while the game tears down
+                // shows the user nothing at all, which reads as "it froze".
+                _window.GoHome();
+
+                // Politely close every visible window the running game owns, then ask its
+                // processes directly: a fullscreen game may own no window we can enumerate.
                 int n = 0;
                 foreach (var w in _windows.ListWindows())
                 {
@@ -187,6 +200,7 @@ public class UiBridge
                     _windows.Close(h);
                     n++;
                 }
+                n += _launcher.RequestClose();
                 Push(new { type = "toast", message = n > 0 ? "Closing game…" : "No game window to close" });
                 break;
             }
@@ -463,9 +477,7 @@ public class UiBridge
     private static string ActionToast(string? act) => act switch
     {
         "close" => "Closing window…",
-        "minimize" => "Window minimized",
-        "moveToTv" => "Moved to the TV",
-        "moveNext" => "Moved to the next display",
+        "focus" => "Brought to the TV",
         _ => "Done"
     };
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using CouchLauncher.Interop;
 
@@ -7,9 +8,9 @@ namespace CouchLauncher.Services;
 public record WindowInfo(long Handle, string Title, string ProcessName, bool Minimized, string Display);
 
 /// <summary>
-/// The window and system actions behind the radial power menu, so a gamepad can drive Windows
-/// itself: list and focus open windows, close or minimize one, throw one onto the TV, launch a
-/// handful of shell shortcuts, and run power actions.
+/// The window and system actions behind the radial menu, so a gamepad can drive Windows itself:
+/// list open windows and bring one to the TV, close one, launch a handful of shell shortcuts,
+/// park the pointer, and blank or wake the displays.
 /// </summary>
 public class WindowService
 {
@@ -85,11 +86,6 @@ public class WindowService
         Log.Info($"Radial: closed window {hwnd}");
     }
 
-    public void Minimize(IntPtr hwnd)
-    {
-        if (hwnd != IntPtr.Zero) NativeMethods.ShowWindow(hwnd, NativeMethods.SW_MINIMIZE);
-    }
-
     public void Focus(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return;
@@ -112,16 +108,6 @@ public class WindowService
         NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h,
             NativeMethods.SWP_NOZORDER | NativeMethods.SWP_SHOWWINDOW);
         Log.Info($"Radial: moved window {hwnd} to {deviceName}");
-    }
-
-    /// <summary>Cycle a window to the next display in the list.</summary>
-    public void MoveToNextDisplay(IntPtr hwnd)
-    {
-        var all = _displays.GetDisplays();
-        if (all.Count < 2) return;
-        var cur = DisplayOf(hwnd);
-        int i = all.FindIndex(d => d.DeviceName == cur);
-        MoveToDisplay(hwnd, all[(i + 1) % all.Count].DeviceName);
     }
 
     /// <summary>Park the pointer in the middle of a display — a quick way to retrieve a cursor
@@ -152,22 +138,37 @@ public class WindowService
         catch (Exception ex) { Log.Info($"Radial shortcut {id} failed: {ex.Message}"); }
     }
 
-    /// <summary>Power actions. Destructive ones are confirmed in the UI before reaching here.</summary>
-    public void Power(string action)
+    /// <summary>
+    /// "Suspend": drop the displays into standby without suspending the machine. Sleep would need
+    /// Wake-on-LAN or a wake-capable receiver to come back from; this just blanks the TV, leaves
+    /// the session and anything running in it alone, and any gamepad button wakes it.
+    /// </summary>
+    public void BlankDisplays()
     {
-        try
+        NativeMethods.SendMessageTimeout(NativeMethods.HWND_BROADCAST, NativeMethods.WM_SYSCOMMAND,
+            new IntPtr(NativeMethods.SC_MONITORPOWER), new IntPtr(NativeMethods.MONITOR_OFF),
+            NativeMethods.SMTO_ABORTIFHUNG, 1000, out _);
+        Log.Info("Suspend: displays off");
+    }
+
+    /// <summary>
+    /// Bring the displays back. The SC_MONITORPOWER "on" message alone is unreliable once the
+    /// monitors have actually powered down, so a nudge of real mouse input backs it up — that is
+    /// the signal Windows itself treats as a wake.
+    /// </summary>
+    public void WakeDisplays()
+    {
+        NativeMethods.SendMessageTimeout(NativeMethods.HWND_BROADCAST, NativeMethods.WM_SYSCOMMAND,
+            new IntPtr(NativeMethods.SC_MONITORPOWER), new IntPtr(NativeMethods.MONITOR_ON),
+            NativeMethods.SMTO_ABORTIFHUNG, 1000, out _);
+
+        var inputs = new[]
         {
-            switch (action)
-            {
-                case "sleep": Process.Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0"); break;
-                case "shutdown": Process.Start("shutdown.exe", "/s /t 0"); break;
-                case "restart": Process.Start("shutdown.exe", "/r /t 0"); break;
-                case "signout": Process.Start("shutdown.exe", "/l"); break;
-                default: Log.Info($"Radial: unknown power action {action}"); break;
-            }
-            Log.Info($"Radial: power action {action}");
-        }
-        catch (Exception ex) { Log.Info($"Radial power {action} failed: {ex.Message}"); }
+            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dx = 1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } },
+            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dx = -1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } },
+        };
+        NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
+        Log.Info("Suspend: displays on");
     }
 
     private static void Start(string target) =>

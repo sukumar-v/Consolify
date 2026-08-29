@@ -134,9 +134,20 @@ internal static class NativeMethods
 
     public const uint WM_SYSCOMMAND = 0x0112;
     public const int SC_CLOSE = 0xF060;
+    public const int SC_MONITORPOWER = 0xF170;
+    public const int MONITOR_OFF = 2, MONITOR_ON = -1;
+    public static readonly IntPtr HWND_BROADCAST = new(0xFFFF);
 
     [DllImport("user32.dll")]
     public static extern IntPtr PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    /// <summary>Broadcast form of SendMessage. The timeout matters: a plain broadcast blocks on
+    /// any hung top-level window, which would freeze the UI thread.</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
+        uint flags, uint timeoutMs, out IntPtr result);
 
     // ---- Process image path (more reliable than Process.MainModule cross-arch) ----
 
@@ -200,6 +211,7 @@ internal static class NativeMethods
     public static extern bool DestroyCursor(IntPtr hCursor);
 
     public const uint INPUT_MOUSE = 0;
+    public const uint MOUSEEVENTF_MOVE = 0x0001;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
