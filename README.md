@@ -7,6 +7,22 @@ The UI is the imported Claude Design project (`Couch Launcher.dc.html`) implemen
 HTML/CSS/JS app, hosted in **WebView2** inside a native **WPF** shell (.NET 8) that provides all
 system-level features through Win32 P/Invoke.
 
+## Install
+
+Grab the latest `Consolify-vX.Y.Z-win-x64.zip` from
+[Releases](../../releases/latest), unzip it anywhere, and run `Consolify.exe`.
+
+Nothing to install: the .NET runtime is bundled. Windows 11 already has the one thing that is
+not — the **Edge WebView2 Runtime** — and on Windows 10 the app will tell you where to get it.
+Keep `Consolify.exe` and the `ui` folder together; the UI is loaded off disk at startup.
+
+On first run Consolify scans Steam, Epic, GOG and the Xbox app for installed games, then puts
+itself full-screen on your primary display. Point it at the TV in **Settings → Display**, and
+turn on **Launch on startup** there if you want it to come up with Windows. Settings, library
+and cover art live in `%APPDATA%\Consolify`; uninstalling is deleting the folder you unzipped.
+
+`Consolify.exe --windowed` opens a 1280×720 window instead, which is easier to poke at from a desk.
+
 ## Build & run
 
 Requirements: **.NET 8 SDK**, **WebView2 Runtime** (preinstalled on Windows 11).
@@ -21,6 +37,15 @@ no focus guarding) instead of the full-screen TV mode.
 
 The UI can also be previewed in a plain browser (it self-mocks sample data when not hosted in
 WebView2): serve `Consolify/ui/` with any static server and open `index.html`.
+
+To build the zip that goes on a release:
+
+```powershell
+.\tools\package.ps1            # or -Version 1.1.0 to stamp the tag you are about to push
+```
+
+It publishes self-contained and single-file into `artifacts\`, checks that `ui\` came along,
+and writes `dist\Consolify-v<version>-win-x64.zip` with its SHA-256.
 
 ## Architecture
 

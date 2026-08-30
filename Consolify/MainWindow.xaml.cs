@@ -109,9 +109,27 @@ public partial class MainWindow : Window
 
     private async Task InitWebViewAsync()
     {
-        var env = await CoreWebView2Environment.CreateAsync(
-            userDataFolder: Path.Combine(Paths.DataDir, "webview2"));
-        await WebView.EnsureCoreWebView2Async(env);
+        try
+        {
+            var env = await CoreWebView2Environment.CreateAsync(
+                userDataFolder: Path.Combine(Paths.DataDir, "webview2"));
+            await WebView.EnsureCoreWebView2Async(env);
+        }
+        catch (WebView2RuntimeNotFoundException ex)
+        {
+            // The whole UI is a web page, so there is nothing to fall back to. Windows 11 ships
+            // the runtime, but a fresh Windows 10 box may not have it, and without this the window
+            // just sits there black -- the exception would be swallowed by the dispatcher handler.
+            Log.Info($"WebView2 runtime missing: {ex.Message}");
+            MessageBox.Show(
+                "Consolify needs the Microsoft Edge WebView2 Runtime, which is not installed.\n\n" +
+                "Install the free Evergreen Runtime from\n" +
+                "https://developer.microsoft.com/microsoft-edge/webview2/\n\n" +
+                "then start Consolify again.",
+                "Consolify", MessageBoxButton.OK, MessageBoxImage.Error);
+            Application.Current.Shutdown();
+            return;
+        }
 
         var core = WebView.CoreWebView2;
         // Match the page so there is never a flash of the WebView2 default white on startup.

@@ -67,3 +67,6 @@ $RECYCLE.BIN/
 /library.json
 /consolify.log
 /covers/
+
+# Packaging output
+dist/
