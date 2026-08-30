@@ -11,12 +11,39 @@
 </p>
 
 <p align="center">
-  <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-F0A253">
+  <a href="https://github.com/sukumar-v/Consolify/releases/latest">
+    <img alt="Download Consolify for Windows"
+         src="https://img.shields.io/badge/Download%20for%20Windows-F0A253?style=for-the-badge&logo=windows&logoColor=08080A">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sukumar-v/Consolify/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sukumar-v/Consolify?label=latest&color=F0A253"></a>
+  <img alt="Total downloads" src="https://img.shields.io/github/downloads/sukumar-v/Consolify/total?color=1F1F24">
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-1F1F24"></a>
   <img alt="Platform: Windows 11" src="https://img.shields.io/badge/platform-Windows%2011-1F1F24">
-  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8-512BD4">
 </p>
 
 ![Consolify's library screen](assets/screenshot-library.jpg)
+
+## Install
+
+**[Download the latest release](https://github.com/sukumar-v/Consolify/releases/latest)**, unzip it
+anywhere, and run `Consolify.exe`.
+
+Nothing else to install: the .NET runtime is bundled. Windows 11 already has the one thing that is
+not — the **Edge WebView2 Runtime** — and on Windows 10 the app will tell you where to get it.
+Keep `Consolify.exe` and the `ui` folder together; the UI is loaded off disk at startup.
+
+The build is not code-signed yet, so Windows SmartScreen will warn the first time you run it:
+choose **More info → Run anyway**.
+
+On first run Consolify scans Steam, Epic, GOG and the Xbox app for installed games, then puts
+itself full-screen on your primary display. Point it at the TV in **Settings → Display**, and
+turn on **Launch on startup** there if you want it to come up with Windows. Settings, library
+and cover art live in `%APPDATA%\Consolify`; uninstalling is deleting the folder you unzipped.
+
+`Consolify.exe --windowed` opens a 1280×720 window instead, which is easier to poke at from a desk.
 
 ## No keyboard. No mouse.
 
@@ -63,22 +90,6 @@ old primary back when you quit.
 
 ![Consolify's settings screen](assets/screenshot-settings.png)
 
-
-## Install
-
-Grab the latest `Consolify-vX.Y.Z-win-x64.zip` from
-[Releases](../../releases/latest), unzip it anywhere, and run `Consolify.exe`.
-
-Nothing to install: the .NET runtime is bundled. Windows 11 already has the one thing that is
-not — the **Edge WebView2 Runtime** — and on Windows 10 the app will tell you where to get it.
-Keep `Consolify.exe` and the `ui` folder together; the UI is loaded off disk at startup.
-
-On first run Consolify scans Steam, Epic, GOG and the Xbox app for installed games, then puts
-itself full-screen on your primary display. Point it at the TV in **Settings → Display**, and
-turn on **Launch on startup** there if you want it to come up with Windows. Settings, library
-and cover art live in `%APPDATA%\Consolify`; uninstalling is deleting the folder you unzipped.
-
-`Consolify.exe --windowed` opens a 1280×720 window instead, which is easier to poke at from a desk.
 
 ## Build & run
 
