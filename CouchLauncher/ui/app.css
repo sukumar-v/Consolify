@@ -112,8 +112,18 @@ html, body {
   position: relative;
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px;
-  padding: 18px 12px 28px; margin: -18px -12px 0;
+  /* The padding is room for the focused row's scale and glow; the negative margin pulls the box
+     back so it does not shift the layout. It used to be -18px, which ate the whole 16px section
+     gap and clipped scrolled rows on a line running through the header text. */
+  padding: 18px 12px 28px; margin: -8px -12px 0;
   scrollbar-width: none;
+}
+/* Scrolled content is clipped at the scroller's edge, which leaves the half-visible row above
+   ending in a hard line just under the section header. Fade it out instead — and only while
+   there is something above, so the first row's glow keeps the full padding at rest. */
+.grid-scroll.scrolled {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 26px);
 }
 .grid-scroll::-webkit-scrollbar { display: none; }
 .grid-row { display: flex; gap: 24px; flex: 0 0 auto; }

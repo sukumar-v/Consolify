@@ -147,6 +147,19 @@ window.addEventListener("mousedown", (e) => {
 const REVEAL_MARGIN = 30;
 
 /**
+ * Mark a scroller while it is scrolled away from the top, which is what turns on the top fade.
+ * Attaches once per element; the scroller nodes outlive the rows rendered into them.
+ */
+function watchScrolled(scroller) {
+  const mark = () => scroller.classList.toggle("scrolled", scroller.scrollTop > 1);
+  if (!scroller.dataset.scrollWatched) {
+    scroller.dataset.scrollWatched = "1";
+    scroller.addEventListener("scroll", mark, { passive: true });
+  }
+  mark();
+}
+
+/**
  * Scroll a focused element into view, keeping REVEAL_MARGIN of clearance on the side it is
  * approaching from. `scrollIntoView({block:"nearest"})` stops the moment the element's *unscaled*
  * box is visible, which parks it flush against the edge and clips the growth — coming down the
@@ -156,6 +169,7 @@ const REVEAL_MARGIN = 30;
  */
 function revealIn(scroller, el, isFirst, isLast) {
   if (!scroller || !el) return;
+  watchScrolled(scroller);
   if (isFirst) { scroller.scrollTo({ top: 0, behavior: "smooth" }); return; }
   if (isLast) { scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }); return; }
 
@@ -686,6 +700,10 @@ function renderLibrary() {
   renderPlaying();
   contItems = cont;
   gridRows = rows;
+  // Not only from revealIn: scrolling with the wheel never moves the pad focus, and the top
+  // fade still has to come on.
+  watchScrolled($("gridScroll"));
+  watchScrolled($("collGridScroll"));
 
   $("titleCount").textContent = `${S.games.length} TITLE${S.games.length === 1 ? "" : "S"}`;
   $("gridLabel").textContent = filterSummary(total);
