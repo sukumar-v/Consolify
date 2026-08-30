@@ -35,8 +35,8 @@ public class GamepadService : IDisposable
     public event Action? RadialRequested;
     /// <summary>"pad" when the D-pad/buttons drive navigation, "pointer" when the stick moves the cursor.</summary>
     public event Action<string>? InputModeChanged;
-    /// <summary>type: 0 none/wired, 2 alkaline, 3 NiMH; level: 0 empty .. 3 full.</summary>
-    public event Action<byte, byte>? BatteryChanged;
+    /// <summary>Charge level of the attached pad; see BatteryState.</summary>
+    public event Action<BatteryState>? BatteryChanged;
     public event Action<bool>? ConnectedChanged;
     /// <summary>Left-stick direction while the radial menu is up (x right, y up, normalized).</summary>
     public event Action<double, double>? StickDirection;
@@ -55,6 +55,10 @@ public class GamepadService : IDisposable
     public volatile bool Suspended;
 
     public bool Connected { get; private set; }
+
+    /// <summary>Latest reading, so the UI can ask for it after the bridge is up. The pad is
+    /// usually detected before the WebView exists, and that first push has nowhere to go.</summary>
+    public BatteryState CurrentBattery { get; private set; }
 
     private const double MaxSpeedPxPerSec = 1400;
     private const double MaxScrollNotchesPerSec = 18;
@@ -75,6 +79,7 @@ public class GamepadService : IDisposable
 
     public void Start()
     {
+        ControllerBattery.Prime();   // WinRT fills its gamepad list lazily
         _running = true;
         _thread = new Thread(PollLoop) { IsBackground = true, Name = "GamepadService" };
         _thread.Start();
@@ -116,7 +121,7 @@ public class GamepadService : IDisposable
         var sw = Stopwatch.StartNew();
         long lastTick = sw.ElapsedMilliseconds;
         long nextBatteryPoll = 0, nextStickPush = 0;
-        var lastBattery = (type: (byte)255, level: (byte)255);
+        CurrentBattery = new BatteryState(false, -1, false, -99);   // impossible, so the first read always pushes
         int missCount = 0;
 
         void SetInputMode(string mode)
@@ -141,6 +146,14 @@ public class GamepadService : IDisposable
             if (rc != 0)
             {
                 if (Connected && ++missCount > 60) { Connected = false; ConnectedChanged?.Invoke(false); }
+                // Still report the battery while nothing is attached, or the UI never hears that
+                // there is no controller and shows an empty corner instead of the missing-pad icon.
+                if (now >= nextBatteryPoll)
+                {
+                    nextBatteryPoll = now + 10_000;
+                    var none = new BatteryState(false, null, false, 0);
+                    if (none != CurrentBattery) { CurrentBattery = none; Log.Info("Battery: no controller"); BatteryChanged?.Invoke(none); }
+                }
                 prevButtons = 0;
                 if (leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
                 if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
@@ -153,10 +166,12 @@ public class GamepadService : IDisposable
             if (now >= nextBatteryPoll)
             {
                 nextBatteryPoll = now + 10_000;
-                if (NativeMethods.TryGetBattery(0, out var bat) && (bat.BatteryType, bat.BatteryLevel) != lastBattery)
+                var batt = ControllerBattery.Read(0, Connected);
+                if (batt != CurrentBattery)
                 {
-                    lastBattery = (bat.BatteryType, bat.BatteryLevel);
-                    BatteryChanged?.Invoke(bat.BatteryType, bat.BatteryLevel);
+                    CurrentBattery = batt;
+                    Log.Info($"Battery: {batt}");
+                    BatteryChanged?.Invoke(batt);
                 }
             }
 

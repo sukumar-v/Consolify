@@ -241,6 +241,14 @@ const ICONS = {
   bars: '<path d="M4.5 20V9.5M9.5 20V4.5M14.5 20v-7M19.5 20v-4"/>',
   gear: '<circle cx="12" cy="12" r="3.1"/>'
       + '<path d="M12 2.6v2.8M12 18.6v2.8M2.6 12h2.8M18.6 12h2.8M5.3 5.3l2 2M16.7 16.7l2 2M18.7 5.3l-2 2M7.3 16.7l-2 2"/>',
+
+  /* Controller status. A gamepad silhouette with grips reads as a controller at a glance far
+     better than the rounded rectangle used elsewhere; the slashed one is the same shape, so
+     "connected" and "not connected" are obviously two states of one thing. */
+  controller: '<path d="M8.6 8h6.8a5.4 5.4 0 0 1 5.2 4l1.1 4.4a2.4 2.4 0 0 1-4.4 1.8L15.6 16H8.4l-1.7 2.2a2.4 2.4 0 0 1-4.4-1.8L3.4 12A5.4 5.4 0 0 1 8.6 8z"/>'
+            + '<path d="M6.6 11.4v2.2M5.5 12.5h2.2M15.4 11.6h.01M17.6 13.4h.01"/>',
+  controllerOff: '<path d="M8.6 8h6.8a5.4 5.4 0 0 1 5.2 4l1.1 4.4a2.4 2.4 0 0 1-4.4 1.8L15.6 16H8.4l-1.7 2.2a2.4 2.4 0 0 1-4.4-1.8L3.4 12A5.4 5.4 0 0 1 8.6 8z"/>'
+               + '<path d="m2.6 2.6 18.8 18.8"/>',
 };
 
 function iconSvg(name) {
@@ -461,15 +469,46 @@ setInterval(tickClock, 10000);
 
 /* Battery indicator: only shown for controllers that actually run on a battery
    (wireless pads report ALKALINE/NIMH); wired pads and no-pad show nothing. */
-function updateBattery(batteryType, level) {
+/**
+ * Controller status: a pad icon, a battery bar and the percentage.
+ *
+ * `percent` is null when nothing can tell us the real charge -- XInput only reports four coarse
+ * levels, and over Bluetooth often reports no battery at all. In that case the bar is drawn at
+ * the coarse level and no number is shown, rather than inventing a precise-looking figure.
+ */
+function updateBattery(m) {
   const el = $("padBattery");
-  if (!S.padConnected || batteryType === undefined || batteryType < 2) {
-    el.textContent = "";
+  el.classList.remove("low", "charging", "off");
+
+  // The message's own `present` decides, not S.padConnected. The pad is usually detected while
+  // the WebView is still starting, so that first "connected" push has no bridge to travel over
+  // and is lost -- gating on it left a connected controller showing as missing.
+  if (!m || m.present === false) {
+    el.innerHTML = iconSvg("controllerOff");
+    el.classList.add("off");
+    el.title = "No controller connected";
     return;
   }
-  const bars = "▮".repeat(Math.max(level, 0) + 1) + "▯".repeat(3 - Math.min(level, 3));
-  el.textContent = `PAD ${bars}`;
-  el.style.color = level <= 0 ? "#E97A6C" : "";
+  S.padConnected = true;
+
+  const pct = typeof m.percent === "number" ? Math.max(0, Math.min(100, m.percent)) : null;
+  // Coarse levels are 0..3; -1 means even that is unknown, so show an empty-looking bar.
+  const fill = pct !== null ? pct
+             : m.level >= 0 ? [12, 38, 68, 100][Math.min(m.level, 3)]
+             : 0;
+
+  if (m.charging) el.classList.add("charging");
+  else if (pct !== null && pct <= 15) el.classList.add("low");
+  else if (pct === null && m.level === 0) el.classList.add("low");
+
+  el.innerHTML =
+    iconSvg("controller") +
+    `<span class="batt"><span class="batt-fill" style="width:${fill}%"></span></span>` +
+    (m.charging ? `<span class="batt-pct">${pct !== null ? pct + "%" : ""}⚡</span>`
+                : pct !== null ? `<span class="batt-pct">${pct}%</span>` : "");
+  el.title = m.charging ? "Controller charging"
+           : pct !== null ? `Controller battery ${pct}%`
+           : "Controller connected; battery level unavailable";
 }
 
 /* ============================== backdrop ============================== */
@@ -1966,12 +2005,12 @@ function handleHostMessage(m) {
     case "padConnected":
       S.padConnected = m.connected;
       if (m.connected) toast("Controller connected");
-      else updateBattery(undefined, 0);
-      if (lastBatteryMsg && m.connected) updateBattery(lastBatteryMsg.batteryType, lastBatteryMsg.level);
+      else updateBattery(null);
+      if (lastBatteryMsg && m.connected) updateBattery(lastBatteryMsg);
       break;
     case "battery":
       lastBatteryMsg = m;
-      updateBattery(m.batteryType, m.level);
+      updateBattery(m);
       break;
     case "game":
       S.gameRunning = m.running;
@@ -2063,7 +2102,7 @@ function mockHandle(msg) {
 
   if (msg.cmd === "ready") {
     setTimeout(pushState, 60);
-    setTimeout(() => { handleHostMessage({ type: "padConnected", connected: true }); handleHostMessage({ type: "battery", batteryType: 3, level: 2 }); }, 700);
+    setTimeout(() => { handleHostMessage({ type: "padConnected", connected: true }); handleHostMessage({ type: "battery", present: true, percent: 62, charging: false, level: 2 }); }, 700);
   } else if (msg.cmd === "launch") {
     toast("(preview) would launch " + msg.id);
   } else if (msg.cmd === "toggleFavorite") {
@@ -2117,5 +2156,8 @@ fitStage();
 tickClock();
 renderTabbars();
 renderGuide();
+// Show the no-controller state straight away. The host only pushes when something changes, so
+// waiting for a message left the corner blank until a pad was plugged in.
+updateBattery(null);
 switchView("library");
 send({ cmd: "ready" });

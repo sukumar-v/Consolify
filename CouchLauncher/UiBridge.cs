@@ -65,6 +65,7 @@ public class UiBridge
         {
             case "ready":
                 PushState();
+                _window.PushPadState();
                 if (_library.Games.Count == 0) StartScan();
                 break;
 
@@ -470,8 +471,8 @@ public class UiBridge
         });
     }
 
-    public void PushBattery(byte type, byte level) =>
-        Push(new { type = "battery", batteryType = type, level });
+    public void PushBattery(BatteryState b) =>
+        Push(new { type = "battery", present = b.Present, percent = b.Percent, charging = b.Charging, level = b.CoarseLevel });
 
     /// <summary>
     /// Politely close every visible window the running game owns, then ask its processes

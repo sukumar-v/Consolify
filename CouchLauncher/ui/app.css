@@ -56,7 +56,28 @@ html, body {
   font-size: 18px; letter-spacing: 0.1em; color: rgba(246,245,243,0.45);
 }
 .vsep { width: 1px; height: 20px; background: rgba(255,255,255,0.15); }
-.pad-status.on { color: #F0A253; }
+/* ---- controller + battery readout in the top bar ---- */
+.pad-status { display: flex; align-items: center; gap: 10px; color: rgba(246,245,243,0.7); }
+/* inherit, so the pad, the bar and the number all turn red together on a low battery
+   rather than the icon staying grey next to a red bar */
+.pad-status .ov-icon { width: 26px; height: 26px; flex: 0 0 auto; color: inherit; }
+.pad-status.off { color: rgba(246,245,243,0.3); }        /* nothing connected */
+.pad-status.low { color: #E97A6C; }
+.pad-status.charging { color: #F0A253; }
+.batt {
+  position: relative; width: 40px; height: 18px; border-radius: 4px;
+  border: 2px solid currentColor; padding: 2px;
+}
+/* the nub on the positive end, so the shape reads as a battery and not a progress bar */
+.batt::after {
+  content: ""; position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 7px; border-radius: 0 2px 2px 0; background: currentColor;
+}
+.batt-fill {
+  display: block; height: 100%; border-radius: 1px; background: currentColor;
+  transition: width 300ms linear;
+}
+.batt-pct { font-size: 18px; letter-spacing: 0.06em; min-width: 52px; }
 #scanStatus { color: #F0A253; }
 
 /* ---- library body ---- */

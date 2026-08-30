@@ -64,7 +64,7 @@ public partial class MainWindow : Window
             // pointer mode with nothing highlighted.
             _gamepad.ResetInputMode();
         });
-        _gamepad.BatteryChanged += (type, level) => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(type, level));
+        _gamepad.BatteryChanged += b => Dispatcher.BeginInvoke(() => _bridge?.PushBattery(b));
         _gamepad.InputModeChanged += mode => Dispatcher.BeginInvoke(() =>
         {
             _cursor.SetPadMode(mode == "pad");
@@ -259,6 +259,17 @@ public partial class MainWindow : Window
 
     /// <summary>Radial opened from the in-game menu and back again.</summary>
     public void SetRadialActive(bool active) => _gamepad.MenuOwnsStick = active;
+
+    /// <summary>
+    /// Re-send the pad state once the UI is up. The controller is normally detected while the
+    /// WebView is still starting, so that first connected/battery push has no bridge to cross and
+    /// is lost -- the corner then showed "no controller" with one sitting right there.
+    /// </summary>
+    public void PushPadState()
+    {
+        _bridge?.PushPadConnected(_gamepad.Connected);
+        _bridge?.PushBattery(_gamepad.CurrentBattery);
+    }
 
     /// <summary>The UI changed input mode by itself; keep the pad service's copy in step.</summary>
     public void SetInputMode(string mode) => _gamepad.NotifyInputMode(mode);
