@@ -56,14 +56,23 @@ html, body {
   font-size: 18px; letter-spacing: 0.1em; color: rgba(246,245,243,0.45);
 }
 .vsep { width: 1px; height: 20px; background: rgba(255,255,255,0.15); }
-/* ---- controller + battery readout in the top bar ---- */
-.pad-status { display: flex; align-items: center; gap: 10px; color: rgba(246,245,243,0.7); }
-/* inherit, so the pad, the bar and the number all turn red together on a low battery
-   rather than the icon staying grey next to a red bar */
+/* An empty flex item still gets a gap on each side, so the idle scan slot was opening a 56px
+   hole between the battery and the title count while every other pair sat at 28px -- which is
+   what made the controller readout look detached from the rest of the bar. */
+#scanStatus:empty, .pad-status:empty { display: none; }
+/* ---- controller + battery readout in the top bar ----
+   It sits among the title count and the clock, so it has to carry the same visual weight as
+   they do. Those are rgba(246,245,243,0.45); the alphas below are the ones that land the red
+   and the accent at the same perceived brightness on this background, rather than the same
+   number -- a saturated colour at 0.45 reads far dimmer than white at 0.45, and at full
+   strength the low-battery red was shouting over everything else in the bar. */
+.pad-status { display: flex; align-items: center; gap: 10px; }   /* colour inherited from .topbar-right */
+/* inherit, so the pad, the bar and the number all shift together rather than the icon
+   staying grey next to a coloured bar */
 .pad-status .ov-icon { width: 26px; height: 26px; flex: 0 0 auto; color: inherit; }
-.pad-status.off { color: rgba(246,245,243,0.3); }        /* nothing connected */
-.pad-status.low { color: #E97A6C; }
-.pad-status.charging { color: #F0A253; }
+.pad-status.off { color: rgba(246,245,243,0.32); }       /* nothing connected: quieter still */
+.pad-status.low { color: rgba(233,122,108,0.78); }
+.pad-status.charging { color: rgba(240,162,83,0.65); }
 .batt {
   position: relative; width: 40px; height: 18px; border-radius: 4px;
   border: 2px solid currentColor; padding: 2px;
@@ -77,7 +86,10 @@ html, body {
   display: block; height: 100%; border-radius: 1px; background: currentColor;
   transition: width 300ms linear;
 }
-.batt-pct { font-size: 18px; letter-spacing: 0.06em; min-width: 52px; }
+/* No min-width: reserving room for "100%" left trailing space after a short number, widening
+   the gap to the next item. The readout is the leftmost thing in a right-anchored row, so a
+   changing width only nudges its own left edge -- nothing else moves. */
+.batt-pct { font-size: 18px; letter-spacing: 0.06em; }
 #scanStatus { color: #F0A253; }
 
 /* ---- library body ---- */
