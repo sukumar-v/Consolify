@@ -232,6 +232,12 @@ behaviour and screen structure. Things that could not map 1:1 to local desktop r
 No input injection at the Windows lock screen / Secure Desktop (OS restriction; handled outside
 this app). The in-app wake guide recommends automatic sign-in for a couch-only setup.
 
+## Contributing
+
+Bug reports and small fixes are welcome; open an issue first for anything larger. Build steps,
+the conventions this repo follows, and what is deliberately out of scope are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and
