@@ -1,11 +1,68 @@
-# Consolify
+<p align="center">
+  <img src="assets/consolify-logo.jpg" alt="Consolify" width="160">
+</p>
 
-<img src="consolify-icon.png" alt="Consolify" width="120">
+<h1 align="center">Consolify</h1>
 
-A full-screen, controller-first game launcher for the living-room TV, built for Windows 11.
-The UI is the imported Claude Design project (`Couch Launcher.dc.html`) implemented as a real
-HTML/CSS/JS app, hosted in **WebView2** inside a native **WPF** shell (.NET 8) that provides all
-system-level features through Win32 P/Invoke.
+<p align="center">
+  <b>Turn a Windows 11 PC into a console.</b><br>
+  Your games, your desktop, your whole machine — driven from the couch with nothing in your hands
+  but a controller.
+</p>
+
+<p align="center">
+  <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-F0A253">
+  <img alt="Platform: Windows 11" src="https://img.shields.io/badge/platform-Windows%2011-1F1F24">
+  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8-512BD4">
+</p>
+
+![Consolify's library screen](assets/screenshot-library.jpg)
+
+## No keyboard. No mouse.
+
+Most couch launchers get you as far as starting a game, then leave you stranded the moment you
+need to do anything else — dismiss an update prompt, log into a store, close a window that opened
+on the wrong screen. You end up walking to the desk for the mouse anyway.
+
+Consolify is built so that never happens. **The controller is a complete input device**, not just
+a menu remote:
+
+- **The left stick is the mouse.** Deadzone, sensitivity and an acceleration curve — slow near
+  the centre for precision, fast at full deflection to cross a 4K screen — are all sliders in
+  Settings. The right stick scrolls. A and B are left and right click, live across the whole
+  desktop the moment the launcher isn't in front.
+- **The keyboard comes to you.** Hold Start to raise the Windows touch keyboard, which takes
+  gamepad input directly, so you can type a search, a password or a message without getting up.
+  Text fields inside the launcher raise it on their own.
+- **The Power Wheel runs Windows.** One double-tap of View + Menu, from anywhere — including
+  mid-game — and you can switch to any open window (it gets dragged onto the TV with you), fire
+  a saved shortcut, summon the keyboard, re-centre a lost pointer, close the window in front of
+  you, or blank the TV and park the pad until you press a button again.
+- **The pointer knows when to disappear.** Touch the D-pad and the cursor hides and stops
+  stealing focus; nudge the stick or a real mouse and it comes straight back. Optionally
+  system-wide, so it stays hidden out on the desktop too.
+
+The result is a machine you genuinely never have to walk over to. Games are the reason you sit
+down; everything else stops being a reason to stand up.
+
+![Driving the Windows touch keyboard with a gamepad](assets/screenshot-keyboard.png)
+
+![The Power Wheel overlay](assets/screenshot-power-wheel.png)
+
+## Your library, found automatically
+
+Consolify scans **Steam**, **Epic**, **GOG** and the **Xbox app** from their local install data —
+no accounts, no API keys, nothing phoned anywhere. It picks up real cover art, tracks playtime and
+sessions locally, and rescans every time it starts, so a game installed yesterday is simply there.
+Anything the scanners drag in that isn't a game (benchmarks, wallpaper tools, redistributables)
+gets hidden with one button.
+
+The TV is treated as a first-class display: the launcher places itself there pixel-exactly, makes
+it the Windows primary before a game starts so the game opens on the right screen, and puts your
+old primary back when you quit.
+
+![Consolify's settings screen](assets/screenshot-settings.png)
+
 
 ## Install
 
@@ -48,6 +105,9 @@ It publishes self-contained and single-file into `artifacts\`, checks that `ui\`
 and writes `dist\Consolify-v<version>-win-x64.zip` with its SHA-256.
 
 ## Architecture
+
+A native WPF shell (.NET 8) hosting the UI as an HTML/CSS/JS app in WebView2, bridged by JSON
+messages, with every system-level feature behind Win32 P/Invoke.
 
 ```
 Consolify/
@@ -171,3 +231,11 @@ behaviour and screen structure. Things that could not map 1:1 to local desktop r
 
 No input injection at the Windows lock screen / Secure Desktop (OS restriction; handled outside
 this app). The in-app wake guide recommends automatic sign-in for a couch-only setup.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and
+third-party components.
+
+"Consolify" and the Consolify logo are **not** covered by that grant — section 6 of the license
+reserves trademarks. Fork it freely; give the fork its own name.

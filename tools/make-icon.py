@@ -1,4 +1,4 @@
-# Generates Consolify.ico and consolify-icon.png (the app icon and its README master).
+# Generates Consolify.ico and consolify-icon.png (the app icon and its full-size master).
 #   pip install Pillow
 #   python tools/make-icon.py     -- writes into the current directory
 # Copy Consolify.ico into Consolify/ and consolify-icon.png to the repo root.
