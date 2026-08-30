@@ -370,6 +370,111 @@ internal static class NativeMethods
     }
 
 
+    // ---- Bluetooth battery (the number Settings shows) ----
+    //
+    // A pad on Bluetooth reports its real charge to the BLE Battery Service, and Windows caches
+    // that on the Bluetooth device node. Neither XInput nor WinRT will hand it over: XInput calls
+    // an Xbox pad on Bluetooth "disconnected" with level 0, and WinRT's battery report just dresses
+    // that same coarse level up as milliwatt-hours -- 100 of 1000, i.e. 10%, for a pad Settings was
+    // showing at 97%.
+
+    private const uint CR_SUCCESS = 0;
+    private const uint CM_GETIDLIST_FILTER_ENUMERATOR = 0x00000001;
+    private const uint CM_GETIDLIST_FILTER_PRESENT = 0x00000100;
+    private const uint DEVPROP_TYPE_BYTE = 0x00000003;
+    private const uint DEVPROP_TYPE_GUID = 0x0000000D;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DEVPROPKEY { public Guid fmtid; public uint pid; }
+
+    /// <summary>Undocumented but stable: the 0-100 battery level shown on the Bluetooth settings page.</summary>
+    private static readonly DEVPROPKEY DEVPKEY_Bluetooth_Battery =
+        new() { fmtid = new Guid("104EA319-6EE2-4701-BD47-8DDBF425BBE5"), pid = 2 };
+
+    /// <summary>Identifies the physical device, so the pad's HID node and its Bluetooth node can be tied together.</summary>
+    private static readonly DEVPROPKEY DEVPKEY_Device_ContainerId =
+        new() { fmtid = new Guid("8C7ED206-3F8A-4827-B3AB-AE9E1FAEFC6C"), pid = 2 };
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint CM_Get_Device_ID_List_SizeW(out uint pulLen, string? pszFilter, uint ulFlags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint CM_Get_Device_ID_ListW(string? pszFilter, char[] buffer, uint bufferLen, uint ulFlags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint CM_Locate_DevNodeW(out uint pdnDevInst, string pDeviceID, uint ulFlags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint CM_Get_DevNode_PropertyW(uint dnDevInst, in DEVPROPKEY key, out uint propertyType,
+        byte[]? propertyBuffer, ref uint propertyBufferSize, uint ulFlags);
+
+    /// <summary>Instance ids of every device currently present under one enumerator ("HID", "BTHLE", ...).</summary>
+    private static IEnumerable<string> PresentDevices(string enumerator)
+    {
+        const uint flags = CM_GETIDLIST_FILTER_ENUMERATOR | CM_GETIDLIST_FILTER_PRESENT;
+        if (CM_Get_Device_ID_List_SizeW(out uint len, enumerator, flags) != CR_SUCCESS || len == 0)
+            return Array.Empty<string>();
+
+        var buffer = new char[len];
+        if (CM_Get_Device_ID_ListW(enumerator, buffer, len, flags) != CR_SUCCESS)
+            return Array.Empty<string>();
+
+        return new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    /// <summary>One device-node property, or null when the node has no such property of that type.</summary>
+    private static byte[]? DevNodeProperty(string instanceId, in DEVPROPKEY key, uint expectedType)
+    {
+        if (CM_Locate_DevNodeW(out uint devInst, instanceId, 0) != CR_SUCCESS) return null;
+
+        uint size = 0;
+        CM_Get_DevNode_PropertyW(devInst, key, out uint type, null, ref size, 0);   // asks for the size
+        if (size == 0 || type != expectedType) return null;
+
+        var buffer = new byte[size];
+        return CM_Get_DevNode_PropertyW(devInst, key, out _, buffer, ref size, 0) == CR_SUCCESS ? buffer : null;
+    }
+
+    /// <summary>
+    /// Charge of the attached gamepad as a real percentage, or null when it is not on Bluetooth (or
+    /// is not reporting). Gamepads are picked out by the "IG_" in their HID instance id, which is
+    /// how XInput itself marks the devices it drives.
+    /// </summary>
+    public static bool TryGetBluetoothBatteryPercent(out int percent)
+    {
+        percent = 0;
+        try
+        {
+            var pads = new List<Guid>();
+            foreach (var id in PresentDevices("HID"))
+                if (id.Contains("IG_", StringComparison.OrdinalIgnoreCase)
+                    && DevNodeProperty(id, DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID) is { Length: 16 } g)
+                    pads.Add(new Guid(g));
+
+            if (pads.Count == 0) return false;
+
+            // BTHLE covers Bluetooth LE (an Xbox pad), BTHENUM classic Bluetooth (a DualSense).
+            foreach (var enumerator in new[] { "BTHLE", "BTHENUM" })
+                foreach (var id in PresentDevices(enumerator))
+                {
+                    if (DevNodeProperty(id, DEVPKEY_Bluetooth_Battery, DEVPROP_TYPE_BYTE) is not { Length: 1 } level)
+                        continue;
+                    if (DevNodeProperty(id, DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID) is not { Length: 16 } cid)
+                        continue;
+                    // Headsets, keyboards and mice report a battery too; only the node sharing a
+                    // physical device with a gamepad is ours.
+                    if (!pads.Contains(new Guid(cid))) continue;
+
+                    percent = Math.Min((int)level[0], 100);
+                    return true;
+                }
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+        return false;
+    }
+
+
     // ---- Window control (Power Wheel) ----
 
     public const int SW_MINIMIZE = 6;

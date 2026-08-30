@@ -13,11 +13,17 @@ public readonly record struct BatteryState(bool Present, int? Percent, bool Char
 /// <summary>
 /// Reads the controller's charge.
 ///
-/// XInput only reports four coarse levels and, over Bluetooth, frequently reports the battery as
-/// DISCONNECTED even while the pad is working — which is why the readout used to be blank on a
-/// controller whose percentage Windows itself was happy to show. WinRT's
-/// IGameControllerBatteryInfo is the source Settings uses, and it gives real capacity numbers, so
-/// try that first and keep XInput as the fallback.
+/// Three sources, none of them good on its own:
+///
+/// - XInput reports four coarse levels, and over Bluetooth calls the battery DISCONNECTED even
+///   while the pad is working.
+/// - WinRT's IGameControllerBatteryInfo looks better -- it hands back milliwatt-hours -- but for an
+///   Xbox pad those are the same coarse level in disguise, and the same wrong one: 100 of 1000
+///   (10%) for a pad Windows itself was showing at 97%. It is still the only one that knows about
+///   the cable, so it is kept for the charging flag.
+/// - The Bluetooth device node carries the real percentage, the one on the Settings page.
+///
+/// So: charging from WinRT, the number from Bluetooth, and the coarse levels only as a last resort.
 /// </summary>
 public static class ControllerBattery
 {
@@ -70,8 +76,19 @@ public static class ControllerBattery
     {
         if (!connected) return new BatteryState(false, null, false, 0);
 
-        if (ReadWinRt() is { } winrt)
-            return new BatteryState(true, winrt.Percent, winrt.Charging, PercentToCoarse(winrt.Percent));
+        var winrt = ReadWinRt();
+
+        // A pad on the cable reports no percentage anywhere; take WinRT's word that it is charging.
+        if (winrt is { Charging: true } charging)
+            return new BatteryState(true, charging.Percent, true, PercentToCoarse(charging.Percent));
+
+        // Bluetooth first: it is the only source that gives the pad's real charge. WinRT and XInput
+        // both quantise an Xbox pad on Bluetooth to a coarse level, and get that level wrong.
+        if (Interop.NativeMethods.TryGetBluetoothBatteryPercent(out int bt))
+            return new BatteryState(true, bt, false, PercentToCoarse(bt));
+
+        if (winrt is { } w)
+            return new BatteryState(true, w.Percent, w.Charging, PercentToCoarse(w.Percent));
 
         // XInput fallback: four levels, and a wired pad has no battery to report.
         if (Interop.NativeMethods.TryGetBattery(userIndex, out var info))
