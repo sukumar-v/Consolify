@@ -31,7 +31,7 @@ public class GamepadService : IDisposable
     public event Action? KeyboardToggleRequested;
     /// <summary>Combo tapped: minimize/restore, or the in-game menu while a game runs.</summary>
     public event Action? MinimizeToggleRequested;
-    /// <summary>Combo held: open the radial power menu.</summary>
+    /// <summary>Combo double-tapped: open the Power Wheel.</summary>
     public event Action? RadialRequested;
     /// <summary>"pad" when the D-pad/buttons drive navigation, "pointer" when the stick moves the cursor.</summary>
     public event Action<string>? InputModeChanged;
@@ -199,7 +199,7 @@ public class GamepadService : IDisposable
             // the pad is deliberately silent, but this combo is the only way back out, so it has
             // to keep working there.
             //
-            // Tap = minimize/restore (or the in-game menu), double tap = power menu. The single
+            // Tap = minimize/restore (or the in-game menu), double tap = the Power Wheel. The single
             // tap is held back until the double-tap window closes, otherwise a quick double tap
             // would minimize and restore the launcher on the way to opening the radial.
             bool comboNow = ComboPressed(state.Gamepad, s.MinimizeCombo);

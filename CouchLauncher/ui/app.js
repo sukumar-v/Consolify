@@ -876,7 +876,23 @@ function libraryInput(btn) {
 }
 
 function launchGame(g) {
-  if (S.gameRunning) { toast("A game is already running"); return; }
+  if (S.gameRunning) {
+    // Already playing something else. Offer the swap rather than just refusing -- from the
+    // couch, "a game is already running" left you with nothing to do about it.
+    if (S.runningGameId === g.id) { send({ cmd: "resumeGame" }); return; }
+    const running = gameById(S.runningGameId);
+    confirmState = {
+      title: running ? `CLOSE ${running.title.toUpperCase()}?` : "CLOSE THE RUNNING GAME?",
+      body: `${g.title} will start once it has closed.`,
+      yesLabel: `Close and play ${g.title}`,
+      icon: "play", danger: false,
+      onYes: () => { toast(`Closing ${running ? running.title : "the game"}…`); send({ cmd: "launch", id: g.id, replace: true }); },
+    };
+    confirmIdx = 0;
+    renderConfirm();
+    $("overlay-confirm").classList.add("active");
+    return;
+  }
   toast(`Launching ${g.title}…`);
   send({ cmd: "launch", id: g.id });
 }
@@ -1217,7 +1233,7 @@ function settingsRows() {
     : null;
 
   rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
-    "Tap to minimize or restore the launcher (in-game menu while a game runs); hold to open the power menu",
+    "Tap to minimize or restore the launcher (in-game menu while a game runs); double tap to open the Power Wheel",
     comboWarn));
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
@@ -1500,12 +1516,14 @@ function gameMenuItems() {
       action: () => { send({ cmd: "toggleHidden", id: g.id }); closeGameMenu(); } },
   ];
   if (running) {
-    items.unshift({ label: "Resume game", icon: "info", sub: "Back to the running game",
+    items.unshift({ label: "Resume game", icon: "play", sub: "Back to the running game",
       action: () => { closeGameMenu(); send({ cmd: "resumeGame" }); } });
-    items.push({ label: "Close game", icon: "trash", danger: true,
+    items.push({ label: "Close game", icon: "x", danger: true,
       action: () => { closeGameMenu(); send({ cmd: "closeGame" }); } });
   }
-  if (g.manual) items.push({
+  // Deleting the entry for the game you are in the middle of playing is never what you meant,
+  // so this one only shows while it is not running.
+  if (g.manual && !running) items.push({
     label: "Remove from library", icon: "trash", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeGameMenu(); },
   });
@@ -1644,7 +1662,14 @@ function manageInput(btn) {
 function renderConfirm() {
   if (!confirmState) return;
   $("confirmTitle").textContent = confirmState.title;
-  const items = [{ label: confirmState.yesLabel || "Yes, delete", icon: "trash", danger: true }];
+  // Defaults suit the destructive cases, which is most of them; swapping games passes its own
+  // icon and clears `danger`, since starting a game is not a red action.
+  const items = [{
+    label: confirmState.yesLabel || "Yes, delete",
+    sub: confirmState.body,
+    icon: confirmState.icon || "trash",
+    danger: confirmState.danger !== false,
+  }];
   confirmIdx = 0;
   renderMenu($("confirmList"), $("confirmFoot"), items, confirmIdx,
     foot(["A", "Confirm"], ["B", "Cancel"]),

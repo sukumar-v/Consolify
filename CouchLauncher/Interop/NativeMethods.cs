@@ -370,7 +370,7 @@ internal static class NativeMethods
     }
 
 
-    // ---- Window control (radial power menu) ----
+    // ---- Window control (Power Wheel) ----
 
     public const int SW_MINIMIZE = 6;
     public const int SW_RESTORE = 9;

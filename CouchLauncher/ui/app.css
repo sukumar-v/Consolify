@@ -483,7 +483,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .playing-hint { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
 .playing-hint > span:not(.btn-badge) { font-size: 20px; color: rgba(246,245,243,0.7); margin-right: 14px; }
 .playing-hint .btn-badge { width: 34px; height: 34px; font-size: 17px; }
-/* ---- radial power menu ---- */
+/* ---- Power Wheel (the radial) ---- */
 .radial-wrap {
   position: relative; width: 880px; height: 880px;
   display: flex; align-items: center; justify-content: center;

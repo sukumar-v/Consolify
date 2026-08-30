@@ -78,6 +78,13 @@ public class UiBridge
                     Push(new { type = "toast", message = $"{game.Title} is not installed" });
                     break;
                 }
+                if (_launcher.GameRunning)
+                {
+                    // The UI has already asked whether to swap; `replace` is that answer.
+                    if (msg["replace"]?.GetValue<bool>() == true) _ = SwapRunningGame(game);
+                    else Push(new { type = "toast", message = "A game is already running" });
+                    break;
+                }
                 _launcher.Launch(game);
                 break;
             }
@@ -126,7 +133,7 @@ public class UiBridge
                 break;
             }
 
-            // ---- radial power menu / in-game menu ----
+            // ---- Power Wheel / in-game menu ----
 
             case "listWindows":
                 Push(new { type = "windows", windows = _windows.ListWindows(), displays = _displays.GetDisplays() });
@@ -190,17 +197,7 @@ public class UiBridge
                 // shows the user nothing at all, which reads as "it froze".
                 _window.GoHome();
 
-                // Politely close every visible window the running game owns, then ask its
-                // processes directly: a fullscreen game may own no window we can enumerate.
-                int n = 0;
-                foreach (var w in _windows.ListWindows())
-                {
-                    var h = new IntPtr(w.Handle);
-                    if (!_launcher.OwnsWindow(h)) continue;
-                    _windows.Close(h);
-                    n++;
-                }
-                n += _launcher.RequestClose();
+                int n = CloseRunningGame();
                 Push(new { type = "toast", message = n > 0 ? "Closing game…" : "No game window to close" });
                 break;
             }
@@ -473,6 +470,51 @@ public class UiBridge
 
     public void PushBattery(byte type, byte level) =>
         Push(new { type = "battery", batteryType = type, level });
+
+    /// <summary>
+    /// Politely close every visible window the running game owns, then ask its processes
+    /// directly — a fullscreen game may own no window we can enumerate. Returns how many things
+    /// were asked, so the caller can tell "closing…" from "there was nothing to close".
+    /// </summary>
+    private int CloseRunningGame()
+    {
+        int n = 0;
+        foreach (var w in _windows.ListWindows())
+        {
+            var h = new IntPtr(w.Handle);
+            if (!_launcher.OwnsWindow(h)) continue;
+            _windows.Close(h);
+            n++;
+        }
+        return n + _launcher.RequestClose();
+    }
+
+    /// <summary>
+    /// Close whatever is running and start <paramref name="next"/> once it has actually gone.
+    /// Launching straight away would race the old game's teardown — it still owns the display
+    /// mode we are about to change and the foreground we are about to take.
+    /// </summary>
+    private async Task SwapRunningGame(Game next)
+    {
+        var outgoing = _launcher.RunningGameId is { } id ? _library.Find(id)?.Title : null;
+        Log.Info($"Swapping {outgoing ?? "running game"} -> {next.Title}");
+
+        if (CloseRunningGame() == 0)
+        {
+            Push(new { type = "toast", message = "Could not find the running game to close" });
+            return;
+        }
+
+        // Generous: a game that prompts to save, or a launcher-chained title, can take a while.
+        if (!await _launcher.WaitForExitAsync(TimeSpan.FromSeconds(25)))
+        {
+            Push(new { type = "toast", message = $"{outgoing ?? "The game"} didn't close — {next.Title} not started" });
+            return;
+        }
+
+        Push(new { type = "toast", message = $"Launching {next.Title}…" });
+        _launcher.Launch(next);
+    }
 
     private static string ActionToast(string? act) => act switch
     {

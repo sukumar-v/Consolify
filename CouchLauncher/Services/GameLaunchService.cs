@@ -242,6 +242,17 @@ public class GameLaunchService
         return n;
     }
 
+    /// <summary>
+    /// Wait for the current session to finish, up to a timeout. False means it is still running,
+    /// which happens when a game ignores the close request or puts up its own "really quit?".
+    /// </summary>
+    public async Task<bool> WaitForExitAsync(TimeSpan timeout)
+    {
+        var until = DateTime.UtcNow + timeout;
+        while (GameRunning && DateTime.UtcNow < until) await Task.Delay(200);
+        return !GameRunning;
+    }
+
     /// <summary>Is this pid one of the game's own processes (launcher, chained exe, game)?</summary>
     private bool PidBelongsToGame(uint pid)
     {

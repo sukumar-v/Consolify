@@ -1,7 +1,7 @@
 "use strict";
 
 /*
- * Radial power menu and in-game menu.
+ * Power Wheel (the radial) and the in-game menu.
  *
  * Loaded after app.js and shares its globals ($, send, esc, iconSvg, foot, renderMenu,
  * focusVisible, hoverEnabled, setOverlayMode, switchView, gameById, S).
@@ -205,7 +205,7 @@ function ingameItems() {
       action: () => { hideIngame(); send({ cmd: "resumeGame" }); } },
     { label: "Home", icon: "home", desc: "Leave the game running and open the library",
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
-    { label: "Windows", icon: "apps", desc: "Switch windows, keyboard, sleep",
+    { label: "Power Wheel", icon: "apps", desc: "Switch windows, keyboard, sleep",
       action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
     // No confirm step: drop the overlay and land back on the library. Leaving the overlay up
     // over a closing game looks like nothing happened at all.
