@@ -300,23 +300,24 @@ html, body {
 .quick-item.danger { color: #E97A6C; }
 #quickList, #manageList { display: flex; flex-direction: column; gap: 10px; }
 
-.wol-card {
-  width: 1080px; max-height: 880px; background: #101012;
+.guide-card {
+  /* Tall enough that the four steps fit without scrolling. It still scrolls if the text grows. */
+  width: 1080px; max-height: 940px; background: #101012;
   border: 1px solid rgba(255,255,255,0.09); border-radius: 20px;
   padding: 48px 48px 32px; display: flex; flex-direction: column; gap: 28px;
 }
-.wol-body { overflow-y: auto; display: flex; flex-direction: column; gap: 26px; scrollbar-width: none; }
-.wol-body::-webkit-scrollbar { display: none; }
-.wol-step { display: flex; gap: 24px; }
-.wol-num {
+.guide-body { overflow-y: auto; display: flex; flex-direction: column; gap: 26px; scrollbar-width: none; }
+.guide-body::-webkit-scrollbar { display: none; }
+.guide-step { display: flex; gap: 24px; }
+.guide-num {
   font-family: "IBM Plex Mono", monospace; font-size: 17px; color: #F0A253;
   flex: 0 0 44px; padding-top: 4px;
 }
-.wol-step-body { display: flex; flex-direction: column; gap: 8px; }
-.wol-step-title { font-size: 24px; font-weight: 600; }
-.wol-step-text { font-size: 20px; line-height: 1.55; color: rgba(246,245,243,0.62); }
-.wol-step-text b { color: rgba(246,245,243,0.9); font-weight: 600; }
-.wol-foot { display: flex; align-items: center; gap: 14px; font-size: 20px; color: rgba(246,245,243,0.7); }
+.guide-step-body { display: flex; flex-direction: column; gap: 8px; }
+.guide-step-title { font-size: 24px; font-weight: 600; }
+.guide-step-text { font-size: 20px; line-height: 1.55; color: rgba(246,245,243,0.62); }
+.guide-step-text b { color: rgba(246,245,243,0.9); font-weight: 600; }
+.guide-foot { display: flex; align-items: center; gap: 14px; font-size: 20px; color: rgba(246,245,243,0.7); }
 
 /* ---- toast ---- */
 #toast {

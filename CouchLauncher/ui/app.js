@@ -305,7 +305,7 @@ let manageOpen = false, manageIdx = 0;
 let collectOpen = false, collectIdx = 0;
 let confirmState = null, confirmIdx = 0; // { title, onYes }
 let inputOpen = false, inputConfirm = null;
-let wolOpen = false;
+let guideOpen = false;
 
 let settingsIdx = 0;
 let saveTimer = null;
@@ -616,7 +616,7 @@ function updateContinueScroll(follow) {
 let hWheelAccum = 0;
 
 function overlayOpen() {
-  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!confirmState || wolOpen;
+  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!confirmState || guideOpen;
 }
 
 window.addEventListener("wheel", (e) => {
@@ -1309,9 +1309,9 @@ function settingsRows() {
   rows.push(toggleRow("Launch Couch Launcher at login", "Registers a startup entry so the launcher is ready after wake or reboot",
     () => s.launchOnStartup, v => set(() => s.launchOnStartup = v)));
   rows.push({
-    name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, Wake-on-LAN, controller wake",
+    name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, controller wake, auto-start",
     type: "action", label: "Open guide",
-    action: () => { wolOpen = true; $("overlay-wol").classList.add("active"); },
+    action: () => { guideOpen = true; $("overlay-guide").classList.add("active"); },
   });
   rows.push({
     name: "Exit Couch Launcher", type: "action", label: "Exit", danger: true,
@@ -1772,31 +1772,27 @@ $("inputField").addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeInput(false);
 });
 
-/* ============================== lock screen / wake guide ============================== */
+/* ============================== couch setup guide ============================== */
 
-const WOL_STEPS = [
+const GUIDE_STEPS = [
   ["Switch the touch keyboard to the Gamepad layout (one time)", "Windows does not expose this as a setting an app can flip, so do it once by hand and it sticks. Open the touch keyboard (hold <b>Start</b>), tap the <b>cog icon</b> in its top-left, open <b>Keyboard layout</b> and choose <b>Gamepad</b>. You then get controller navigation with button accelerators — <b>X</b> backspace, <b>Y</b> space. On the default layout the keyboard ignores the pad entirely. Requires Windows 11 build 26100.3624 or newer."],
   ["Sign in from the couch: set up a Windows Hello PIN", "Apps cannot type into the secure lock screen, but you don't need one: in <b>Settings → Accounts → Sign-in options</b>, add a <b>PIN (Windows Hello)</b>. The sign-in screen's PIN pad works with the touch keyboard, which supports gamepad input — so after a wake you can sign in without leaving the sofa. For a fully hands-off couch PC, enable automatic sign-in instead (<b>netplwiz</b>, untick \"Users must enter a user name and password\")."],
-  ["Enable Wake-on-LAN in BIOS/UEFI", "Reboot and enter BIOS setup (usually <b>Del</b> or <b>F2</b> during boot). Find <b>Wake-on-LAN</b>, <b>Power On by PCI-E</b> or <b>Resume by LAN</b> — often under Power Management or Advanced — and enable it. Save and exit."],
-  ["Allow the network adapter to wake the PC", "In Windows, open <b>Device Manager → Network adapters</b>, double-click your Ethernet adapter, and on the <b>Power Management</b> tab tick <b>Allow this device to wake the computer</b> and <b>Only allow a magic packet to wake the computer</b>. On the <b>Advanced</b> tab enable <b>Wake on Magic Packet</b>."],
-  ["Let your controller's receiver wake the PC", "Still in Device Manager, find your gamepad's USB receiver (under <b>Human Interface Devices</b> or <b>Xbox Peripherals</b>). Open its <b>Power Management</b> tab and tick <b>Allow this device to wake the computer</b>. Pressing the controller button will then wake the PC from sleep."],
-  ["Disable Fast Startup for reliable WOL from shutdown", "Wake-on-LAN from full shutdown often fails with Fast Startup. In <b>Control Panel → Power Options → Choose what the power buttons do</b>, click <b>Change settings that are currently unavailable</b> and untick <b>Turn on fast startup</b>."],
-  ["Send the magic packet", "Use any Wake-on-LAN app on your phone (or another PC) with this machine's MAC address and your LAN's broadcast address, port 9. Find the MAC with <b>ipconfig /all</b> — the Ethernet adapter's Physical Address."],
+  ["Let your controller's receiver wake the PC", "Open <b>Device Manager</b> and find your gamepad's USB receiver (under <b>Human Interface Devices</b> or <b>Xbox Peripherals</b>). Open its <b>Power Management</b> tab and tick <b>Allow this device to wake the computer</b>. Pressing the controller button will then wake the PC from sleep."],
   ["Auto-start Couch Launcher", "Turn on <b>Launch Couch Launcher at login</b> in Settings → Startup so the PC lands straight back on the TV with gamepad-mouse active after waking."],
 ];
 
-function renderWol() {
-  $("wolBody").innerHTML = WOL_STEPS.map(([t, txt], i) =>
-    `<div class="wol-step"><div class="wol-num">${String(i + 1).padStart(2, "0")}</div><div class="wol-step-body"><div class="wol-step-title">${t}</div><div class="wol-step-text">${txt}</div></div></div>`
+function renderGuide() {
+  $("guideBody").innerHTML = GUIDE_STEPS.map(([t, txt], i) =>
+    `<div class="guide-step"><div class="guide-num">${String(i + 1).padStart(2, "0")}</div><div class="guide-step-body"><div class="guide-step-title">${t}</div><div class="guide-step-text">${txt}</div></div></div>`
   ).join("");
 }
 
-function wolInput(btn) {
-  const body = $("wolBody");
+function guideInput(btn) {
+  const body = $("guideBody");
   switch (btn) {
     case "Up": body.scrollBy({ top: -160, behavior: "smooth" }); break;
     case "Down": body.scrollBy({ top: 160, behavior: "smooth" }); break;
-    case "B": case "A": wolOpen = false; $("overlay-wol").classList.remove("active"); break;
+    case "B": case "A": guideOpen = false; $("overlay-guide").classList.remove("active"); break;
   }
 }
 
@@ -1865,7 +1861,7 @@ function handleInput(btn, src) {
   if (radialSub) { radialSubInput(btn); return; }
   if (radialOpen) { radialInput(btn); return; }
   if (ingameOpen) { ingameInput(btn); return; }
-  if (wolOpen) { wolInput(btn); return; }
+  if (guideOpen) { guideInput(btn); return; }
   if (filterOpen) { filterInput(btn); return; }
   if (gameMenu) { gameMenuInput(btn); return; }
   if (collectOpen) { collectInput(btn); return; }
@@ -2120,6 +2116,6 @@ function mockHandle(msg) {
 fitStage();
 tickClock();
 renderTabbars();
-renderWol();
+renderGuide();
 switchView("library");
 send({ cmd: "ready" });

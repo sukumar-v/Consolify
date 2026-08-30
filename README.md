@@ -95,9 +95,9 @@ CouchLauncher/
   no registry value or API to select it, so the app cannot switch it for you. It is a one-time
   choice that persists: step 01 of the in-app setup guide walks through it.
 - **Lock screen, wake & startup** — Settings → "Launch Couch Launcher at login" (HKCU Run key),
-  plus a step-by-step in-app guide: Windows Hello PIN for couch-friendly sign-in (the sign-in
-  screen's touch keyboard supports gamepad input), BIOS Wake-on-LAN, adapter magic-packet
-  settings, letting the controller receiver wake the PC, Fast Startup, and automatic sign-in.
+  plus a step-by-step in-app guide: the touch keyboard's Gamepad layout, a Windows Hello PIN for
+  couch-friendly sign-in (the sign-in screen's touch keyboard supports gamepad input), letting the
+  controller receiver wake the PC from sleep, and auto-starting the launcher.
 - **Focus guarding** — no taskbar button; if the desktop steals focus while no game runs, the
   launcher re-activates itself (Settings → "Keep launcher focused"). Alt-Tab still works.
 

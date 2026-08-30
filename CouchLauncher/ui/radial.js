@@ -49,9 +49,9 @@ const SHORTCUTS = [
 /** Close every transient menu so an overlay never stacks on a stale one. */
 function closeAllMenus() {
   filterOpen = false; gameMenu = null; collectOpen = false;
-  manageOpen = false; confirmState = null; wolOpen = false;
+  manageOpen = false; confirmState = null; guideOpen = false;
   ["overlay-filter", "overlay-gamemenu", "overlay-collect",
-   "overlay-manage", "overlay-confirm", "overlay-wol"]
+   "overlay-manage", "overlay-confirm", "overlay-guide"]
     .forEach(id => $(id).classList.remove("active"));
 }
 
