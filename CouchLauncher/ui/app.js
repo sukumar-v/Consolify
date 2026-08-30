@@ -139,16 +139,41 @@ window.addEventListener("mousedown", (e) => {
   if (e.target instanceof Element && e.target.closest(FOCUSABLE_SEL)) setPointerOnItem(true);
 }, true);
 
+/*
+ * A focused tile grows past its own box: scale(1.05) pushes it about 12px up (the transform
+ * origin is its bottom edge) and the ring adds 3px all round. Anything less than that much
+ * clearance and the highlight is shaved off against the scroller's edge.
+ */
+const REVEAL_MARGIN = 30;
+
 /**
- * Scroll a focused element into view. `scrollIntoView({block:"nearest"})` stops as soon as
- * the element's box is visible, which clips the focus ring/scale of the first and last rows
- * against the container padding — so snap fully to the ends instead.
+ * Scroll a focused element into view, keeping REVEAL_MARGIN of clearance on the side it is
+ * approaching from. `scrollIntoView({block:"nearest"})` stops the moment the element's *unscaled*
+ * box is visible, which parks it flush against the edge and clips the growth — coming down the
+ * grid it shaved the bottom of the new row, coming up it shaved the top.
+ *
+ * The first and last rows snap fully to the ends instead, so their outer edge is never cropped.
  */
 function revealIn(scroller, el, isFirst, isLast) {
   if (!scroller || !el) return;
-  if (isFirst) scroller.scrollTo({ top: 0, behavior: "smooth" });
-  else if (isLast) scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-  else el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (isFirst) { scroller.scrollTo({ top: 0, behavior: "smooth" }); return; }
+  if (isLast) { scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }); return; }
+
+  // offsetTop is relative to the scroller because it is `position: relative` -- deliberately, so
+  // this arithmetic stays in layout pixels. getBoundingClientRect would report post-transform
+  // pixels (the whole stage is scaled to the window) and would not match scrollTop.
+  const top = el.offsetTop;
+  const bottom = top + el.offsetHeight;
+  const viewTop = scroller.scrollTop;
+  const viewBottom = viewTop + scroller.clientHeight;
+
+  let next = null;
+  if (top - REVEAL_MARGIN < viewTop) next = top - REVEAL_MARGIN;
+  else if (bottom + REVEAL_MARGIN > viewBottom) next = bottom + REVEAL_MARGIN - scroller.clientHeight;
+  if (next === null) return;
+
+  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.scrollTo({ top: Math.max(0, Math.min(next, max)), behavior: "smooth" });
 }
 
 /*
@@ -1214,6 +1239,10 @@ function settingsRows() {
   rows.push(sliderRow("Stick deadzone", () => s.deadzone, 0.05, 0.40, 0.01, v => set(() => s.deadzone = v), v => v.toFixed(2)));
   rows.push(sliderRow("Cursor sensitivity", () => s.sensitivity, 0.2, 3.0, 0.1, v => set(() => s.sensitivity = v), v => v.toFixed(1) + "×"));
   rows.push(sliderRow("Acceleration curve", () => s.accelExponent, 1.0, 3.0, 0.1, v => set(() => s.accelExponent = v), v => v.toFixed(1)));
+  rows.push(cycleRow("Speed boost button", ["RT", "LT", "LB", "RB", "LS", "RS", "Off"], () => s.boostButton, v => set(() => s.boostButton = v),
+    "Hold to move the cursor and scroll faster — crossing a 4K screen a nudge at a time gets old"));
+  if (s.boostButton !== "Off")
+    rows.push(sliderRow("Boost multiplier", () => s.boostMultiplier, 1.5, 5.0, 0.5, v => set(() => s.boostMultiplier = v), v => v.toFixed(1) + "×"));
   rows.push(cycleRow("Left click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.leftClickButton, v => set(() => s.leftClickButton = v),
     "Sends a real mouse click when the launcher is not focused"));
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
@@ -1281,11 +1310,15 @@ function toggleRow(name, hint, get, setV) {
   };
 }
 
+/* Both row builders fall back when a setting is missing. A settings file written by an older
+   build has no key for an option added since, and one undefined value used to throw inside the
+   formatter and take the whole settings screen down with it. */
 function sliderRow(name, get, min, max, step, setV, fmt) {
+  const cur = () => { const v = get(); return typeof v === "number" && isFinite(v) ? v : min; };
   return {
-    name, type: "slider", value: get(), min, max, fmt,
+    name, type: "slider", value: cur(), min, max, fmt,
     adjust: (dir) => {
-      let v = Math.round((get() + dir * step) / step) * step;
+      let v = Math.round((cur() + dir * step) / step) * step;
       v = Math.max(min, Math.min(max, v));
       setV(v);
     },
@@ -1293,10 +1326,11 @@ function sliderRow(name, get, min, max, step, setV, fmt) {
 }
 
 function cycleRow(name, options, get, setV, hint, warn) {
+  const cur = () => (options.includes(get()) ? get() : options[0]);
   return {
-    name, hint, warn, type: "select", value: get(),
+    name, hint, warn, type: "select", value: cur(),
     adjust: (dir) => {
-      const i = (options.indexOf(get()) + dir + options.length) % options.length;
+      const i = (options.indexOf(cur()) + dir + options.length) % options.length;
       setV(options[i]);
     },
   };
@@ -2000,6 +2034,7 @@ function mockHandle(msg) {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
+        boostButton: "RT", boostMultiplier: 2.5,
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,

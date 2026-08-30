@@ -108,6 +108,8 @@ html, body {
 
 /* All-games grid */
 .grid-scroll {
+  /* relative so revealIn() can measure rows against it with offsetTop */
+  position: relative;
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px;
   padding: 18px 12px 28px; margin: -18px -12px 0;
@@ -225,6 +227,7 @@ html, body {
 
 /* ---- settings ---- */
 .settings-scroll {
+  position: relative;   /* see .grid-scroll */
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 18px;
   padding: 30px 80px 30px; scrollbar-width: none;
@@ -323,6 +326,7 @@ html, body {
   padding: 30px 80px 0; overflow: hidden;
 }
 .coll-list {
+  position: relative;   /* see .grid-scroll */
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 18px;
   padding: 12px 12px 30px; margin: -12px -12px 0;
@@ -408,6 +412,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 }
 .ov-cat:first-child { padding-top: 4px; }
 .ov-scroll {
+  position: relative;   /* see .grid-scroll */
   display: flex; flex-direction: column; gap: 6px;
   max-height: 620px; overflow-y: auto;
   padding: 10px 10px; margin: -10px -10px;

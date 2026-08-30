@@ -326,6 +326,8 @@ public class UiBridge
         t.Deadzone = Math.Clamp(s.Deadzone, 0.05, 0.40);
         t.Sensitivity = Math.Clamp(s.Sensitivity, 0.2, 3.0);
         t.AccelExponent = Math.Clamp(s.AccelExponent, 1.0, 3.0);
+        t.BoostButton = s.BoostButton;
+        t.BoostMultiplier = Math.Clamp(s.BoostMultiplier, 1.5, 5.0);
         t.LeftClickButton = s.LeftClickButton;
         t.RightClickButton = s.RightClickButton;
         t.MinimizeCombo = s.MinimizeCombo;

@@ -319,6 +319,10 @@ public class GamepadService : IDisposable
             }
             else if (s.GamepadMouseEnabled)
             {
+                // Hold the boost button to cross the screen quickly. It scales the cursor and both
+                // scroll axes by the same factor, so the pad keeps feeling like one device.
+                double boost = ComboPressed(state.Gamepad, s.BoostButton) ? Math.Clamp(s.BoostMultiplier, 1.0, 5.0) : 1.0;
+
                 double nx = state.Gamepad.sThumbLX / 32767.0;
                 double ny = state.Gamepad.sThumbLY / 32767.0;
                 double mag = Math.Sqrt(nx * nx + ny * ny);
@@ -326,7 +330,7 @@ public class GamepadService : IDisposable
                 {
                     // rescale so movement starts at zero right past the deadzone, then apply accel curve
                     double t = Math.Min((mag - s.Deadzone) / (1 - s.Deadzone), 1.0);
-                    double speed = MaxSpeedPxPerSec * s.Sensitivity * Math.Pow(t, s.AccelExponent);
+                    double speed = MaxSpeedPxPerSec * s.Sensitivity * Math.Pow(t, s.AccelExponent) * boost;
                     fracX += nx / mag * speed * dt;
                     fracY += -ny / mag * speed * dt;
                     int dx = (int)fracX, dy = (int)fracY;
@@ -351,12 +355,12 @@ public class GamepadService : IDisposable
                 if (Math.Abs(ry) >= Math.Abs(rx))
                 {
                     hScrollAccum = 0;
-                    scrollAccum = StickScroll(ry, s.Deadzone, dt, scrollAccum, n => SendWheel(n * 120));
+                    scrollAccum = StickScroll(ry, s.Deadzone, dt, boost, scrollAccum, n => SendWheel(n * 120));
                 }
                 else
                 {
                     scrollAccum = 0;
-                    hScrollAccum = StickScroll(rx, s.Deadzone, dt, hScrollAccum, n => SendHWheel(n * 120));
+                    hScrollAccum = StickScroll(rx, s.Deadzone, dt, boost, hScrollAccum, n => SendHWheel(n * 120));
                 }
             }
 
@@ -392,12 +396,12 @@ public class GamepadService : IDisposable
     /// One axis of stick-driven scrolling: rescales past the deadzone, accumulates notches per
     /// elapsed time and emits whole notches. Returns the carried-over remainder.
     /// </summary>
-    private static double StickScroll(double axis, double deadzone, double dt, double accum, Action<int> emit)
+    private static double StickScroll(double axis, double deadzone, double dt, double boost, double accum, Action<int> emit)
     {
         double mag = Math.Abs(axis);
         if (mag <= deadzone) return 0;
         double t = Math.Min((mag - deadzone) / (1 - deadzone), 1.0);
-        accum += Math.Sign(axis) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * dt;
+        accum += Math.Sign(axis) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * boost * dt;
         int notches = (int)accum;
         if (notches != 0)
         {
