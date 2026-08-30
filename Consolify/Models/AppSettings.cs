@@ -1,4 +1,4 @@
-namespace CouchLauncher.Models;
+namespace Consolify.Models;
 
 public class AppSettings
 {

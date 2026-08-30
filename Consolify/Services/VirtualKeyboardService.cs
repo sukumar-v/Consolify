@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using CouchLauncher.Interop;
+using Consolify.Interop;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>
 /// Shows/hides the Windows touch keyboard (TabTip.exe). The touch keyboard is preferred because

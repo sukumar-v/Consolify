@@ -1,10 +1,10 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using CouchLauncher.Models;
+using Consolify.Models;
 using Microsoft.Win32;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>
 /// Scans Steam (appmanifest ACF files), Epic (launcher .item manifests) and GOG (registry)

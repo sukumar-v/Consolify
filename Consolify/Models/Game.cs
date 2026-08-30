@@ -1,4 +1,4 @@
-namespace CouchLauncher.Models;
+namespace Consolify.Models;
 
 public class Game
 {
@@ -12,7 +12,7 @@ public class Game
     public string? CoverFile { get; set; }           // portrait art, file name inside <appdata>\covers
     public string? BannerFile { get; set; }          // landscape art (continue row / detail hero)
     public long SizeBytes { get; set; }
-    public double PlaytimeMinutes { get; set; }      // tracked by Couch Launcher sessions
+    public double PlaytimeMinutes { get; set; }      // tracked by Consolify sessions
     public int Sessions { get; set; }
     public DateTime? LastPlayed { get; set; }
     public bool Installed { get; set; } = true;

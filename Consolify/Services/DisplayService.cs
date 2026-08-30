@@ -1,6 +1,6 @@
-using CouchLauncher.Interop;
+using Consolify.Interop;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 public record DisplayInfo(
     string DeviceName,      // \\.\DISPLAY1

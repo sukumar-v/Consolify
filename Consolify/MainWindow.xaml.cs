@@ -1,11 +1,11 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
-using CouchLauncher.Interop;
-using CouchLauncher.Services;
+using Consolify.Interop;
+using Consolify.Services;
 using Microsoft.Web.WebView2.Core;
 
-namespace CouchLauncher;
+namespace Consolify;
 
 public partial class MainWindow : Window
 {
@@ -124,13 +124,13 @@ public partial class MainWindow : Window
 #endif
 
         var uiDir = Path.Combine(AppContext.BaseDirectory, "ui");
-        core.SetVirtualHostNameToFolderMapping("couch.ui", uiDir, CoreWebView2HostResourceAccessKind.Allow);
-        core.SetVirtualHostNameToFolderMapping("couch.data", Paths.DataDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("consolify.ui", uiDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("consolify.data", Paths.DataDir, CoreWebView2HostResourceAccessKind.Allow);
 
         _bridge = new UiBridge(this, core, _settings, _library, _displays, _scanner, _launcher, _keyboard, _windows);
         core.WebMessageReceived += _bridge.OnWebMessageReceived;
 
-        core.Navigate("https://couch.ui/index.html");
+        core.Navigate("https://consolify.ui/index.html");
     }
 
     private void OnGameStarted()

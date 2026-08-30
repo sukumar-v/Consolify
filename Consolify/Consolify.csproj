@@ -7,9 +7,10 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>CouchLauncher</AssemblyName>
-    <RootNamespace>CouchLauncher</RootNamespace>
+    <AssemblyName>Consolify</AssemblyName>
+    <RootNamespace>Consolify</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Consolify.ico</ApplicationIcon>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
@@ -19,6 +20,9 @@
 
   <ItemGroup>
     <None Include="ui\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- ApplicationIcon gives the exe its icon; Resource also embeds it so the window itself
+         (and therefore Alt-Tab) can use it, since there is no taskbar button to carry one -->
+    <Resource Include="Consolify.ico" />
   </ItemGroup>
 
 </Project>

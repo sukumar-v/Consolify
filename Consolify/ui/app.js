@@ -328,11 +328,11 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function coverUrl(g) {
-  if (g.coverFile) return HOST ? `https://couch.data/covers/${encodeURIComponent(g.coverFile)}` : g.coverFile;
+  if (g.coverFile) return HOST ? `https://consolify.data/covers/${encodeURIComponent(g.coverFile)}` : g.coverFile;
   return null;
 }
 function bannerUrl(g) {
-  if (g.bannerFile) return HOST ? `https://couch.data/covers/${encodeURIComponent(g.bannerFile)}` : g.bannerFile;
+  if (g.bannerFile) return HOST ? `https://consolify.data/covers/${encodeURIComponent(g.bannerFile)}` : g.bannerFile;
   return coverUrl(g);
 }
 
@@ -351,7 +351,7 @@ function initials(title) {
  * Cover art loads through a small queue.
  *
  * WebView2's virtual-host mapping drops requests when a whole screen's worth of tiles
- * fire at once: with ~22 images requested simultaneously from https://couch.data only
+ * fire at once: with ~22 images requested simultaneously from https://consolify.data only
  * the first handful resolved and the rest failed outright, leaving most tiles blank
  * even though every file was present and valid. Capping concurrency and retrying with
  * a cache-busting suffix makes the load reliable; anything still failing after its
@@ -1271,7 +1271,7 @@ function settingsRows() {
   const rows = [];
   rows.push({ section: "DISPLAY" });
   rows.push({
-    name: "TV display", hint: "Couch Launcher opens here, and games are steered onto it",
+    name: "TV display", hint: "Consolify opens here, and games are steered onto it",
     type: "select",
     value: displayLabel(S.displays.find(d => d.deviceName === s.tvDeviceName) || null),
     adjust: (dir) => set(() => {
@@ -1303,7 +1303,7 @@ function settingsRows() {
   rows.push(cycleRow("Left click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.leftClickButton, v => set(() => s.leftClickButton = v),
     "Sends a real mouse click when the launcher is not focused"));
   rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
-  rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Couch Launcher exits",
+  rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Consolify exits",
     () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
   const comboWarn =
     s.minimizeCombo === "Guide" ?
@@ -1345,7 +1345,7 @@ function settingsRows() {
   });
 
   rows.push({ section: "STARTUP, WAKE & LOCK SCREEN" });
-  rows.push(toggleRow("Launch Couch Launcher at login", "Registers a startup entry so the launcher is ready after wake or reboot",
+  rows.push(toggleRow("Launch Consolify at login", "Registers a startup entry so the launcher is ready after wake or reboot",
     () => s.launchOnStartup, v => set(() => s.launchOnStartup = v)));
   rows.push({
     name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, controller wake, auto-start",
@@ -1353,7 +1353,7 @@ function settingsRows() {
     action: () => { guideOpen = true; $("overlay-guide").classList.add("active"); },
   });
   rows.push({
-    name: "Exit Couch Launcher", type: "action", label: "Exit", danger: true,
+    name: "Exit Consolify", type: "action", label: "Exit", danger: true,
     action: () => send({ cmd: "exitApp" }),
   });
   return rows;
@@ -1817,7 +1817,7 @@ const GUIDE_STEPS = [
   ["Switch the touch keyboard to the Gamepad layout (one time)", "Windows does not expose this as a setting an app can flip, so do it once by hand and it sticks. Open the touch keyboard (hold <b>Start</b>), tap the <b>cog icon</b> in its top-left, open <b>Keyboard layout</b> and choose <b>Gamepad</b>. You then get controller navigation with button accelerators — <b>X</b> backspace, <b>Y</b> space. On the default layout the keyboard ignores the pad entirely. Requires Windows 11 build 26100.3624 or newer."],
   ["Sign in from the couch: set up a Windows Hello PIN", "Apps cannot type into the secure lock screen, but you don't need one: in <b>Settings → Accounts → Sign-in options</b>, add a <b>PIN (Windows Hello)</b>. The sign-in screen's PIN pad works with the touch keyboard, which supports gamepad input — so after a wake you can sign in without leaving the sofa. For a fully hands-off couch PC, enable automatic sign-in instead (<b>netplwiz</b>, untick \"Users must enter a user name and password\")."],
   ["Let your controller's receiver wake the PC", "Open <b>Device Manager</b> and find your gamepad's USB receiver (under <b>Human Interface Devices</b> or <b>Xbox Peripherals</b>). Open its <b>Power Management</b> tab and tick <b>Allow this device to wake the computer</b>. Pressing the controller button will then wake the PC from sleep."],
-  ["Auto-start Couch Launcher", "Turn on <b>Launch Couch Launcher at login</b> in Settings → Startup so the PC lands straight back on the TV with gamepad-mouse active after waking."],
+  ["Auto-start Consolify", "Turn on <b>Launch Consolify at login</b> in Settings → Startup so the PC lands straight back on the TV with gamepad-mouse active after waking."],
 ];
 
 function renderGuide() {

@@ -1,4 +1,4 @@
-# Couch Launcher — working notes
+# Consolify — working notes
 
 ## Commit messages
 
@@ -26,7 +26,7 @@ Stop the scrolled grid from clipping through the All games header
   hosting, so it cannot see host-level input, focus, cursor or window bugs. It is
   fine for layout and UI logic only.
 - For anything touching input, focus, the cursor or window behaviour, run the
-  published app: `publish\CouchLauncher.exe --windowed` gives a 1280x720
+  published app: `publish\Consolify.exe --windowed` gives a 1280x720
   non-topmost window. Drive it with real `SendInput` and screen captures.
 - The WPF window sets `ShowInTaskbar=false`, so `Process.MainWindowHandle` is 0 —
   find the window by enumerating top-level windows for the pid.

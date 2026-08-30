@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using CouchLauncher.Interop;
-using CouchLauncher.Models;
+using Consolify.Interop;
+using Consolify.Models;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>
 /// Orchestrates a game session:

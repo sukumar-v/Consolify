@@ -1,7 +1,7 @@
 using System.Windows;
-using CouchLauncher.Services;
+using Consolify.Services;
 
-namespace CouchLauncher;
+namespace Consolify;
 
 public partial class App : Application
 {
@@ -9,7 +9,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        _instanceMutex = new System.Threading.Mutex(true, "CouchLauncher_SingleInstance", out bool createdNew);
+        _instanceMutex = new System.Threading.Mutex(true, "Consolify_SingleInstance", out bool createdNew);
         if (!createdNew)
         {
             Shutdown();
@@ -17,7 +17,8 @@ public partial class App : Application
         }
 
         Paths.EnsureCreated();
-        Log.Info("---- Couch Launcher starting ----");
+        Log.Info("---- Consolify starting ----");
+        StartupService.MigrateOldEntry();
 
         AppDomain.CurrentDomain.UnhandledException += (_, ex) =>
             Log.Info($"Unhandled exception: {ex.ExceptionObject}");

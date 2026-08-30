@@ -1,4 +1,6 @@
-# Couch Launcher
+# Consolify
+
+<img src="consolify-icon.png" alt="Consolify" width="120">
 
 A full-screen, controller-first game launcher for the living-room TV, built for Windows 11.
 The UI is the imported Claude Design project (`Couch Launcher.dc.html`) implemented as a real
@@ -10,24 +12,24 @@ system-level features through Win32 P/Invoke.
 Requirements: **.NET 8 SDK**, **WebView2 Runtime** (preinstalled on Windows 11).
 
 ```bash
-dotnet build CouchLauncher.sln
+dotnet build Consolify.sln
 ```
 
-Run `CouchLauncher\bin\Debug\net8.0-windows\CouchLauncher.exe`, or open `CouchLauncher.sln`
+Run `Consolify\bin\Debug\net8.0-windows\Consolify.exe`, or open `Consolify.sln`
 in Visual Studio 2022 and F5. Pass `--windowed` for a 1280×720 debug window (no always-on-top,
 no focus guarding) instead of the full-screen TV mode.
 
 The UI can also be previewed in a plain browser (it self-mocks sample data when not hosted in
-WebView2): serve `CouchLauncher/ui/` with any static server and open `index.html`.
+WebView2): serve `Consolify/ui/` with any static server and open `index.html`.
 
 ## Architecture
 
 ```
-CouchLauncher/
+Consolify/
   MainWindow.xaml(.cs)    Borderless, topmost, taskbar-less window; hosts WebView2 on the TV display
   UiBridge.cs             JSON message bridge: web UI <-> native services
   ui/                     The design-faithful UI (index.html, app.css, app.js), 1920x1080 stage
-                          scaled to the display; served via WebView2 virtual host couch.ui
+                          scaled to the display; served via WebView2 virtual host consolify.ui
   Services/
     DisplayService.cs     Monitor enumeration + primary-display switching (ChangeDisplaySettingsEx)
     GameLaunchService.cs  Launch orchestration, process tracking, window repositioning, playtime
@@ -37,7 +39,7 @@ CouchLauncher/
     VirtualKeyboardService.cs  Touch keyboard (TabTip) via ITipInvocation COM
     CursorService.cs      Optional system-wide pointer hiding while the D-pad drives
     StartupService.cs     HKCU Run key registration
-    Storage.cs            JSON persistence in %APPDATA%\CouchLauncher (settings, library, log, covers)
+    Storage.cs            JSON persistence in %APPDATA%\Consolify (settings, library, log, covers)
   Interop/NativeMethods.cs   All P/Invoke declarations
 ```
 
@@ -94,15 +96,20 @@ CouchLauncher/
   layout**, which Windows exposes solely through the keyboard's own settings flyout — there is
   no registry value or API to select it, so the app cannot switch it for you. It is a one-time
   choice that persists: step 01 of the in-app setup guide walks through it.
-- **Lock screen, wake & startup** — Settings → "Launch Couch Launcher at login" (HKCU Run key),
+- **Lock screen, wake & startup** — Settings → "Launch Consolify at login" (HKCU Run key),
   plus a step-by-step in-app guide: the touch keyboard's Gamepad layout, a Windows Hello PIN for
   couch-friendly sign-in (the sign-in screen's touch keyboard supports gamepad input), letting the
   controller receiver wake the PC from sleep, and auto-starting the launcher.
 - **Focus guarding** — no taskbar button; if the desktop steals focus while no game runs, the
   launcher re-activates itself (Settings → "Keep launcher focused"). Alt-Tab still works.
 
-Data lives in `%APPDATA%\CouchLauncher\` (`settings.json`, `library.json`, `covers\`,
-`couchlauncher.log`). Delete `library.json` to force a clean rescan.
+Data lives in `%APPDATA%\Consolify\` (`settings.json`, `library.json`, `covers\`,
+`consolify.log`). Delete `library.json` to force a clean rescan.
+
+The app was previously called **Couch Launcher**. On first run it copies `settings.json`,
+`library.json` and any missing cover art out of `%APPDATA%\CouchLauncher\`, and moves an existing
+HKCU Run entry across. It copies rather than moves, and leaves the old folder alone — delete that
+yourself once you are satisfied the library came over.
 
 ## Design → native mapping (flagged deviations)
 

@@ -1,11 +1,11 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CouchLauncher.Models;
-using CouchLauncher.Services;
+using Consolify.Models;
+using Consolify.Services;
 using Microsoft.Web.WebView2.Core;
 
-namespace CouchLauncher;
+namespace Consolify;
 
 /// <summary>
 /// JSON message bridge between the WebView2 UI and the native shell.

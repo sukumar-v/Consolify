@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using CouchLauncher.Interop;
-using CouchLauncher.Models;
+using Consolify.Interop;
+using Consolify.Models;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>
 /// Background XInput polling loop (~125 Hz).

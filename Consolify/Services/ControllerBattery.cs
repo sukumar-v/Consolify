@@ -1,7 +1,7 @@
 using Windows.Gaming.Input;
 using Windows.System.Power;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>How much charge the pad has left, and where the number came from.</summary>
 /// <param name="Present">A controller is attached at all.</param>

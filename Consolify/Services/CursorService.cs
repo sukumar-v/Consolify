@@ -1,6 +1,6 @@
-using CouchLauncher.Interop;
+using Consolify.Interop;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 /// <summary>
 /// Hides the mouse pointer while the user is navigating with the D-pad.

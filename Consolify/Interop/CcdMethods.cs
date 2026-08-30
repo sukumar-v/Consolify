@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace CouchLauncher.Interop;
+namespace Consolify.Interop;
 
 
 /// <summary>

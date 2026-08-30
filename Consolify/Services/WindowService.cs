@@ -5,9 +5,9 @@ using System.Windows.Media.Imaging;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using CouchLauncher.Interop;
+using Consolify.Interop;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 public record WindowInfo(long Handle, string Title, string ProcessName, bool Minimized, string Display);
 

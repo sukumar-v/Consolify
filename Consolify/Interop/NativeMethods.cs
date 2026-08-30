@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace CouchLauncher.Interop;
+namespace Consolify.Interop;
 
 internal static class NativeMethods
 {

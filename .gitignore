@@ -62,8 +62,8 @@ $RECYCLE.BIN/
 *.swp
 *~
 
-# Couch Launcher runtime data (lives in %APPDATA%\CouchLauncher, but never commit strays)
+# Consolify runtime data (lives in %APPDATA%\Consolify, but never commit strays)
 /settings.json
 /library.json
-/couchlauncher.log
+/consolify.log
 /covers/

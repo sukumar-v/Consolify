@@ -1,24 +1,81 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CouchLauncher.Models;
+using Consolify.Models;
 
-namespace CouchLauncher.Services;
+namespace Consolify.Services;
 
 public static class Paths
 {
     public static string DataDir { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CouchLauncher");
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Consolify");
 
     public static string CoversDir { get; } = Path.Combine(DataDir, "covers");
     public static string SettingsFile { get; } = Path.Combine(DataDir, "settings.json");
     public static string LibraryFile { get; } = Path.Combine(DataDir, "library.json");
-    public static string LogFile { get; } = Path.Combine(DataDir, "couchlauncher.log");
+    public static string LogFile { get; } = Path.Combine(DataDir, "consolify.log");
 
     public static void EnsureCreated()
     {
+        MigrateFromCouchLauncher();
         Directory.CreateDirectory(DataDir);
         Directory.CreateDirectory(CoversDir);
+    }
+
+    /// <summary>
+    /// The app used to be called Couch Launcher and kept everything in %APPDATA%\CouchLauncher.
+    /// Renaming without this would orphan an existing library, its cover art and every setting.
+    ///
+    /// Copies rather than moves, and leaves the old folder alone. Moving the whole directory is
+    /// all-or-nothing and races anything still holding a handle in there -- an old build left
+    /// running will keep writing to it, and a half-finished move can leave the library in one
+    /// folder and the settings in another. The WebView2 profile is skipped deliberately: it is a
+    /// rebuildable cache, it is the part that holds locks, and it is most of the bytes.
+    ///
+    /// A marker file makes this run exactly once, so a rescan that happened before the migration
+    /// completed is still replaced by the real library, and later starts never touch it again.
+    /// </summary>
+    private static void MigrateFromCouchLauncher()
+    {
+        var old = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CouchLauncher");
+        var marker = Path.Combine(DataDir, ".migrated-from-couchlauncher");
+        if (!Directory.Exists(old) || File.Exists(marker)) return;
+
+        try
+        {
+            Directory.CreateDirectory(DataDir);
+            Directory.CreateDirectory(CoversDir);
+
+            foreach (var name in new[] { "settings.json", "library.json" })
+            {
+                var src = Path.Combine(old, name);
+                if (File.Exists(src)) File.Copy(src, Path.Combine(DataDir, name), overwrite: true);
+            }
+
+            int covers = 0;
+            var oldCovers = Path.Combine(old, "covers");
+            if (Directory.Exists(oldCovers))
+                foreach (var f in Directory.GetFiles(oldCovers))
+                {
+                    var dst = Path.Combine(CoversDir, Path.GetFileName(f));
+                    if (File.Exists(dst)) continue;
+                    File.Copy(f, dst);
+                    covers++;
+                }
+
+            // Carry the history over, but only into an empty log, so a re-run cannot duplicate it.
+            var oldLog = Path.Combine(old, "couchlauncher.log");
+            if (File.Exists(oldLog) && !File.Exists(LogFile)) File.Copy(oldLog, LogFile);
+
+            File.WriteAllText(marker, DateTime.Now.ToString("O"));
+            Log.Info($"Migrated settings, library and {covers} cover(s) from {old} (left in place)");
+        }
+        catch (Exception ex)
+        {
+            // Never block startup on this. Without the marker it simply tries again next time.
+            try { Log.Info($"Could not migrate from {old}: {ex.Message}"); } catch { }
+        }
     }
 }
 
