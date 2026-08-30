@@ -65,8 +65,12 @@ foreach ($required in 'Consolify.exe', 'ui\index.html', 'ui\app.js', 'ui\app.css
 # Nothing here is any use to someone running the app.
 Get-ChildItem $staging -Include *.pdb, *.xml -Recurse | Remove-Item -Force
 
-Copy-Item (Join-Path $repo 'README.md') $staging -Force
-if (Test-Path (Join-Path $repo 'LICENSE')) { Copy-Item (Join-Path $repo 'LICENSE') $staging -Force }
+# Apache-2.0 section 4 wants the license and the NOTICE to travel with the distribution, not
+# just sit in the repo.
+foreach ($doc in "README.md", "LICENSE", "NOTICE", "CONTRIBUTING.md") {
+    $path = Join-Path $repo $doc
+    if (Test-Path $path) { Copy-Item $path $staging -Force }
+}
 
 $zip = Join-Path $dist "Consolify-v$Version-$Runtime.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
