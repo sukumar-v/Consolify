@@ -16,6 +16,10 @@
   <div class="bd" id="bdB"></div>
 </div>
 
+<!-- Still of the desktop or the game, captured by the host just before an overlay menu opens.
+     The window is opaque, so this is what "you can see what is behind the menu" is made of. -->
+<div id="overlayShot"></div>
+
 <div id="stage">
 
   <!-- ============ LIBRARY ============ -->
@@ -208,6 +212,7 @@
       <div class="radial" id="radialRing"></div>
       <div class="radial-center">
         <div class="radial-sel" id="radialSelName">—</div>
+        <div class="radial-desc" id="radialDesc"></div>
         <div class="radial-target mono" id="radialTarget"></div>
       </div>
       <div class="ov-foot radial-foot" id="radialFoot"></div>
@@ -223,12 +228,17 @@
     </div>
   </div>
 
-  <!-- ============ IN-GAME MENU ============ -->
+  <!-- ============ IN-GAME MENU ============
+       A console-style bar along the bottom rather than a centred card, so as much of the
+       paused game as possible stays visible above it. -->
   <div class="overlay" id="overlay-ingame">
-    <div class="quick-card menu-card">
-      <div class="quick-title mono" id="ingameTitle">PLAYING</div>
-      <div class="ov-scroll" id="ingameList"></div>
-      <div class="ov-foot" id="ingameFoot"></div>
+    <div class="ingame-bar">
+      <div class="ingame-head">
+        <div class="ingame-title" id="ingameTitle">PLAYING</div>
+        <div class="ingame-desc" id="ingameDesc"></div>
+      </div>
+      <div class="ingame-row" id="ingameList"></div>
+      <div class="ov-foot ingame-foot" id="ingameFoot"></div>
     </div>
   </div>
 

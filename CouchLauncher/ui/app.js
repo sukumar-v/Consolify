@@ -179,6 +179,29 @@ const ICONS = {
   terminal: '<path d="m5 8 4 4-4 4M12 16h7"/><rect x="2" y="4" width="20" height="16" rx="1.5"/>',
   file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
   store: '<path d="M21 12a9 9 0 1 1-2.6-6.35M21 3.5v5h-5"/>',
+
+  /* ---- overlay-menu actions. Drawn to match the action rather than borrowed from a
+     lookalike: an X closes, a moon sleeps, and "switch window" copies the two overlapping
+     panes of the Xbox View button, which is the control that does this on a console. ---- */
+  play: '<path d="M8 5.4v13.2L18.5 12 8 5.4z"/>',
+  x: '<path d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6"/>',
+  viewBtn: '<rect x="2.5" y="8" width="11.5" height="9.5" rx="1.6"/>'
+         + '<path d="M7.4 8V6.5A1.5 1.5 0 0 1 8.9 5h10.1a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H17"/>',
+  moon: '<path d="M20.2 14.8A8.6 8.6 0 0 1 9.2 3.8a8.6 8.6 0 1 0 11 11z"/>',
+  keyboard: '<rect x="2" y="5.5" width="20" height="13" rx="2"/>'
+          + '<path d="M6 9.5h.01M10 9.5h.01M14 9.5h.01M18 9.5h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M8.5 16.5h7"/>',
+  pointer: '<path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2"/>'
+         + '<path d="M9.4 9.4l7 2.9-3 1.1-1.1 3-2.9-7z"/>',
+  home: '<path d="M3.5 10.4 12 3.8l8.5 6.6V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-6v6H5A1.5 1.5 0 0 1 3.5 19v-8.6z"/>',
+  apps: '<rect x="3.2" y="3.2" width="7.2" height="7.2" rx="1.6"/><rect x="13.6" y="3.2" width="7.2" height="7.2" rx="1.6"/>'
+      + '<rect x="3.2" y="13.6" width="7.2" height="7.2" rx="1.6"/><rect x="13.6" y="13.6" width="7.2" height="7.2" rx="1.6"/>',
+  power: '<path d="M12 3.2v8.4"/><path d="M7.3 6.4a7.6 7.6 0 1 0 9.4 0"/>',
+  monitor: '<rect x="2.5" y="4" width="19" height="12.5" rx="1.6"/><path d="M8.5 20.5h7M12 16.5v4"/>',
+  volume: '<path d="M4 9.4h3.6L12 5.4v13.2L7.6 14.6H4z"/><path d="M15.8 9.6a3.8 3.8 0 0 1 0 4.8M18.6 7.2a7.6 7.6 0 0 1 0 9.6"/>',
+  lock: '<rect x="4.4" y="10.4" width="15.2" height="10.1" rx="1.8"/><path d="M8 10.4V7.6a4 4 0 0 1 8 0v2.8"/>',
+  bars: '<path d="M4.5 20V9.5M9.5 20V4.5M14.5 20v-7M19.5 20v-4"/>',
+  gear: '<circle cx="12" cy="12" r="3.1"/>'
+      + '<path d="M12 2.6v2.8M12 18.6v2.8M2.6 12h2.8M18.6 12h2.8M5.3 5.3l2 2M16.7 16.7l2 2M18.7 5.3l-2 2M7.3 16.7l-2 2"/>',
 };
 
 function iconSvg(name) {
@@ -1700,7 +1723,20 @@ function wolInput(btn) {
   }
 }
 
-/* ---- overlay mode: transparent window floating over the desktop or a game ---- */
+/**
+ * The still the host grabbed of whatever was on screen before the menu opened. Deliberately
+ * NOT cleared when overlay mode ends: the in-game menu drops overlay mode on its way into the
+ * radial, and clearing here would blank the background halfway through that hop. It is simply
+ * replaced by the next capture, and null (a capture the host could not make, e.g. a game in
+ * exclusive fullscreen) falls back to the menu's own solid ground.
+ */
+function setOverlayShot(dataUri) {
+  const el = $("overlayShot");
+  el.style.backgroundImage = dataUri ? `url("${dataUri}")` : "none";
+  el.classList.toggle("has-shot", !!dataUri);
+}
+
+/* ---- overlay mode: a menu over a still of the desktop or the game behind it ---- */
 function setOverlayMode(on) {
   overlayMode = on;
   document.documentElement.classList.toggle("overlay-mode", on);
@@ -1828,6 +1864,7 @@ function handleHostMessage(m) {
       break;
     case "overlay":
       overlayTargetTitle = m.targetTitle || "";
+      setOverlayShot(m.shot);
       setOverlayMode(true);
       hostWindows = m.windows || [];
       if (m.runningGameId !== undefined) S.runningGameId = m.runningGameId;

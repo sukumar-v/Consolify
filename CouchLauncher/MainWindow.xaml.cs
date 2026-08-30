@@ -219,10 +219,15 @@ public partial class MainWindow : Window
         var fg = NativeMethods.GetForegroundWindow();
         if (fg != _hwnd) _overlayTarget = fg;
 
-        // Tell the UI to go transparent-overlay FIRST. Script keeps running while the window is
+        // Grab the screen before we put ourselves in front of it: the menu paints this still,
+        // dimmed, as its background, which is how you can still see what is behind it now that
+        // the window itself is opaque.
+        var shot = _windows.CaptureDisplay(_settings.Settings.TvDeviceName);
+
+        // Tell the UI to switch to overlay mode FIRST. Script keeps running while the window is
         // minimized, so by the time we show it the library is already hidden and only the menu
         // is painted -- otherwise the launcher flashes up before the overlay appears.
-        _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget));
+        _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget), shot);
         await Task.Delay(90);
 
         _overlayActive = true;

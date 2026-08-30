@@ -516,13 +516,18 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .radial-item.danger .ov-icon, .radial-item.danger span { color: #E97A6C; }
 
 .radial-center {
-  position: relative; width: 300px; text-align: center;
+  position: relative; width: 366px; text-align: center;
   display: flex; flex-direction: column; gap: 10px; pointer-events: none;
 }
 .radial-sel { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+/* Fixed height so the ring never shifts as the description changes length spoke to spoke. */
+.radial-desc {
+  font-size: 18px; line-height: 1.35; color: rgba(246,245,243,0.62);
+  height: 56px; display: flex; align-items: center; justify-content: center;
+}
 .radial-target {
   font-size: 16px; letter-spacing: 0.1em; color: rgba(246,245,243,0.42);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .radial-foot {
   position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
@@ -532,16 +537,69 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 /* the radial needs more contrast than a list menu, since it floats over the whole screen */
 #overlay-radial { background: rgba(8,8,10,0.90); }
 
+/* ---- in-game menu: a console-style bar along the bottom ---- */
+#overlay-ingame { align-items: flex-end; justify-content: flex-start; }
+.ingame-bar {
+  width: 100%; padding: 0 80px 46px;
+  display: flex; flex-direction: column; gap: 22px;
+  /* Lift the bar off the paused frame without a hard edge, so the game is still readable
+     above it but the labels never sit on a bright patch of artwork. */
+  background: linear-gradient(0deg, rgba(8,8,10,0.97) 42%, rgba(8,8,10,0.72) 74%, rgba(8,8,10,0) 100%);
+  padding-top: 150px;
+}
+.ingame-head { display: flex; flex-direction: column; gap: 7px; min-height: 62px; }
+.ingame-title {
+  font-family: "IBM Plex Mono", Consolas, monospace;
+  font-size: 16px; letter-spacing: 0.18em; color: rgba(246,245,243,0.5);
+}
+.ingame-desc { font-size: 21px; color: rgba(246,245,243,0.72); }
+.ingame-row { display: flex; gap: 22px; }
+.ingame-tile {
+  width: 176px; height: 128px; border-radius: 16px;
+  background: #101012; border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  transform-origin: center bottom;
+  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+}
+.ingame-tile.focused {
+  background: #141417; transform: scale(1.06);
+  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+}
+.ingame-tile .ov-icon { width: 34px; height: 34px; }
+.ingame-tile.focused .ov-icon { color: #F0A253; }
+.ingame-tile span { font-size: 20px; font-weight: 500; color: rgba(246,245,243,0.85); }
+.ingame-tile.danger .ov-icon, .ingame-tile.danger span { color: #E97A6C; }
+.ingame-foot { border-top: none; padding-top: 4px; margin-top: 0; }
+
 /* ---- overlay mode: the launcher floats over whatever is behind it ----
    The WPF window is AllowsTransparency, so a transparent body lets the desktop or game show
    through; only the menu and its dim wash are painted. */
-/* The window itself is opaque -- see the note in MainWindow: a transparent (layered) WPF
-   window costs the WebView2 every mouse and wheel message. So overlay mode paints its own
-   solid ground rather than letting the desktop through, and only hides the library behind it. */
+/* The window itself is opaque -- see the note in MainWindow: a transparent (layered) WPF window
+   costs the WebView2 every mouse and wheel message. To still show what is behind a menu, the
+   host captures the screen just before opening it and the UI paints that still here, under a
+   dim wash. Frozen rather than live, which is what a console overlay does anyway. */
+#overlayShot {
+  position: fixed; inset: 0; display: none;
+  background-size: cover; background-position: center;
+  /* A touch of blur and desaturation: enough that menu text never fights the artwork behind
+     it, not so much that you stop recognising what you were looking at. */
+  filter: blur(3px) saturate(0.85);
+  transform: scale(1.03);   /* hides the soft edges the blur leaves at the border */
+}
+body.overlay-mode #overlayShot.has-shot { display: block; }
+
 html.overlay-mode, body.overlay-mode { background: #08080A; cursor: none; }
 body.overlay-mode #backdrop { display: none; }
 body.overlay-mode .screen { display: none !important; }
 body.overlay-mode * { cursor: none !important; }
+
+/* Dim, not black. With a still behind them these can be see-through again -- the menu cards
+   are opaque, so the contrast complaint that pushed this to 0.93 does not apply. */
+body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.74); }
+body.overlay-mode #overlay-radialsub { background: rgba(8,8,10,0.74); }
+/* Lighter still: the in-game bar has its own gradient and lives at the bottom, so the paused
+   game stays readable above it. */
+body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
 
 /* Inline warning inside a settings row, so the row grows instead of spawning a second one */
 .set-warn {

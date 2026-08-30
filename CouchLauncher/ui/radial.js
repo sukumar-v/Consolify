@@ -16,12 +16,18 @@ let hostWindows = [];
 /* Spokes are laid out clockwise from the top, so with six of them the index IS the clock
    position: 0 top, 1 top-right, 2 lower-right, 3 bottom, 4 lower-left, 5 top-left. */
 const RADIAL_ITEMS = [
-  { id: "close",       label: "Close window",  icon: "trash", danger: true },  // top
-  { id: "windows",     label: "Switch window", icon: "folder" },               // top-right
-  { id: "shortcuts",   label: "Shortcuts",     icon: "terminal" },
-  { id: "keyboard",    label: "Keyboard",      icon: "file" },
-  { id: "centerMouse", label: "Center mouse",  icon: "info" },
-  { id: "sleep",       label: "Sleep",         icon: "eyeOff" },               // top-left
+  { id: "close",       label: "Close window",  icon: "x",        danger: true,   // top
+    desc: "Ask the window behind this menu to quit" },
+  { id: "windows",     label: "Switch window", icon: "viewBtn",                  // top-right
+    desc: "Pick another open window and bring it to the TV" },
+  { id: "shortcuts",   label: "Shortcuts",     icon: "apps",
+    desc: "Task Manager, Explorer, Settings and friends" },
+  { id: "keyboard",    label: "Keyboard",      icon: "keyboard",
+    desc: "Show or hide the on-screen keyboard" },
+  { id: "centerMouse", label: "Center mouse",  icon: "pointer",
+    desc: "Park the pointer in the middle of the TV" },
+  { id: "sleep",       label: "Sleep",         icon: "moon",                     // top-left
+    desc: "Blank the screen — any button wakes it" },
 ];
 
 /* Where the highlight sits before the stick has been pushed anywhere. Deliberately NOT spoke
@@ -30,14 +36,14 @@ const RADIAL_ITEMS = [
 const RADIAL_HOME = 1;
 
 const SHORTCUTS = [
-  { id: "taskManager",     label: "Task Manager",     icon: "terminal" },
+  { id: "taskManager",     label: "Task Manager",     icon: "bars" },
   { id: "explorer",        label: "File Explorer",    icon: "folder" },
-  { id: "settings",        label: "Windows Settings", icon: "store" },
-  { id: "displaySettings", label: "Display Settings", icon: "gamepad" },
-  { id: "volume",          label: "Volume Mixer",     icon: "chevronsUp" },
+  { id: "settings",        label: "Windows Settings", icon: "gear" },
+  { id: "displaySettings", label: "Display Settings", icon: "monitor" },
+  { id: "volume",          label: "Volume Mixer",     icon: "volume" },
   // Distinct from Sleep, which only blanks the screen: this hands the session to the Windows
   // lock screen, which the pad cannot drive at all.
-  { id: "lock",            label: "Lock PC",          icon: "eyeOff" },
+  { id: "lock",            label: "Lock PC",          icon: "lock" },
 ];
 
 /** Close every transient menu so an overlay never stacks on a stale one. */
@@ -87,8 +93,13 @@ function renderRadial() {
     el.addEventListener("click", () => { radialIdx = i; radialActivate(); });
     ring.appendChild(el);
   });
-  $("radialSelName").textContent = RADIAL_ITEMS[radialIdx].label;
-  $("radialTarget").textContent = overlayTargetTitle ? overlayTargetTitle.toUpperCase() : "NO WINDOW";
+  const sel = RADIAL_ITEMS[radialIdx];
+  $("radialSelName").textContent = sel.label;
+  $("radialDesc").textContent = sel.desc || "";
+  // "Close window" is the only spoke that acts on the window behind the menu, so that is the
+  // only one that needs to name it.
+  $("radialTarget").textContent =
+    sel.id === "close" ? (overlayTargetTitle ? overlayTargetTitle.toUpperCase() : "NO WINDOW") : "";
   $("radialFoot").innerHTML = foot(["A", "Select"], ["B", "Close"]);
 }
 
@@ -190,15 +201,15 @@ function hideIngame() {
 function ingameItems() {
   const g = gameById(S.runningGameId);
   return [
-    { label: "Resume game", icon: "info", sub: "Back to what you were playing",
+    { label: "Resume", icon: "play", desc: "Back to what you were playing",
       action: () => { hideIngame(); send({ cmd: "resumeGame" }); } },
-    { label: "Home", icon: "folder", sub: "Leave it running and open the library",
+    { label: "Home", icon: "home", desc: "Leave the game running and open the library",
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "goHome" }); } },
-    { label: "Windows menu", icon: "store", sub: "Switch windows, keyboard, sleep",
+    { label: "Windows", icon: "apps", desc: "Switch windows, keyboard, sleep",
       action: () => { hideIngame(); send({ cmd: "setRadialActive", active: true }); openRadial(g ? g.title : ""); } },
-    // No confirm step: drop the overlay and land back on the library. Leaving the transparent
-    // overlay window up over a closing game looks like nothing happened at all.
-    { label: "Close game", icon: "trash", danger: true,
+    // No confirm step: drop the overlay and land back on the library. Leaving the overlay up
+    // over a closing game looks like nothing happened at all.
+    { label: "Close game", icon: "x", danger: true, desc: "Ask the game to quit and return here",
       action: () => { hideIngame(); setOverlayMode(false); switchView("library"); send({ cmd: "closeGame" }); } },
   ];
 }
@@ -206,19 +217,36 @@ function ingameItems() {
 function renderIngame() {
   const g = gameById(S.runningGameId);
   $("ingameTitle").textContent = (g ? g.title : "PLAYING").toUpperCase();
+
   const items = ingameItems();
   ingameIdx = Math.max(0, Math.min(ingameIdx, items.length - 1));
-  renderMenu($("ingameList"), $("ingameFoot"), items, ingameIdx,
-    foot(["A", "Select"], ["B", "Resume"]),
-    (i) => { if (ingameIdx !== i) { ingameIdx = i; renderIngame(); } },
-    (i) => items[i].action());
+  $("ingameDesc").textContent = (items[ingameIdx] && items[ingameIdx].desc) || "";
+
+  const row = $("ingameList");
+  row.innerHTML = "";
+  items.forEach((it, i) => {
+    const el = document.createElement("div");
+    el.className = "ingame-tile"
+      + (i === ingameIdx && focusVisible() ? " focused" : "")
+      + (it.danger ? " danger" : "");
+    el.innerHTML = iconSvg(it.icon) + "<span>" + esc(it.label) + "</span>";
+    el.addEventListener("mouseenter", () => {
+      if (hoverEnabled() && ingameIdx !== i) { ingameIdx = i; renderIngame(); }
+    });
+    el.addEventListener("click", () => { ingameIdx = i; it.action(); });
+    row.appendChild(el);
+  });
+
+  $("ingameFoot").innerHTML = foot(["A", "Select"], ["B", "Resume"]);
 }
 
 function ingameInput(btn) {
   const items = ingameItems();
   switch (btn) {
-    case "Up": ingameIdx = Math.max(0, ingameIdx - 1); renderIngame(); break;
-    case "Down": ingameIdx = Math.min(items.length - 1, ingameIdx + 1); renderIngame(); break;
+    // A row, so it reads left and right. Up/Down are deliberately inert rather than wrapping
+    // the row, which would feel like the highlight jumped for no reason.
+    case "Left":  ingameIdx = Math.max(0, ingameIdx - 1); renderIngame(); break;
+    case "Right": ingameIdx = Math.min(items.length - 1, ingameIdx + 1); renderIngame(); break;
     case "A": if (focusVisible() && items[ingameIdx]) items[ingameIdx].action(); break;
     case "B": hideIngame(); send({ cmd: "resumeGame" }); break;
   }

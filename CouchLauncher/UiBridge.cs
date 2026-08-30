@@ -481,12 +481,13 @@ public class UiBridge
         _ => "Done"
     };
 
-    public void PushOverlay(string mode, string targetTitle) =>
+    public void PushOverlay(string mode, string targetTitle, string? shot) =>
         Push(new
         {
             type = "overlay",
             mode,
             targetTitle,
+            shot,
             windows = _windows.ListWindows(),
             displays = _displays.GetDisplays(),
             runningGameId = _launcher.RunningGameId

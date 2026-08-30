@@ -1,3 +1,7 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -137,6 +141,70 @@ public class WindowService
         }
         catch (Exception ex) { Log.Info($"Radial shortcut {id} failed: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// Grab what is on a display as a data: URI, so an overlay menu can show the desktop or the
+    /// paused game dimmed behind it. The launcher's own window cannot be see-through — see the
+    /// note in MainWindow — so the next best thing is a still of what was there a moment before
+    /// the menu came up. Call it BEFORE showing the overlay, or it captures the overlay itself.
+    ///
+    /// Downscaled and JPEG-encoded on purpose: it sits behind a dark wash and a slight blur, so
+    /// it gets no scrutiny, and a raw 4K frame would be megabytes of base64 over the bridge.
+    /// Returns null if the capture fails, which a game in exclusive fullscreen can cause; the
+    /// menu then just falls back to its solid background.
+    /// </summary>
+    public string? CaptureDisplay(string? deviceName)
+    {
+        var d = (deviceName is not null ? _displays.GetDisplay(deviceName) : null)
+                ?? _displays.GetDisplays().FirstOrDefault(x => x.IsPrimary);
+        if (d is null || d.Width <= 0 || d.Height <= 0) return null;
+
+        // Straight GDI rather than System.Drawing, which is a separate package this app does not
+        // otherwise need; WPF's own imaging stack does the scaling and the JPEG encoding.
+        IntPtr screen = IntPtr.Zero, mem = IntPtr.Zero, bmp = IntPtr.Zero, prev = IntPtr.Zero;
+        try
+        {
+            screen = NativeMethods.GetDC(IntPtr.Zero);
+            if (screen == IntPtr.Zero) return null;
+            mem = NativeMethods.CreateCompatibleDC(screen);
+            bmp = NativeMethods.CreateCompatibleBitmap(screen, d.Width, d.Height);
+            if (mem == IntPtr.Zero || bmp == IntPtr.Zero) return null;
+            prev = NativeMethods.SelectObject(mem, bmp);
+
+            if (!NativeMethods.BitBlt(mem, 0, 0, d.Width, d.Height, screen, d.X, d.Y,
+                                      NativeMethods.SRCCOPY | NativeMethods.CAPTUREBLT))
+            {
+                Log.Info("Overlay capture: BitBlt failed");
+                return null;
+            }
+
+            int w = Math.Min(d.Width, CaptureWidth);
+            int h = (int)Math.Round(d.Height * (w / (double)d.Width));
+            var source = Imaging.CreateBitmapSourceFromHBitmap(
+                bmp, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(w, h));
+
+            var encoder = new JpegBitmapEncoder { QualityLevel = 62 };
+            encoder.Frames.Add(BitmapFrame.Create(source));
+            using var ms = new MemoryStream();
+            encoder.Save(ms);
+            Log.Info($"Overlay capture: {w}x{h}, {ms.Length / 1024} KB");
+            return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Overlay capture failed: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (prev != IntPtr.Zero) NativeMethods.SelectObject(mem, prev);
+            if (bmp != IntPtr.Zero) NativeMethods.DeleteObject(bmp);
+            if (mem != IntPtr.Zero) NativeMethods.DeleteDC(mem);
+            if (screen != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, screen);
+        }
+    }
+
+    private const int CaptureWidth = 1280;
 
     /// <summary>
     /// "Suspend": drop the displays into standby without suspending the machine. Sleep would need

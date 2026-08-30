@@ -224,6 +224,22 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int index);
 
+    // ---- GDI screen capture (used for the still behind an overlay menu) ----
+
+    public const int SRCCOPY = 0x00CC0020;
+    /// <summary>Include layered windows in the blit; without it they come out as holes.</summary>
+    public const int CAPTUREBLT = 0x40000000;
+
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hDC, int w, int h);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hDC, IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hDC);
+    [DllImport("gdi32.dll")]
+    public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, int rop);
+
     public const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77;
     public const int SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
 
