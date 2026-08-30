@@ -1332,7 +1332,7 @@ function settingsRows() {
   });
 
   rows.push({ section: "LIBRARY" });
-  const counts = PLATFORMS.slice(1).map(p => `${p} ${S.games.filter(g => g.platform === p).length}`).join(" · ");
+  const counts = PLATFORMS.map(p => `${p} ${S.games.filter(g => g.platform === p).length}`).join(" · ");
   rows.push({
     name: "Rescan platforms", hint: counts || "Steam, Epic and GOG are scanned from their local install data",
     type: "action", label: S.scanning ? "Scanning…" : "Rescan",
@@ -1713,7 +1713,8 @@ function manageItems() {
   });
   items.push({
     label: "Change executable", icon: "file",
-    sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "Bypass the store launcher",
+    // Only subtitled once an exe has been picked -- the row already says what it does.
+    sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "",
     action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
   });
   if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))

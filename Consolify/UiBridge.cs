@@ -66,7 +66,11 @@ public class UiBridge
             case "ready":
                 PushState();
                 _window.PushPadState();
-                if (_library.Games.Count == 0) StartScan();
+                // Scan on every start, not just an empty library: games get installed and
+                // uninstalled between sessions, and nobody on a couch wants to go looking for
+                // Settings to find out. The merge keeps playtime, favourites, manual entries and
+                // every per-game override, so re-running it costs nothing.
+                StartScan();
                 break;
 
             case "launch":
