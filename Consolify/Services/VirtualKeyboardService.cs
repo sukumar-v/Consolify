@@ -23,6 +23,16 @@ public class VirtualKeyboardService
 
     public VirtualKeyboardService(SettingsStore settings) => _settings = settings;
 
+    /// <summary>
+    /// The built-in keyboard, when one is in use. Set by MainWindow, which owns the WPF window;
+    /// this service only decides which backend a Show/Hide/Toggle should reach.
+    /// </summary>
+    public Func<bool>? BuiltinVisible;
+    public Action? BuiltinShow;
+    public Action? BuiltinHide;
+
+    private bool UseBuiltin => _settings.Settings.KeyboardApp == "Builtin" && BuiltinShow is not null;
+
     public static bool IsVisible()
     {
         var wnd = NativeMethods.FindWindow("IPTip_Main_Window", null);
@@ -33,6 +43,11 @@ public class VirtualKeyboardService
     {
         try
         {
+            if (UseBuiltin)
+            {
+                if (BuiltinVisible?.Invoke() == true) BuiltinHide!(); else BuiltinShow!();
+                return;
+            }
             if (IsVisible()) Hide();
             else Show();
         }
@@ -43,6 +58,7 @@ public class VirtualKeyboardService
     {
         try
         {
+            if (UseBuiltin) { BuiltinShow!(); return; }
             if (IsVisible()) return;
 
             var path = Path.Combine(
@@ -71,6 +87,7 @@ public class VirtualKeyboardService
     {
         try
         {
+            if (UseBuiltin) { BuiltinHide!(); return; }
             var wnd = NativeMethods.FindWindow("IPTip_Main_Window", null);
             if (wnd != IntPtr.Zero && NativeMethods.IsWindowVisible(wnd))
             {

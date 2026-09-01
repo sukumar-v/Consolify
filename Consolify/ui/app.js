@@ -1333,6 +1333,9 @@ function settingsRows() {
       : null));
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
+  rows.push(cycleRow("Keyboard", ["Builtin", "TabTip", "Osk"], () => s.keyboardApp, v => set(() => s.keyboardApp = v),
+    "Builtin is Consolify's own gamepad keyboard: it never takes focus, so it keeps working over a game. " +
+    "TabTip is the Windows touch keyboard, which does not"));
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
     "Hold this button to show or hide the Windows touch keyboard (it supports gamepad input)"));
   rows.push(sliderRow("Hold time", () => s.keyboardToggleHoldMs, 200, 2000, 100, v => set(() => s.keyboardToggleHoldMs = v), v => Math.round(v) + " ms"));

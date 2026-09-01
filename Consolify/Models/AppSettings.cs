@@ -32,5 +32,6 @@ public class AppSettings
     public string ScreenshotCombo { get; set; } = "Off";
     public string KeyboardToggleButton { get; set; } = "Start";
     public int KeyboardToggleHoldMs { get; set; } = 600;
-    public string KeyboardApp { get; set; } = "TabTip"; // TabTip | Osk
+    /// <summary>Builtin (the gamepad-driven on-screen keyboard) | TabTip | Osk.</summary>
+    public string KeyboardApp { get; set; } = "Builtin";
 }

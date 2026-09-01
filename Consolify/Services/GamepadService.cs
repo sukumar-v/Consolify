@@ -54,6 +54,16 @@ public class GamepadService : IDisposable
     /// <summary>Displays are blanked; the pad is inert until a button wakes them.</summary>
     public volatile bool Suspended;
 
+    /// <summary>
+    /// The built-in on-screen keyboard is up and takes every button. Set for the keyboard the
+    /// same way MenuOwnsStick is set for an overlay menu, and honoured before the in-game
+    /// silence gate so it still works over a game.
+    /// </summary>
+    public volatile bool KeyboardOwnsPad;
+
+    /// <summary>A direction or button for the on-screen keyboard while it owns the pad.</summary>
+    public event Action<string>? KeyboardInput;
+
     public bool Connected { get; private set; }
 
     /// <summary>Latest reading, so the UI can ask for it after the bridge is up. The pad is
@@ -117,6 +127,7 @@ public class GamepadService : IDisposable
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, pendingTap = false;
         bool shotLatched = false;
+        long nextStickNav = 0;
         bool prevTrigger = false;                          // trigger edge, used only while suspended
         long lastComboTapAt = -1;
         var sw = Stopwatch.StartNew();
@@ -268,6 +279,50 @@ public class GamepadService : IDisposable
                 shotLatched = false;
             }
 
+            // ---- on-screen keyboard owns the pad ----
+            // Before the serviceActive gate, like the menu combo: the built-in keyboard is most
+            // useful over a game, which is exactly when the rest of the pad is silenced. Every
+            // button is swallowed here so nothing leaks through to the game underneath.
+            if (KeyboardOwnsPad)
+            {
+                foreach (var (mask, name) in NavButtons)
+                {
+                    if ((pressed & mask) != 0)
+                    {
+                        KeyboardInput?.Invoke(name);
+                        repeat[mask] = now + RepeatDelayMs;
+                    }
+                    else if ((buttons & mask) != 0 && repeat.TryGetValue(mask, out var t) && now >= t)
+                    {
+                        KeyboardInput?.Invoke(name);
+                        repeat[mask] = now + RepeatIntervalMs;
+                    }
+                    if ((released & mask) != 0) repeat.Remove(mask);
+                }
+
+                foreach (var (mask, name) in KeyboardButtons)
+                    if ((pressed & mask) != 0)
+                        KeyboardInput?.Invoke(name);
+
+                // The stick nudges the highlight too, so whichever hand is already on it works.
+                double sx = state.Gamepad.sThumbLX / 32767.0, sy = state.Gamepad.sThumbLY / 32767.0;
+                string? dir = Math.Abs(sx) > Math.Abs(sy)
+                    ? (sx > 0.55 ? "Right" : sx < -0.55 ? "Left" : null)
+                    : (sy > 0.55 ? "Up" : sy < -0.55 ? "Down" : null);
+                if (dir is not null && now >= nextStickNav)
+                {
+                    KeyboardInput?.Invoke(dir);
+                    nextStickNav = now + (nextStickNav == 0 ? RepeatDelayMs : RepeatIntervalMs);
+                }
+                else if (dir is null)
+                {
+                    nextStickNav = 0;
+                }
+
+                prevButtons = buttons;
+                continue;
+            }
+
             if (!serviceActive)
             {
                 prevButtons = buttons;
@@ -408,6 +463,19 @@ public class GamepadService : IDisposable
         (NativeMethods.XINPUT_GAMEPAD_DPAD_DOWN, "Down"),
         (NativeMethods.XINPUT_GAMEPAD_DPAD_LEFT, "Left"),
         (NativeMethods.XINPUT_GAMEPAD_DPAD_RIGHT, "Right"),
+    };
+
+    /// <summary>What the face buttons do while the on-screen keyboard has the pad.</summary>
+    private static readonly (ushort mask, string name)[] KeyboardButtons =
+    {
+        (NativeMethods.XINPUT_GAMEPAD_A, "Press"),
+        (NativeMethods.XINPUT_GAMEPAD_B, "Backspace"),
+        (NativeMethods.XINPUT_GAMEPAD_X, "Space"),
+        (NativeMethods.XINPUT_GAMEPAD_Y, "Shift"),
+        (NativeMethods.XINPUT_GAMEPAD_LEFT_SHOULDER, "CaretLeft"),
+        (NativeMethods.XINPUT_GAMEPAD_RIGHT_SHOULDER, "CaretRight"),
+        (NativeMethods.XINPUT_GAMEPAD_START, "Enter"),
+        (NativeMethods.XINPUT_GAMEPAD_BACK, "Close"),
     };
 
     private static readonly (ushort mask, string name)[] FaceButtons =

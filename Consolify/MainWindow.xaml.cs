@@ -71,10 +71,17 @@ public partial class MainWindow : Window
             _bridge?.PushInputMode(mode);
         });
 
+        _keyboard.BuiltinShow = ShowBuiltinKeyboard;
+        _keyboard.BuiltinHide = HideBuiltinKeyboard;
+        _keyboard.BuiltinVisible = () => _kb is { IsVisible: true };
+        _gamepad.KeyboardInput += what => Dispatcher.BeginInvoke(() => OnKeyboardInput(what));
+
         SourceInitialized += OnSourceInitialized;
         Loaded += async (_, _) => await InitWebViewAsync();
         Deactivated += OnDeactivated;
-        Closed += (_, _) => { _gamepad.Dispose(); _cursor.Dispose(); };
+        // The keyboard is a second top-level window, and WPF shuts down on the last one closing,
+        // so leaving it open would keep the process alive with no UI.
+        Closed += (_, _) => { _kb?.Close(); _gamepad.Dispose(); _cursor.Dispose(); };
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -272,6 +279,49 @@ public partial class MainWindow : Window
             Topmost = false;
             WindowState = WindowState.Minimized;
             if (refocusTarget && _overlayTarget != IntPtr.Zero) _windows.Focus(_overlayTarget);
+        }
+    }
+
+
+    // ---- built-in on-screen keyboard ----
+
+    private KeyboardWindow? _kb;
+
+    /// <summary>
+    /// Show the built-in keyboard on the TV. It is created lazily: most sessions never raise it,
+    /// and a WPF window costs nothing until it exists.
+    /// </summary>
+    private void ShowBuiltinKeyboard()
+    {
+        _kb ??= new KeyboardWindow();
+        var target = (_settings.Settings.TvDeviceName is { } name ? _displays.GetDisplay(name) : null)
+                     ?? _displays.GetDisplays().FirstOrDefault(d => d.IsPrimary);
+        if (target is not null) _kb.ShowOn(target);
+        // Hand the pad over. Nothing else can read it until the keyboard closes, which is what
+        // makes A "press this key" rather than "launch the highlighted game".
+        _gamepad.KeyboardOwnsPad = true;
+    }
+
+    private void HideBuiltinKeyboard()
+    {
+        _kb?.Hide();
+        _gamepad.KeyboardOwnsPad = false;
+    }
+
+    private void OnKeyboardInput(string what)
+    {
+        if (_kb is null) return;
+        switch (what)
+        {
+            case "Up": case "Down": case "Left": case "Right": _kb.Move(what); break;
+            case "Press":      _kb.Press(); break;
+            case "Backspace":  _kb.Backspace(); break;
+            case "Space":      _kb.Space(); break;
+            case "Enter":      _kb.Enter(); break;
+            case "Shift":      _kb.ToggleShift(); break;
+            case "CaretLeft":  _kb.CaretLeft(); break;
+            case "CaretRight": _kb.CaretRight(); break;
+            case "Close":      HideBuiltinKeyboard(); break;
         }
     }
 

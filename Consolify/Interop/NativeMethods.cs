@@ -81,6 +81,8 @@ internal static class NativeMethods
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new(-2);
     public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_FRAMECHANGED = 0x0020;
@@ -345,6 +347,56 @@ internal static class NativeMethods
         {
             new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, wScan = scan } } },
             new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = KEYEVENTF_KEYUP } } },
+        };
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    // ---- non-activating overlay window ----
+
+    /// <summary>
+    /// A window with this style is never given the foreground, so an on-screen keyboard can sit
+    /// over a game while the game keeps focus and its text caret. Without it the keyboard would
+    /// take the foreground the moment it appeared and every keystroke would go to the keyboard
+    /// itself.
+    /// </summary>
+    public const long WS_EX_NOACTIVATE = 0x08000000;
+
+    public const uint WM_MOUSEACTIVATE = 0x0021;
+    public const int MA_NOACTIVATE = 3;
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+    public const uint KEYEVENTF_UNICODE = 0x0004;
+
+    public const ushort VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0D, VK_ESCAPE = 0x1B;
+    public const ushort VK_LEFT = 0x25, VK_RIGHT = 0x27, VK_HOME = 0x24, VK_END = 0x23;
+
+    /// <summary>
+    /// Type one character as injected keyboard input. KEYEVENTF_UNICODE carries the character
+    /// itself rather than a key position, so the result does not depend on the user's keyboard
+    /// layout -- pressing the on-screen "q" types q on AZERTY too. Surrogate pairs go through as
+    /// two events, which is what Windows expects.
+    /// </summary>
+    public static void SendChar(char ch)
+    {
+        var inputs = new[]
+        {
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE } } },
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } } },
+        };
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    /// <summary>Tap a virtual key by code, letting Windows supply the scan code.</summary>
+    public static void SendVirtualKey(ushort vk, bool extended = false)
+    {
+        uint extra = extended ? KEYEVENTF_EXTENDEDKEY : 0;
+        var inputs = new[]
+        {
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, dwFlags = extra } } },
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, dwFlags = extra | KEYEVENTF_KEYUP } } },
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
