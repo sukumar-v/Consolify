@@ -1261,7 +1261,7 @@ function detailInput(btn) {
 
 /* ============================== settings ============================== */
 
-function settingsRows() {
+function allSettingsRows() {
   const s = S.settings;
   if (!s) return [];
   const set = (fn) => { fn(); scheduleSave(); renderSettings(); };
@@ -1272,7 +1272,7 @@ function settingsRows() {
   };
 
   const rows = [];
-  rows.push({ section: "DISPLAY" });
+  rows.push({ section: "DISPLAY", cat: "general" });
   rows.push({
     name: "TV display", hint: "Consolify opens here, and games are steered onto it",
     type: "select",
@@ -1291,7 +1291,7 @@ function settingsRows() {
   rows.push(toggleRow("Keep launcher focused", "Pull focus back if the desktop steals it while no game is running",
     () => s.keepFocus, v => set(() => s.keepFocus = v)));
 
-  rows.push({ section: "GAMEPAD" });
+  rows.push({ section: "GAMEPAD", cat: "input" });
   rows.push(toggleRow("Gamepad mouse", "Left stick moves the cursor; right stick scrolls",
     () => s.gamepadMouseEnabled, v => set(() => s.gamepadMouseEnabled = v)));
   rows.push(toggleRow("Stay active while a game is focused", "The gamepad-mouse always works when a game is running but not focused; this keeps it alive inside the game too (off avoids fighting native controller support)",
@@ -1332,19 +1332,32 @@ function settingsRows() {
       ? "Same as the menu combo above, so one press does both. Pick a different one."
       : null));
 
-  rows.push({ section: "VIRTUAL KEYBOARD" });
-  rows.push(cycleRow("Keyboard", ["Builtin", "TabTip", "Osk"], () => s.keyboardApp, v => set(() => s.keyboardApp = v),
+  rows.push({ section: "KEYBOARD", cat: "keyboard" });
+  rows.push(cycleRow("Keyboard app", ["Builtin", "TabTip", "Osk"], () => s.keyboardApp, v => set(() => s.keyboardApp = v),
     "Builtin is Consolify's own gamepad keyboard: it never takes focus, so it keeps working over a game. " +
     "TabTip is the Windows touch keyboard, which does not"));
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
     "Hold this button to show or hide the Windows touch keyboard (it supports gamepad input)"));
   rows.push(sliderRow("Hold time", () => s.keyboardToggleHoldMs, 200, 2000, 100, v => set(() => s.keyboardToggleHoldMs = v), v => Math.round(v) + " ms"));
+
+  rows.push({ section: "ON-SCREEN KEYBOARD", cat: "keyboard" });
+  rows.push({
+    name: "Controls", type: "static",
+    value: "A press  ·  B close  ·  X back  ·  Y space  ·  LS shift  ·  LT symbols  ·  LB/RB caret  ·  Menu enter",
+    hint: "The Xbox keyboard's own bindings; each is also printed on the key it drives",
+  });
+  rows.push(sliderRow("D-pad repeat delay", () => s.keyRepeatDelayMs, 120, 900, 10,
+    v => set(() => s.keyRepeatDelayMs = v), v => Math.round(v) + " ms",
+    "How long a direction is held before the highlight starts moving on its own"));
+  rows.push(sliderRow("D-pad repeat speed", () => s.keyRepeatIntervalMs, 20, 300, 5,
+    v => set(() => s.keyRepeatIntervalMs = v), v => Math.round(v) + " ms",
+    "Gap between steps once it is moving 2014 lower is faster"));
   rows.push({
     name: "Show keyboard now", type: "action", label: "Toggle",
     action: () => send({ cmd: "toggleKeyboard" }),
   });
 
-  rows.push({ section: "LIBRARY" });
+  rows.push({ section: "LIBRARY", cat: "library" });
   const counts = PLATFORMS.map(p => `${p} ${S.games.filter(g => g.platform === p).length}`).join(" · ");
   rows.push({
     name: "Rescan platforms", hint: counts || "Steam, Epic and GOG are scanned from their local install data",
@@ -1357,7 +1370,7 @@ function settingsRows() {
     action: () => send({ cmd: "addManual" }),
   });
 
-  rows.push({ section: "STARTUP, WAKE & LOCK SCREEN" });
+  rows.push({ section: "STARTUP, WAKE & LOCK SCREEN", cat: "general" });
   rows.push(toggleRow("Launch Consolify at login", "Registers a startup entry so the launcher is ready after wake or reboot",
     () => s.launchOnStartup, v => set(() => s.launchOnStartup = v)));
   rows.push({
@@ -1383,10 +1396,10 @@ function toggleRow(name, hint, get, setV) {
 /* Both row builders fall back when a setting is missing. A settings file written by an older
    build has no key for an option added since, and one undefined value used to throw inside the
    formatter and take the whole settings screen down with it. */
-function sliderRow(name, get, min, max, step, setV, fmt) {
+function sliderRow(name, get, min, max, step, setV, fmt, hint) {
   const cur = () => { const v = get(); return typeof v === "number" && isFinite(v) ? v : min; };
   return {
-    name, type: "slider", value: cur(), min, max, fmt,
+    name, hint, type: "slider", value: cur(), min, max, fmt,
     adjust: (dir) => {
       let v = Math.round((cur() + dir * step) / step) * step;
       v = Math.max(min, Math.min(max, v));
@@ -1406,7 +1419,60 @@ function cycleRow(name, options, get, setV, hint, warn) {
   };
 }
 
+/* ---- settings categories ----
+   One screen of every setting had become unreadable. The rows are unchanged; they are just
+   filtered to the active category, and X cycles it. LB/RB are left alone because they already
+   move between Library, Collections and Settings -- reusing them here would trap you in Settings. */
+const SETTINGS_TABS = [
+  { id: "general",  label: "General" },
+  { id: "input",    label: "Input" },
+  { id: "keyboard", label: "Keyboard" },
+  { id: "library",  label: "Library" },
+];
+let settingsTab = "general";
+
+function settingsRows() {
+  let cat = null;
+  return allSettingsRows().filter(r => {
+    if (r.section) cat = r.cat;
+    return (r.section ? r.cat : cat) === settingsTab;
+  });
+}
+
+function setSettingsTab(id) {
+  if (settingsTab === id) return;
+  settingsTab = id;
+  settingsIdx = 0;
+  renderSettings();
+}
+
+function cycleSettingsTab(dir) {
+  const i = SETTINGS_TABS.findIndex(t => t.id === settingsTab);
+  setSettingsTab(SETTINGS_TABS[(i + dir + SETTINGS_TABS.length) % SETTINGS_TABS.length].id);
+}
+
+function renderSettingsNav() {
+  const nav = $("settingsNav");
+  if (!nav) return;
+  let cat = null;
+  const counts = {};
+  allSettingsRows().forEach(r => {
+    if (r.section) { cat = r.cat; return; }
+    counts[cat] = (counts[cat] || 0) + 1;
+  });
+
+  nav.innerHTML = "";
+  SETTINGS_TABS.forEach(t => {
+    const el = document.createElement("div");
+    el.className = "set-tab" + (t.id === settingsTab ? " active" : "");
+    el.innerHTML = `<span>${esc(t.label)}</span><span class="set-tab-count">${counts[t.id] || 0}</span>`;
+    el.addEventListener("click", () => setSettingsTab(t.id));
+    nav.appendChild(el);
+  });
+}
+
 function renderSettings() {
+  renderSettingsNav();
   const rows = settingsRows();
   const scroll = $("settingsScroll");
   scroll.innerHTML = "";
@@ -1464,6 +1530,7 @@ function settingsInput(btn) {
     case "Left": if (row && row.adjust) row.adjust(-1); break;
     case "Right": if (row && row.adjust) row.adjust(1); break;
     case "A": if (focusVisible() && row) { if (row.action) row.action(); else if (row.adjust) row.adjust(1); } break;
+    case "X": cycleSettingsTab(1); break;
     case "B": switchView("library"); break;
   }
 }

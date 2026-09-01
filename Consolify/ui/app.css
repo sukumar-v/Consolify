@@ -658,3 +658,28 @@ body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
   font-size: 17px; line-height: 1.55; color: rgba(246,245,243,0.72);
   max-width: 1180px; white-space: normal;
 }
+
+/* ---- settings categories ----
+   The settings screen grew past the point where one scroll was readable, so it is split into
+   categories down the left. The nav is a fixed column and only the rows scroll. */
+.settings-body { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 30px 80px 30px; }
+.settings-body .settings-scroll { padding: 0; }
+.settings-nav {
+  flex: 0 0 300px; display: flex; flex-direction: column; gap: 6px;
+  border-right: 1px solid rgba(246,245,243,0.10); padding-right: 22px;
+}
+.set-tab {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; border-radius: 14px; cursor: pointer;
+  font-size: 22px; color: rgba(246,245,243,0.62);
+  border: 1px solid transparent;
+}
+.set-tab .set-tab-count {
+  margin-left: auto; font-family: "IBM Plex Mono", monospace;
+  font-size: 15px; color: rgba(246,245,243,0.34);
+}
+.set-tab.active { background: rgba(240,162,83,0.12); color: #F6F5F3; border-color: rgba(240,162,83,0.34); }
+.set-tab.active .set-tab-count { color: rgba(240,162,83,0.8); }
+/* The nav itself never takes the highlight -- LB/RB switch category, so a focus ring here would
+   suggest a third thing the D-pad has to walk through. */
+.set-tab:hover { color: #F6F5F3; }

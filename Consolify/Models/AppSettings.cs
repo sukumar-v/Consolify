@@ -30,6 +30,13 @@ public class AppSettings
     /// <summary>Gamepad button or combo that taps the screenshot key. "Off" disables it.
     /// Evaluated even inside a focused game, which is the only place it is any use.</summary>
     public string ScreenshotCombo { get; set; } = "Off";
+
+    // On-screen keyboard
+    /// <summary>How long a D-pad direction must be held on the on-screen keyboard before the
+    /// highlight starts repeating.</summary>
+    public int KeyRepeatDelayMs { get; set; } = 350;
+    /// <summary>Gap between repeats once it is moving; smaller is faster.</summary>
+    public int KeyRepeatIntervalMs { get; set; } = 90;
     public string KeyboardToggleButton { get; set; } = "Start";
     public int KeyboardToggleHoldMs { get; set; } = 600;
     /// <summary>Builtin (the gamepad-driven on-screen keyboard) | TabTip | Osk.</summary>

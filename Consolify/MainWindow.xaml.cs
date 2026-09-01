@@ -293,7 +293,13 @@ public partial class MainWindow : Window
     /// </summary>
     private void ShowBuiltinKeyboard()
     {
-        _kb ??= new KeyboardWindow();
+        if (_kb is null)
+        {
+            _kb = new KeyboardWindow();
+            // Menu commits and leaves, B just leaves; both come back through here so the pad
+            // is handed back and the window hidden in one place.
+            _kb.CloseRequested += () => Dispatcher.BeginInvoke(HideBuiltinKeyboard);
+        }
         var target = (_settings.Settings.TvDeviceName is { } name ? _displays.GetDisplay(name) : null)
                      ?? _displays.GetDisplays().FirstOrDefault(d => d.IsPrimary);
         if (target is not null) _kb.ShowOn(target);
@@ -317,10 +323,11 @@ public partial class MainWindow : Window
             case "Press":      _kb.Press(); break;
             case "Backspace":  _kb.Backspace(); break;
             case "Space":      _kb.Space(); break;
-            case "Enter":      _kb.Enter(); break;
+            case "Commit":     _kb.Commit(); break;
             case "Shift":      _kb.ToggleShift(); break;
             case "CaretLeft":  _kb.CaretLeft(); break;
             case "CaretRight": _kb.CaretRight(); break;
+            case "Layer":      _kb.ToggleLayer(); break;
             case "Close":      HideBuiltinKeyboard(); break;
         }
     }

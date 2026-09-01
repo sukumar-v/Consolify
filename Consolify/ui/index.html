@@ -151,13 +151,19 @@
       </div>
     </header>
 
-    <div class="settings-scroll" id="settingsScroll"></div>
+    <div class="settings-body">
+      <!-- Categories, so one screen is not a wall of every setting at once. Driven by LB/RB and
+           by clicking; the rows to the right are only ever the active category. -->
+      <nav class="settings-nav" id="settingsNav"></nav>
+      <div class="settings-scroll" id="settingsScroll"></div>
+    </div>
 
     <footer class="legend">
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>
       <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
       <div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>
-      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>
+      <div class="legend-item"><div class="btn-badge btn-x">X</div><span>Category</span></div>
+      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Screen</span></div>
     </footer>
   </div>
 

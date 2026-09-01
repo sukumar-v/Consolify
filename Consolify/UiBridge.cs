@@ -351,6 +351,8 @@ public class UiBridge
         t.RightClickButton = s.RightClickButton;
         t.MinimizeCombo = s.MinimizeCombo;
         t.ScreenshotCombo = s.ScreenshotCombo;
+        t.KeyRepeatDelayMs = Math.Clamp(s.KeyRepeatDelayMs, 120, 900);
+        t.KeyRepeatIntervalMs = Math.Clamp(s.KeyRepeatIntervalMs, 20, 300);
         t.KeyboardToggleButton = s.KeyboardToggleButton;
         t.KeyboardToggleHoldMs = Math.Clamp(s.KeyboardToggleHoldMs, 200, 2000);
         t.KeyboardApp = s.KeyboardApp;

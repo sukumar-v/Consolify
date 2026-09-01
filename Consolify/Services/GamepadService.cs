@@ -127,7 +127,7 @@ public class GamepadService : IDisposable
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, pendingTap = false;
         bool shotLatched = false;
-        long nextStickNav = 0;
+        bool ltLatched = false;
         bool prevTrigger = false;                          // trigger edge, used only while suspended
         long lastComboTapAt = -1;
         var sw = Stopwatch.StartNew();
@@ -215,7 +215,9 @@ public class GamepadService : IDisposable
             // mouse and keyboard toggle stay available for the desktop.
             bool gameFocused = _isGameFocused();
             bool launcherFg = _isLauncherForeground();
-            bool serviceActive = !gameFocused || s.GamepadMouseDuringGame;
+            // The keyboard needs the cursor alive even inside a game: pointing at a key is one
+            // of the two ways to drive it.
+            bool serviceActive = !gameFocused || s.GamepadMouseDuringGame || KeyboardOwnsPad;
 
             ushort buttons = state.Gamepad.wButtons;
             ushort pressed = (ushort)(buttons & ~prevButtons);
@@ -279,23 +281,26 @@ public class GamepadService : IDisposable
                 shotLatched = false;
             }
 
-            // ---- on-screen keyboard owns the pad ----
-            // Before the serviceActive gate, like the menu combo: the built-in keyboard is most
-            // useful over a game, which is exactly when the rest of the pad is silenced. Every
-            // button is swallowed here so nothing leaks through to the game underneath.
-            if (KeyboardOwnsPad)
+            // ---- on-screen keyboard ----
+            // Before the serviceActive gate, like the menu combo: the keyboard is most useful over
+            // a game, which is exactly when the rest of the pad is silenced. It does NOT swallow
+            // the left stick -- that keeps driving the mouse, so a key can be pointed at as well
+            // as walked to -- and it stands down entirely while a menu is up, so the Power Wheel
+            // opened on top of it still gets the stick and the buttons.
+            bool keyboardDriving = KeyboardOwnsPad && !MenuOwnsStick;
+            if (keyboardDriving)
             {
                 foreach (var (mask, name) in NavButtons)
                 {
                     if ((pressed & mask) != 0)
                     {
                         KeyboardInput?.Invoke(name);
-                        repeat[mask] = now + RepeatDelayMs;
+                        repeat[mask] = now + Math.Max(120, s.KeyRepeatDelayMs);
                     }
                     else if ((buttons & mask) != 0 && repeat.TryGetValue(mask, out var t) && now >= t)
                     {
                         KeyboardInput?.Invoke(name);
-                        repeat[mask] = now + RepeatIntervalMs;
+                        repeat[mask] = now + Math.Max(20, s.KeyRepeatIntervalMs);
                     }
                     if ((released & mask) != 0) repeat.Remove(mask);
                 }
@@ -304,23 +309,10 @@ public class GamepadService : IDisposable
                     if ((pressed & mask) != 0)
                         KeyboardInput?.Invoke(name);
 
-                // The stick nudges the highlight too, so whichever hand is already on it works.
-                double sx = state.Gamepad.sThumbLX / 32767.0, sy = state.Gamepad.sThumbLY / 32767.0;
-                string? dir = Math.Abs(sx) > Math.Abs(sy)
-                    ? (sx > 0.55 ? "Right" : sx < -0.55 ? "Left" : null)
-                    : (sy > 0.55 ? "Up" : sy < -0.55 ? "Down" : null);
-                if (dir is not null && now >= nextStickNav)
-                {
-                    KeyboardInput?.Invoke(dir);
-                    nextStickNav = now + (nextStickNav == 0 ? RepeatDelayMs : RepeatIntervalMs);
-                }
-                else if (dir is null)
-                {
-                    nextStickNav = 0;
-                }
-
-                prevButtons = buttons;
-                continue;
+                // LT switches layer, on its own edge because a trigger has no button bit.
+                bool ltNow = state.Gamepad.bLeftTrigger >= TriggerThreshold;
+                if (ltNow && !ltLatched) KeyboardInput?.Invoke("Layer");
+                ltLatched = ltNow;
             }
 
             if (!serviceActive)
@@ -350,7 +342,8 @@ public class GamepadService : IDisposable
             if ((pressed & dpadMask) != 0) SetInputMode("pad");
 
             // ---- launcher UI navigation ----
-            if (launcherFg)
+            // Not while the keyboard is driving, or the D-pad would walk the library grid behind it.
+            if (launcherFg && !keyboardDriving)
             {
                 foreach (var (mask, name) in NavButtons)
                 {
@@ -383,7 +376,9 @@ public class GamepadService : IDisposable
             else
             {
                 // ---- desktop mouse clicks ----
-                if (s.GamepadMouseEnabled)
+                // Not while the keyboard is driving: A and B are its own keys there, and a stray
+                // click would land on the app underneath instead of on a key.
+                if (s.GamepadMouseEnabled && !keyboardDriving)
                 {
                     ushort lMask = ButtonMask(s.LeftClickButton), rMask = ButtonMask(s.RightClickButton);
                     if ((pressed & lMask) != 0 && !leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTDOWN); leftDown = true; }
@@ -465,17 +460,21 @@ public class GamepadService : IDisposable
         (NativeMethods.XINPUT_GAMEPAD_DPAD_RIGHT, "Right"),
     };
 
-    /// <summary>What the face buttons do while the on-screen keyboard has the pad.</summary>
+    /// <summary>
+    /// What the buttons do while the on-screen keyboard has the pad. Deliberately the Xbox
+    /// keyboard's own bindings, so muscle memory carries over, and each is printed on the key
+    /// it drives.
+    /// </summary>
     private static readonly (ushort mask, string name)[] KeyboardButtons =
     {
         (NativeMethods.XINPUT_GAMEPAD_A, "Press"),
-        (NativeMethods.XINPUT_GAMEPAD_B, "Backspace"),
-        (NativeMethods.XINPUT_GAMEPAD_X, "Space"),
-        (NativeMethods.XINPUT_GAMEPAD_Y, "Shift"),
+        (NativeMethods.XINPUT_GAMEPAD_B, "Close"),
+        (NativeMethods.XINPUT_GAMEPAD_X, "Backspace"),
+        (NativeMethods.XINPUT_GAMEPAD_Y, "Space"),
         (NativeMethods.XINPUT_GAMEPAD_LEFT_SHOULDER, "CaretLeft"),
         (NativeMethods.XINPUT_GAMEPAD_RIGHT_SHOULDER, "CaretRight"),
-        (NativeMethods.XINPUT_GAMEPAD_START, "Enter"),
-        (NativeMethods.XINPUT_GAMEPAD_BACK, "Close"),
+        (NativeMethods.XINPUT_GAMEPAD_LEFT_THUMB, "Shift"),
+        (NativeMethods.XINPUT_GAMEPAD_START, "Commit"),
     };
 
     private static readonly (ushort mask, string name)[] FaceButtons =

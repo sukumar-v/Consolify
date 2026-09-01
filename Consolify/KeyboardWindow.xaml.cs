@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Consolify.Interop;
@@ -9,8 +10,13 @@ namespace Consolify;
 
 internal enum KeyAction { Char, Shift, Layer, Backspace, Space, Enter, Tab, Escape }
 
-/// <summary>One key. <paramref name="Units"/> is its width as a multiple of a standard key.</summary>
-internal sealed record KeyDef(string Lower, string? Upper = null, KeyAction Action = KeyAction.Char, double Units = 1);
+/// <summary>
+/// One key. <paramref name="Units"/> is its width as a multiple of a standard key, and
+/// <paramref name="Hint"/> is the gamepad button printed in its corner, so the shortcuts are
+/// discoverable without a manual.
+/// </summary>
+internal sealed record KeyDef(string Lower, string? Upper = null, KeyAction Action = KeyAction.Char,
+                              double Units = 1, string? Hint = null);
 
 /// <summary>
 /// A gamepad-driven on-screen keyboard that never takes the foreground.
@@ -32,21 +38,20 @@ public partial class KeyboardWindow : Window
     private static KeyDef[] Edged(KeyDef first, string middle, KeyDef last) =>
         new[] { first }.Concat(Row(middle)).Append(last).ToArray();
 
-    private static readonly KeyDef BackKey = new("Back", Action: KeyAction.Backspace, Units: 1.5);
+    // Hints match the Xbox keyboard's own bindings, so muscle memory carries over.
+    private static readonly KeyDef BackKey = new("Back", Action: KeyAction.Backspace, Units: 1.5, Hint: "X");
+    private static readonly KeyDef ShiftKey = new("Shift", Action: KeyAction.Shift, Units: 1.5, Hint: "LS");
+    private static readonly KeyDef SpaceKey = new("Space", Action: KeyAction.Space, Units: 4, Hint: "Y");
+    private static readonly KeyDef EnterKey = new("Enter", Action: KeyAction.Enter, Units: 3, Hint: "Menu");
+    private static readonly KeyDef TabKey = new("Tab", Action: KeyAction.Tab, Units: 1.5);
 
     private static readonly KeyDef[][] Letters =
     {
         Row("1234567890"),
         Row("qwertyuiop"),
         Row("asdfghjkl"),
-        Edged(new KeyDef("Shift", Action: KeyAction.Shift, Units: 1.5), "zxcvbnm,.", BackKey),
-        new[]
-        {
-            new KeyDef("&123", Action: KeyAction.Layer, Units: 1.5),
-            new KeyDef("Tab", Action: KeyAction.Tab, Units: 1.5),
-            new KeyDef("Space", Action: KeyAction.Space, Units: 4),
-            new KeyDef("Enter", Action: KeyAction.Enter, Units: 3),
-        },
+        Edged(ShiftKey, "zxcvbnm,.", BackKey),
+        new[] { new KeyDef("&123", Action: KeyAction.Layer, Units: 1.5, Hint: "LT"), TabKey, SpaceKey, EnterKey },
     };
 
     private static readonly KeyDef[][] Symbols =
@@ -58,13 +63,7 @@ public partial class KeyboardWindow : Window
         // row does not turn into a thicket of escapes.
         Edged(new KeyDef("Esc", Action: KeyAction.Escape, Units: 1.5),
               ";:" + (char)39 + (char)34 + (char)96 + "~/?", BackKey),
-        new[]
-        {
-            new KeyDef("abc", Action: KeyAction.Layer, Units: 1.5),
-            new KeyDef("Tab", Action: KeyAction.Tab, Units: 1.5),
-            new KeyDef("Space", Action: KeyAction.Space, Units: 4),
-            new KeyDef("Enter", Action: KeyAction.Enter, Units: 3),
-        },
+        new[] { new KeyDef("abc", Action: KeyAction.Layer, Units: 1.5, Hint: "LT"), TabKey, SpaceKey, EnterKey },
     };
 
     private KeyDef[][] _layout = Letters;
@@ -72,6 +71,9 @@ public partial class KeyboardWindow : Window
     private int _row = 1, _col;
     private double _keySize = 64, _gap = 6;
     private readonly List<List<Border>> _cells = new();
+
+    /// <summary>Raised when the keyboard wants to close itself (B, or Menu after committing).</summary>
+    public event Action? CloseRequested;
 
     public KeyboardWindow()
     {
@@ -88,7 +90,8 @@ public partial class KeyboardWindow : Window
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE,
             new IntPtr(ex | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW));
 
-        // WS_EX_NOACTIVATE still lets a click activate the window; this refuses that too.
+        // WS_EX_NOACTIVATE still lets a click activate the window; this refuses that too, which is
+        // what lets the pointer press keys without the app underneath losing its caret.
         HwndSource.FromHwnd(hwnd)?.AddHook(Hook);
     }
 
@@ -149,20 +152,55 @@ public partial class KeyboardWindow : Window
             for (int c = 0; c < _layout[r].Length; c++)
             {
                 var key = _layout[r][c];
+                int rr = r, cc = c;
+
+                var label = new TextBlock
+                {
+                    FontSize = key.Action == KeyAction.Char ? _keySize * 0.42 : _keySize * 0.26,
+                    FontFamily = new FontFamily("Segoe UI"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+
+                var content = new Grid();
+                content.Children.Add(label);
+
+                if (key.Hint is { } hint)
+                {
+                    content.Children.Add(new Border
+                    {
+                        Background = HintFill,
+                        CornerRadius = new CornerRadius(_keySize * 0.10),
+                        Padding = new Thickness(_keySize * 0.09, _keySize * 0.01, _keySize * 0.09, _keySize * 0.02),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Margin = new Thickness(0, _keySize * 0.06, _keySize * 0.06, 0),
+                        Child = new TextBlock
+                        {
+                            Text = hint,
+                            FontSize = _keySize * 0.18,
+                            FontFamily = new FontFamily("Segoe UI"),
+                            Foreground = HintInk,
+                        },
+                    });
+                }
+
                 var cell = new Border
                 {
                     Width = _keySize * key.Units + _gap * (key.Units - 1),
                     Height = _keySize,
                     CornerRadius = new CornerRadius(_keySize * 0.16),
                     Margin = new Thickness(c == 0 ? 0 : _gap, 0, 0, 0),
-                    Child = new TextBlock
-                    {
-                        FontSize = key.Action == KeyAction.Char ? _keySize * 0.42 : _keySize * 0.26,
-                        FontFamily = new FontFamily("Segoe UI"),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                    },
+                    BorderThickness = new Thickness(1),
+                    Child = content,
+                    Tag = label,
                 };
+
+                // The pointer is a first-class way to drive this: hovering moves the highlight and
+                // a click presses, so the stick can type without the D-pad and vice versa.
+                cell.MouseEnter += (_, _) => { _row = rr; _col = cc; Paint(); };
+                cell.MouseLeftButtonUp += (_, _) => { _row = rr; _col = cc; Press(); };
+
                 rowCells.Add(cell);
                 panel.Children.Add(cell);
             }
@@ -179,11 +217,18 @@ public partial class KeyboardWindow : Window
     private string Face(KeyDef k) =>
         k.Action == KeyAction.Char && _shift && k.Upper is { } up ? up : k.Lower;
 
-    private static readonly Brush KeyFill = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x28));
-    private static readonly Brush KeyInk = new SolidColorBrush(Color.FromRgb(0xEC, 0xEC, 0xF0));
+    // Brighter than the first pass: on a dark key over a dark game the old fill and the background
+    // were nearly the same value, so the grid read as one grey slab. Each key now carries its own
+    // lighter fill and a visible edge.
+    private static readonly Brush KeyFill = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x48));
+    private static readonly Brush KeyEdge = new SolidColorBrush(Color.FromRgb(0x7E, 0x7E, 0x92));
+    private static readonly Brush KeyInk = new SolidColorBrush(Colors.White);
     private static readonly Brush FocusFill = new SolidColorBrush(Color.FromRgb(0xF0, 0xA2, 0x53));
+    private static readonly Brush FocusEdge = new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x8E));
     private static readonly Brush FocusInk = new SolidColorBrush(Color.FromRgb(0x08, 0x08, 0x0A));
-    private static readonly Brush LatchFill = new SolidColorBrush(Color.FromRgb(0x5A, 0x42, 0x2A));
+    private static readonly Brush LatchFill = new SolidColorBrush(Color.FromRgb(0x7A, 0x59, 0x36));
+    private static readonly Brush HintFill = new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00));
+    private static readonly Brush HintInk = new SolidColorBrush(Color.FromRgb(0xF0, 0xA2, 0x53));
 
     /// <summary>Repaint faces and the highlight without rebuilding the tree.</summary>
     private void Paint()
@@ -197,7 +242,8 @@ public partial class KeyboardWindow : Window
                 bool latched = key.Action == KeyAction.Shift && _shift;
 
                 cell.Background = focused ? FocusFill : latched ? LatchFill : KeyFill;
-                if (cell.Child is TextBlock tb)
+                cell.BorderBrush = focused ? FocusEdge : KeyEdge;
+                if (cell.Tag is TextBlock tb)
                 {
                     tb.Text = Face(key);
                     tb.Foreground = focused ? FocusInk : KeyInk;
@@ -263,10 +309,10 @@ public partial class KeyboardWindow : Window
                 if (_shift) { _shift = false; Paint(); }
                 break;
             case KeyAction.Shift:     ToggleShift(); break;
-            case KeyAction.Layer:     _layout = _layout == Letters ? Symbols : Letters; _shift = false; Build(); break;
+            case KeyAction.Layer:     ToggleLayer(); break;
             case KeyAction.Backspace: Backspace(); break;
             case KeyAction.Space:     Space(); break;
-            case KeyAction.Enter:     Enter(); break;
+            case KeyAction.Enter:     Commit(); break;
             case KeyAction.Tab:       NativeMethods.SendVirtualKey(NativeMethods.VK_TAB); break;
             case KeyAction.Escape:    NativeMethods.SendVirtualKey(NativeMethods.VK_ESCAPE); break;
         }
@@ -274,9 +320,17 @@ public partial class KeyboardWindow : Window
 
     public void Backspace() => NativeMethods.SendVirtualKey(NativeMethods.VK_BACK);
     public void Space() => NativeMethods.SendChar(' ');
-    public void Enter() => NativeMethods.SendVirtualKey(NativeMethods.VK_RETURN);
     public void ToggleShift() { _shift = !_shift; Paint(); }
+    public void ToggleLayer() { _layout = _layout == Letters ? Symbols : Letters; _shift = false; Build(); }
     public void CaretLeft() => NativeMethods.SendVirtualKey(NativeMethods.VK_LEFT, extended: true);
     public void CaretRight() => NativeMethods.SendVirtualKey(NativeMethods.VK_RIGHT, extended: true);
 
+    /// <summary>Enter, then get out of the way -- the same thing Menu does on the Xbox keyboard.</summary>
+    public void Commit()
+    {
+        NativeMethods.SendVirtualKey(NativeMethods.VK_RETURN);
+        CloseRequested?.Invoke();
+    }
+
+    public void RequestClose() => CloseRequested?.Invoke();
 }
