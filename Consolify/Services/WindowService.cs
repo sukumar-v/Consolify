@@ -232,8 +232,8 @@ public class WindowService
 
         var inputs = new[]
         {
-            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dx = 1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } },
-            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dx = -1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } },
+            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, u = new NativeMethods.INPUTUNION { mi = new NativeMethods.MOUSEINPUT { dx = 1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } } },
+            new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, u = new NativeMethods.INPUTUNION { mi = new NativeMethods.MOUSEINPUT { dx = -1, dwFlags = NativeMethods.MOUSEEVENTF_MOVE } } },
         };
         NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
         Log.Info("Suspend: displays on");

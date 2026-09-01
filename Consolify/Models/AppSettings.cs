@@ -27,6 +27,9 @@ public class AppSettings
     public string RightClickButton { get; set; } = "B";
     /// <summary>Gamepad combo that minimizes/restores the launcher, e.g. "LS + RS". "Off" disables it.</summary>
     public string MinimizeCombo { get; set; } = "LS + RS";
+    /// <summary>Gamepad button or combo that taps the screenshot key. "Off" disables it.
+    /// Evaluated even inside a focused game, which is the only place it is any use.</summary>
+    public string ScreenshotCombo { get; set; } = "Off";
     public string KeyboardToggleButton { get; set; } = "Start";
     public int KeyboardToggleHoldMs { get; set; } = 600;
     public string KeyboardApp { get; set; } = "TabTip"; // TabTip | Osk

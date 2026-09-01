@@ -13,12 +13,12 @@ let ingameOpen = false, ingameIdx = 0;
 let overlayTargetTitle = "";
 let hostWindows = [];
 
-/* Spokes are laid out clockwise from the top, so with six of them the index IS the clock
-   position: 0 top, 1 top-right, 2 lower-right, 3 bottom, 4 lower-left, 5 top-left. */
+/* Spokes are laid out clockwise from the top and the ring divides 360 by however many there
+   are, so the count is free to change. */
 const RADIAL_ITEMS = [
   { id: "close",       label: "Close window",  icon: "x",        danger: true,   // top
     desc: "Ask the window behind this menu to quit" },
-  { id: "windows",     label: "Switch window", icon: "viewBtn",                  // top-right
+  { id: "windows",     label: "Switch window", icon: "viewBtn",
     desc: "Pick another open window and bring it to the TV" },
   { id: "shortcuts",   label: "Shortcuts",     icon: "apps",
     desc: "Task Manager, Explorer, Settings and friends" },
@@ -26,7 +26,10 @@ const RADIAL_ITEMS = [
     desc: "Show or hide the on-screen keyboard" },
   { id: "centerMouse", label: "Center mouse",  icon: "pointer",
     desc: "Park the pointer in the middle of the TV" },
-  { id: "sleep",       label: "Sleep",         icon: "moon",                     // top-left
+  /* Label and description are rewritten from the live setting in renderRadial: this one is a
+     toggle, and a spoke that cannot say which way it is currently set is a coin flip. */
+  { id: "mouseInGame", label: "Mouse in game", icon: "controller" },
+  { id: "sleep",       label: "Sleep",         icon: "moon",
     desc: "Blank the screen — any button wakes it" },
 ];
 
@@ -74,6 +77,25 @@ function closeRadial(refocus) {
   send({ cmd: "closeOverlay", refocus: refocus !== false });
 }
 
+/* The stick-as-mouse is off inside a focused game by default, so games with native pad support
+   never see phantom input. For the ones that have none it has to be switchable from where you
+   are -- in the game -- rather than from a settings screen you cannot reach without leaving. */
+function mouseInGameOn() { return !!(S.settings && S.settings.gamepadMouseDuringGame); }
+/* Distinct icon from "Center mouse", which also uses the pointer, and it flips with the state so
+   the spoke reads at a glance from across the room. */
+function radialIcon(it) {
+  if (it.id !== "mouseInGame") return it.icon;
+  return mouseInGameOn() ? "controller" : "controllerOff";
+}
+function radialLabel(it) {
+  return it.id === "mouseInGame" ? (mouseInGameOn() ? "Mouse in game: On" : "Mouse in game: Off") : it.label;
+}
+function mouseInGameDesc() {
+  return mouseInGameOn()
+    ? "Stick keeps moving the pointer while a game is focused — press A to turn it off"
+    : "Force the stick to move the pointer even while a game is focused";
+}
+
 function renderRadial() {
   const ring = $("radialRing");
   ring.innerHTML = "";
@@ -86,7 +108,7 @@ function renderRadial() {
       + (it.danger ? " danger" : "");
     el.style.left = (cx + R * Math.cos(ang)) + "px";
     el.style.top = (cy + R * Math.sin(ang)) + "px";
-    el.innerHTML = iconSvg(it.icon) + "<span>" + esc(it.label) + "</span>";
+    el.innerHTML = iconSvg(radialIcon(it)) + "<span>" + esc(radialLabel(it)) + "</span>";
     el.addEventListener("mouseenter", () => {
       if (hoverEnabled() && radialIdx !== i) { radialIdx = i; renderRadial(); }
     });
@@ -94,8 +116,8 @@ function renderRadial() {
     ring.appendChild(el);
   });
   const sel = RADIAL_ITEMS[radialIdx];
-  $("radialSelName").textContent = sel.label;
-  $("radialDesc").textContent = sel.desc || "";
+  $("radialSelName").textContent = radialLabel(sel);
+  $("radialDesc").textContent = sel.id === "mouseInGame" ? mouseInGameDesc() : (sel.desc || "");
   // "Close window" is the only spoke that acts on the window behind the menu, so that is the
   // only one that needs to name it.
   $("radialTarget").textContent =
@@ -110,6 +132,12 @@ function radialActivate() {
     case "keyboard":  send({ cmd: "toggleKeyboard" });                   closeRadial(true);  break;
     // Blanks the TV and parks the pad; any button brings it back, so it needs no confirm step.
     case "sleep":     send({ cmd: "suspend" });                          closeRadial(false); break;
+    // Stays open so the flipped label is visible; the toast alone would be gone with the menu.
+    case "mouseInGame":
+      if (S.settings) S.settings.gamepadMouseDuringGame = !mouseInGameOn();
+      send({ cmd: "mouseInGame", on: mouseInGameOn() });
+      renderRadial();
+      break;
     case "centerMouse":
       // host re-centres the pointer and closes the overlay; do not refocus the old window
       send({ cmd: "centerMouse" });

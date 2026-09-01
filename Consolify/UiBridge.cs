@@ -183,6 +183,20 @@ public class UiBridge
                 _window.CloseOverlay(false);
                 break;
 
+            case "mouseInGame":
+            {
+                // Toggled from the Power Wheel rather than only from Settings: the moment you need
+                // it is mid-game, when walking to Settings means leaving the game to do it.
+                var st = _settings.Settings;
+                st.GamepadMouseDuringGame = msg["on"]?.GetValue<bool>() ?? !st.GamepadMouseDuringGame;
+                _settings.Save();
+                PushState();
+                Push(new { type = "toast", message = st.GamepadMouseDuringGame
+                    ? "Gamepad mouse forced on while a game runs"
+                    : "Gamepad mouse off while a game runs" });
+                break;
+            }
+
             case "setRadialActive":
                 _window.SetRadialActive(msg["active"]?.GetValue<bool>() ?? false);
                 break;
@@ -336,6 +350,7 @@ public class UiBridge
         t.LeftClickButton = s.LeftClickButton;
         t.RightClickButton = s.RightClickButton;
         t.MinimizeCombo = s.MinimizeCombo;
+        t.ScreenshotCombo = s.ScreenshotCombo;
         t.KeyboardToggleButton = s.KeyboardToggleButton;
         t.KeyboardToggleHoldMs = Math.Clamp(s.KeyboardToggleHoldMs, 200, 2000);
         t.KeyboardApp = s.KeyboardApp;

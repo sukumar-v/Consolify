@@ -255,11 +255,32 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    /// <summary>
+    /// The real INPUT union. This used to be collapsed to MOUSEINPUT alone, which happened to be
+    /// safe only because that is the larger member: a keyboard event written through it would have
+    /// landed wVk and wScan in the right bytes by luck rather than by declaration.
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct INPUT
     {
         public uint type;
-        public MOUSEINPUT mi; // union collapsed to mouse-only; keyboard input is out of scope
-        // pad to the size of the largest union member (KEYBDINPUT) — MOUSEINPUT is already the largest
+        public INPUTUNION u;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -290,15 +311,42 @@ internal static class NativeMethods
             new INPUT
             {
                 type = INPUT_MOUSE,
-                mi = new MOUSEINPUT
+                u = new INPUTUNION
                 {
-                    dx = Math.Clamp(nx, 0, 65535),
-                    dy = Math.Clamp(ny, 0, 65535),
-                    dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                    mi = new MOUSEINPUT
+                    {
+                        dx = Math.Clamp(nx, 0, 65535),
+                        dy = Math.Clamp(ny, 0, 65535),
+                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                    },
                 },
             },
         };
         SendInput(1, input, Marshal.SizeOf<INPUT>());
+    }
+
+    // ---- keyboard injection ----
+
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    public const ushort VK_F12 = 0x7B;
+    public const ushort SCAN_F12 = 0x58;
+
+    /// <summary>
+    /// Tap a key as injected keyboard input. Both the virtual key and the scan code go in:
+    /// overlays like Steam's hook the virtual key, while anything reading raw input or
+    /// DirectInput only ever sees the scan code, and a screenshot key has to reach whichever
+    /// one is listening.
+    /// </summary>
+    public static void SendKeyTap(ushort vk, ushort scan)
+    {
+        var inputs = new[]
+        {
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, wScan = scan } } },
+            new INPUT { type = INPUT_KEYBOARD, u = new INPUTUNION { ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = KEYEVENTF_KEYUP } } },
+        };
+        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
 
     // ---- XInput ----

@@ -116,6 +116,7 @@ public class GamepadService : IDisposable
         var repeat = new Dictionary<ushort, long>();      // button -> next repeat time (ms)
         long toggleDownAt = -1;
         bool toggleFired = false, leftDown = false, rightDown = false, comboLatched = false, pendingTap = false;
+        bool shotLatched = false;
         bool prevTrigger = false;                          // trigger edge, used only while suspended
         long lastComboTapAt = -1;
         var sw = Stopwatch.StartNew();
@@ -249,6 +250,24 @@ public class GamepadService : IDisposable
                 lastComboTapAt = -1;
                 MinimizeToggleRequested?.Invoke();
             }
+
+            // ---- screenshot key ----
+            // Also evaluated before the serviceActive gate: a screenshot is only ever wanted while
+            // a game is focused, which is exactly when the rest of the pad is silent. The Xbox
+            // Share button would be the natural home for this, but Windows keeps it to itself --
+            // it reaches neither XInput nor WinRT's RawGameController -- so it has to be a combo.
+            bool shotNow = s.ScreenshotCombo != "Off" && ComboPressed(state.Gamepad, s.ScreenshotCombo);
+            if (shotNow && !shotLatched)
+            {
+                shotLatched = true;
+                NativeMethods.SendKeyTap(NativeMethods.VK_F12, NativeMethods.SCAN_F12);
+                Log.Info("Screenshot key sent (F12)");
+            }
+            else if (!shotNow)
+            {
+                shotLatched = false;
+            }
+
             if (!serviceActive)
             {
                 prevButtons = buttons;
@@ -483,7 +502,7 @@ public class GamepadService : IDisposable
 
     private static void SendClick(uint flag)
     {
-        var input = new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, mi = new NativeMethods.MOUSEINPUT { dwFlags = flag } };
+        var input = new NativeMethods.INPUT { type = NativeMethods.INPUT_MOUSE, u = new NativeMethods.INPUTUNION { mi = new NativeMethods.MOUSEINPUT { dwFlags = flag } } };
         NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
@@ -492,7 +511,7 @@ public class GamepadService : IDisposable
         var input = new NativeMethods.INPUT
         {
             type = NativeMethods.INPUT_MOUSE,
-            mi = new NativeMethods.MOUSEINPUT { dwFlags = NativeMethods.MOUSEEVENTF_HWHEEL, mouseData = unchecked((uint)delta) }
+            u = new NativeMethods.INPUTUNION { mi = new NativeMethods.MOUSEINPUT { dwFlags = NativeMethods.MOUSEEVENTF_HWHEEL, mouseData = unchecked((uint)delta) } }
         };
         NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
     }
@@ -502,7 +521,7 @@ public class GamepadService : IDisposable
         var input = new NativeMethods.INPUT
         {
             type = NativeMethods.INPUT_MOUSE,
-            mi = new NativeMethods.MOUSEINPUT { dwFlags = NativeMethods.MOUSEEVENTF_WHEEL, mouseData = unchecked((uint)delta) }
+            u = new NativeMethods.INPUTUNION { mi = new NativeMethods.MOUSEINPUT { dwFlags = NativeMethods.MOUSEEVENTF_WHEEL, mouseData = unchecked((uint)delta) } }
         };
         NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
     }

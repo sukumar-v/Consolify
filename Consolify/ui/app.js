@@ -37,6 +37,9 @@ const F = { platforms: new Set(), status: new Set(), fav: false, sort: "az" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
 const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
+/* Deliberately combos rather than single buttons: inside a game every face and shoulder button
+   belongs to the game, so a one-button binding would fire in the middle of play. */
+const SCREENSHOT_COMBOS = ["Off", "View + Y", "View + X", "View + A", "View + B", "LB + RB", "LS + RS"];
 
 const SORTS = [
   { id: "az", label: "A – Z" },
@@ -1321,6 +1324,13 @@ function settingsRows() {
   rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
     "Tap to minimize or restore the launcher (in-game menu while a game runs); double tap to open the Power Wheel",
     comboWarn));
+
+  rows.push(cycleRow("Screenshot button", SCREENSHOT_COMBOS, () => s.screenshotCombo, v => set(() => s.screenshotCombo = v),
+    "Taps F12, Steam's screenshot key. Works while a game is focused, which the Xbox Share button cannot manage, " +
+    "because Windows keeps that button to itself and never passes it to applications",
+    s.screenshotCombo !== "Off" && s.screenshotCombo === s.minimizeCombo
+      ? "Same as the menu combo above, so one press does both. Pick a different one."
+      : null));
 
   rows.push({ section: "VIRTUAL KEYBOARD" });
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
