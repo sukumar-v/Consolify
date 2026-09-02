@@ -255,7 +255,7 @@ public class GamepadService : IDisposable
             }
 
             // Wait for the combo to be let go before acting on a single tap. Firing mid-hold
-            // meant that holding the buttons down past the window minimized the launcher under
+            // meant that holding the buttons down past the window parked the launcher under
             // your thumbs, and it also stole the press that was meant to be the second tap.
             if (pendingTap && !comboNow && lastComboTapAt >= 0 && now - lastComboTapAt > DoubleTapMs)
             {

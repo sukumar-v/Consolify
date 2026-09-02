@@ -158,11 +158,39 @@ public partial class MainWindow : Window
         core.Navigate("https://consolify.ui/index.html");
     }
 
-    private void OnGameStarted()
+    /// <summary>
+    /// Out of the way entirely, rather than minimized.
+    ///
+    /// The window sets ShowInTaskbar=false, so there is no taskbar button to minimize into and
+    /// Windows falls back to the legacy minimized stub -- the little titled bar that was appearing
+    /// in the bottom-left corner. Hiding takes the window off the screen, out of Alt-Tab and out
+    /// of the z-order, which is what "park the launcher" always meant. The HWND and the WebView2
+    /// survive, so coming back is instant and the UI keeps its state.
+    /// </summary>
+    private bool _parked;
+
+    public void Park()
     {
+        _parked = true;
         _suppressRefocus = true;
         Topmost = false;
-        WindowState = WindowState.Minimized;
+        Hide();
+    }
+
+    /// <summary>Bring it back to the TV and to the foreground.</summary>
+    public void Unpark()
+    {
+        _parked = false;
+        _suppressRefocus = false;
+        Show();                      // PositionOnTargetDisplay restores Topmost for the TV
+        PositionOnTargetDisplay();
+        Activate();
+        NativeMethods.SetForegroundWindow(_hwnd);
+    }
+
+    private void OnGameStarted()
+    {
+        Park();
         _bridge?.PushGameState();
     }
 
@@ -171,11 +199,7 @@ public partial class MainWindow : Window
         _overlayActive = false;
         _gamepad.MenuOwnsStick = false;
         _gamepad.ResetInputMode();
-        _suppressRefocus = false;
-        WindowState = WindowState.Normal;
-        PositionOnTargetDisplay();
-        Activate();
-        NativeMethods.SetForegroundWindow(_hwnd);
+        Unpark();
         _bridge?.PushGameState();
         _bridge?.PushState(); // refresh playtime/last-played shown in the UI
     }
@@ -198,20 +222,17 @@ public partial class MainWindow : Window
         NativeMethods.SetForegroundWindow(_hwnd);
     }
 
-    /// <summary>Back+Start gamepad combo: park the launcher so the desktop is usable, and bring it back.</summary>
-    public void ToggleMinimize()
+    /// <summary>Menu combo: park the launcher so the desktop is usable, and bring it back.</summary>
+    public void ToggleParked()
     {
-        if (WindowState == WindowState.Minimized)
+        if (_parked)
         {
-            WindowState = WindowState.Normal;
-            PositionOnTargetDisplay();
-            Activate();
-            NativeMethods.SetForegroundWindow(_hwnd);
+            Unpark();
             _gamepad.ResetInputMode();
         }
         else
         {
-            WindowState = WindowState.Minimized;
+            Park();
         }
     }
 
@@ -230,7 +251,7 @@ public partial class MainWindow : Window
             return;
         }
         if (_launcher.GameRunning) _ = ShowOverlay("ingame");
-        else ToggleMinimize();
+        else ToggleParked();
     }
 
     /// <summary>
@@ -240,7 +261,7 @@ public partial class MainWindow : Window
     /// </summary>
     public async Task ShowOverlay(string mode)
     {
-        _overlayWasMinimized = WindowState == WindowState.Minimized;
+        _overlayWasMinimized = _parked;
         var fg = NativeMethods.GetForegroundWindow();
         if (fg != _hwnd) _overlayTarget = fg;
 
@@ -250,8 +271,8 @@ public partial class MainWindow : Window
         var shot = _windows.CaptureDisplay(_settings.Settings.TvDeviceName);
 
         // Tell the UI to switch to overlay mode FIRST. Script keeps running while the window is
-        // minimized, so by the time we show it the library is already hidden and only the menu
-        // is painted -- otherwise the launcher flashes up before the overlay appears.
+        // hidden, so by the time we show it the library is already hidden and only the menu is
+        // painted -- otherwise the launcher flashes up before the overlay appears.
         _bridge?.PushOverlay(mode, _windows.TitleOf(_overlayTarget), shot);
         await Task.Delay(90);
 
@@ -260,11 +281,7 @@ public partial class MainWindow : Window
         // stick move the cursor underneath it flipped the UI into pointer mode with the pointer
         // over nothing, which left A dead — the menu looked frozen.
         _gamepad.MenuOwnsStick = true;
-        _suppressRefocus = false;
-        WindowState = WindowState.Normal;
-        PositionOnTargetDisplay();
-        Activate();
-        NativeMethods.SetForegroundWindow(_hwnd);
+        Unpark();
     }
 
     /// <summary>Dismiss an overlay, putting the launcher back where it was.</summary>
@@ -275,9 +292,7 @@ public partial class MainWindow : Window
         bool goBack = _overlayWasMinimized || _launcher.GameRunning;
         if (goBack)
         {
-            _suppressRefocus = true;
-            Topmost = false;
-            WindowState = WindowState.Minimized;
+            Park();
             if (refocusTarget && _overlayTarget != IntPtr.Zero) _windows.Focus(_overlayTarget);
         }
     }
@@ -381,19 +396,15 @@ public partial class MainWindow : Window
         _overlayActive = false;
         _gamepad.MenuOwnsStick = false;
         _gamepad.ResetInputMode();
-        _suppressRefocus = false;
-        WindowState = WindowState.Normal;
-        PositionOnTargetDisplay();
-        Activate();
-        NativeMethods.SetForegroundWindow(_hwnd);
+        Unpark();
     }
 
     private async void OnDeactivated(object? sender, EventArgs e)
     {
         if (_windowed || _suppressRefocus || !_settings.Settings.KeepFocus || _launcher.GameRunning) return;
-        if (WindowState == WindowState.Minimized) return;
+        if (_parked) return;
         await Task.Delay(350);
-        if (_suppressRefocus || _launcher.GameRunning || WindowState == WindowState.Minimized) return;
+        if (_suppressRefocus || _launcher.GameRunning || _parked) return;
 
         // Don't fight the virtual keyboard for focus
         var kb = NativeMethods.FindWindow("IPTip_Main_Window", null);

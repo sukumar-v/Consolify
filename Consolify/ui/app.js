@@ -1322,7 +1322,7 @@ function allSettingsRows() {
     : null;
 
   rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
-    "Tap to minimize or restore the launcher (in-game menu while a game runs); double tap to open the Power Wheel",
+    "Tap to hide or bring back the launcher (in-game menu while a game runs); double tap to open the Power Wheel",
     comboWarn));
 
   rows.push(cycleRow("Screenshot button", SCREENSHOT_COMBOS, () => s.screenshotCombo, v => set(() => s.screenshotCombo = v),
