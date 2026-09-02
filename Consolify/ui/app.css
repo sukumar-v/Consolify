@@ -662,8 +662,10 @@ body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
 /* ---- settings categories ----
    The settings screen grew past the point where one scroll was readable, so it is split into
    categories down the left. The nav is a fixed column and only the rows scroll. */
-.settings-body { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 30px 80px 30px; }
-.settings-body .settings-scroll { padding: 0; }
+.settings-body { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 30px 64px 30px; }
+/* The focus ring is a 3px box-shadow OUTSIDE the border and the row scales up slightly, so the
+   scroller needs room on all four sides or it clips the ring off the edges of every row. */
+.settings-body .settings-scroll { padding: 6px 16px; }
 .settings-nav {
   flex: 0 0 300px; display: flex; flex-direction: column; gap: 6px;
   border-right: 1px solid rgba(246,245,243,0.10); padding-right: 22px;
@@ -683,3 +685,10 @@ body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
 /* The nav itself never takes the highlight -- LB/RB switch category, so a focus ring here would
    suggest a third thing the D-pad has to walk through. */
 .set-tab:hover { color: #F6F5F3; }
+/* The sidebar takes the highlight in its own right now: focus lands here first, and B from the
+   options comes back to it. */
+.set-tab.focused {
+  background: rgba(240,162,83,0.16); color: #F6F5F3;
+  border-color: #F0A253;
+  box-shadow: 0 0 0 2px #F0A253, 0 0 30px 4px rgba(240,162,83,0.22);
+}

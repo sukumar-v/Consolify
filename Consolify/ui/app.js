@@ -1425,11 +1425,15 @@ function cycleRow(name, options, get, setV, hint, warn) {
    move between Library, Collections and Settings -- reusing them here would trap you in Settings. */
 const SETTINGS_TABS = [
   { id: "general",  label: "General" },
-  { id: "input",    label: "Input" },
+  { id: "input",    label: "Controller" },
   { id: "keyboard", label: "Keyboard" },
   { id: "library",  label: "Library" },
 ];
 let settingsTab = "general";
+/* Which half of the screen has the highlight. Settings opens on the sidebar, so the first thing
+   you choose is what you are configuring rather than being dropped into a list of rows; A (or
+   Right) steps into the options and B steps back out to the categories. */
+let settingsPane = "nav";
 
 function settingsRows() {
   let cat = null;
@@ -1440,14 +1444,23 @@ function settingsRows() {
 }
 
 function setSettingsTab(id) {
-  if (settingsTab === id) return;
-  settingsTab = id;
-  settingsIdx = 0;
+  if (settingsTab !== id) { settingsTab = id; settingsIdx = 0; }
+  renderSettings();
+}
+
+function settingsTabIdx() {
+  const i = SETTINGS_TABS.findIndex(t => t.id === settingsTab);
+  return i < 0 ? 0 : i;
+}
+
+function enterSettingsPane(pane) {
+  settingsPane = pane;
+  if (pane === "rows") settingsIdx = Math.min(settingsIdx, Math.max(0, settingsRows().filter(r => !r.section).length - 1));
   renderSettings();
 }
 
 function cycleSettingsTab(dir) {
-  const i = SETTINGS_TABS.findIndex(t => t.id === settingsTab);
+  const i = settingsTabIdx();
   setSettingsTab(SETTINGS_TABS[(i + dir + SETTINGS_TABS.length) % SETTINGS_TABS.length].id);
 }
 
@@ -1464,15 +1477,29 @@ function renderSettingsNav() {
   nav.innerHTML = "";
   SETTINGS_TABS.forEach(t => {
     const el = document.createElement("div");
-    el.className = "set-tab" + (t.id === settingsTab ? " active" : "");
+    el.className = "set-tab" + (t.id === settingsTab ? " active" : "")
+      + (t.id === settingsTab && settingsPane === "nav" && focusVisible() ? " focused" : "");
     el.innerHTML = `<span>${esc(t.label)}</span><span class="set-tab-count">${counts[t.id] || 0}</span>`;
-    el.addEventListener("click", () => setSettingsTab(t.id));
+    el.addEventListener("click", () => { settingsPane = "nav"; setSettingsTab(t.id); });
+    el.addEventListener("mouseenter", () => { if (hoverEnabled() && settingsPane !== "nav") { settingsPane = "nav"; renderSettings(); } });
     nav.appendChild(el);
   });
 }
 
 function renderSettings() {
   renderSettingsNav();
+  // The legend changes with the pane: on the categories B leaves Settings, inside the options it
+  // only steps back to the categories, and saying so is cheaper than letting people find out.
+  const foot = $("settingsFoot");
+  if (foot) foot.innerHTML = settingsPane === "nav"
+    ? `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>` +
+      `<div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>` +
+      `<div class="legend-item"><div class="dpad-badge mono">▴ ▾</div><span>Category</span></div>` +
+      `<div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Screen</span></div>`
+    : `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>` +
+      `<div class="legend-item"><div class="btn-badge">B</div><span>Categories</span></div>` +
+      `<div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>` +
+      `<div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Screen</span></div>`;
   const rows = settingsRows();
   const scroll = $("settingsScroll");
   scroll.innerHTML = "";
@@ -1492,7 +1519,7 @@ function renderSettings() {
     fi++;
     const idx = fi;
     const el = document.createElement("div");
-    el.className = "set-row" + (idx === settingsIdx && focusVisible() ? " focused" : "");
+    el.className = "set-row" + (idx === settingsIdx && settingsPane === "rows" && focusVisible() ? " focused" : "");
 
     let right = "";
     if (r.type === "toggle") {
@@ -1512,8 +1539,16 @@ function renderSettings() {
 
     el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${esc(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
 
-    el.addEventListener("mouseenter", () => { if (hoverEnabled() && settingsIdx !== idx) { settingsIdx = idx; renderSettings(); } });
-    el.addEventListener("click", () => { settingsIdx = idx; const row = settingsRows().filter(x => !x.section)[idx]; if (row.action) row.action(); else if (row.adjust) row.adjust(1); });
+    el.addEventListener("mouseenter", () => {
+      if (!hoverEnabled()) return;
+      if (settingsIdx === idx && settingsPane === "rows") return;
+      settingsIdx = idx; settingsPane = "rows"; renderSettings();
+    });
+    el.addEventListener("click", () => {
+      settingsIdx = idx; settingsPane = "rows";
+      const row = settingsRows().filter(x => !x.section)[idx];
+      if (row.action) row.action(); else if (row.adjust) row.adjust(1);
+    });
     scroll.appendChild(el);
   });
 
@@ -1522,6 +1557,16 @@ function renderSettings() {
 }
 
 function settingsInput(btn) {
+  if (settingsPane === "nav") {
+    switch (btn) {
+      case "Up": setSettingsTab(SETTINGS_TABS[Math.max(0, settingsTabIdx() - 1)].id); break;
+      case "Down": setSettingsTab(SETTINGS_TABS[Math.min(SETTINGS_TABS.length - 1, settingsTabIdx() + 1)].id); break;
+      case "Right": case "A": enterSettingsPane("rows"); break;
+      case "B": switchView("library"); break;
+    }
+    return;
+  }
+
   const rows = settingsRows().filter(r => !r.section);
   const row = rows[settingsIdx];
   switch (btn) {
@@ -1530,8 +1575,8 @@ function settingsInput(btn) {
     case "Left": if (row && row.adjust) row.adjust(-1); break;
     case "Right": if (row && row.adjust) row.adjust(1); break;
     case "A": if (focusVisible() && row) { if (row.action) row.action(); else if (row.adjust) row.adjust(1); } break;
-    case "X": cycleSettingsTab(1); break;
-    case "B": switchView("library"); break;
+    // Back goes to the categories first, and only out of Settings from there.
+    case "B": enterSettingsPane("nav"); break;
   }
 }
 
@@ -1958,7 +2003,8 @@ function switchView(v) {
   if (v === "library") { clampFocus(); updateLibraryFocus(); }
   if (v === "collections") renderCollections();
   if (v === "detail") renderDetail();
-  if (v === "settings") { renderSettings(); setBackdrop(null); }
+  // Always land on the categories, never mid-list in whatever was open last time.
+  if (v === "settings") { settingsPane = "nav"; settingsIdx = 0; renderSettings(); setBackdrop(null); }
 }
 
 function cycleSection(dir) {
