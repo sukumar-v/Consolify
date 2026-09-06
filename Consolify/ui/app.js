@@ -25,8 +25,8 @@ let S = {
 
 const SECTIONS = ["library", "collections", "settings"];
 let view = "library";                    // library | collections | detail | settings
-let focus = { zone: "cont", row: 0, col: 0 };  // library zones: tabs | cont | grid
-let tabIdx = 0;
+// Library focus lives in focusKey (see the spatial focus section), not in a zone+row+col
+// triple -- that is what lets a theme lay the screen out any way it likes.
 
 let detailGameId = null;
 let detailReturn = "library";            // where B goes back to from detail
@@ -93,7 +93,9 @@ function hoverEnabled() { return inputMode === "pointer" && !overlayMode; }
    never "arm" a stale item. The index is still remembered, so picking the D-pad back up
    resumes from the last selected item. */
 let pointerOnItem = false;
-const FOCUSABLE_SEL = ".cont-item, .grid-item, .tab, .set-row, .ov-row, .coll-card, .pill-btn";
+/* Screens migrated to the spatial engine mark their items with [data-focusable]; the class
+   list covers the ones still on index navigation. Both are here until the migration finishes. */
+const FOCUSABLE_SEL = "[data-focusable], .cont-item, .grid-item, .tab, .set-row, .ov-row, .coll-card, .pill-btn";
 
 /** Should a focus highlight be painted at all right now? */
 function focusVisible() { return overlayMode || inputMode === "pad" || pointerOnItem; }
@@ -118,6 +120,157 @@ function repaintFocus() {
   }
   else if (view === "detail") updateDetailFocus();
   else if (view === "settings") renderSettings();
+}
+
+/* ============================== spatial focus ==============================
+   The app-side half of nav.js. Focus is an element identified by a stable key
+   rather than a row/column pair, so a re-render (or a theme that lays the same
+   games out completely differently) lands the highlight back on the same thing. */
+
+let focusKey = null;
+let navAnchor = null;      // sticky cross-axis coordinate, held along a straight run
+let navAnchorAxis = null;  // "x" while moving vertically, "y" while moving horizontally
+
+function focusEl() {
+  const scope = Nav.activeScope();
+  if (!scope || !focusKey) return null;
+  return Nav.focusables(scope).find(el => Nav.keyOf(el) === focusKey) || null;
+}
+
+/** Focus an element outright: hover, a click, or landing on a screen. Ends any run. */
+function setFocusEl(el) {
+  if (!el) return;
+  focusKey = Nav.keyOf(el);
+  navAnchor = null;
+  navAnchorAxis = null;
+}
+
+/** Sum offsetTop up to the scroller. Layout pixels, to match scrollTop -- see nav.js. */
+function offsetWithin(el, container) {
+  let top = 0;
+  for (let n = el; n && n !== container; n = n.offsetParent) top += n.offsetTop;
+  return top;
+}
+
+function scrollParentOf(el) {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const s = getComputedStyle(p);
+    if (/(auto|scroll)/.test(s.overflowY) && p.scrollHeight > p.clientHeight + 1) return p;
+  }
+  return null;
+}
+
+/** Bring the focused element into view inside whatever is scrolling it. */
+function revealFocus(el) {
+  const sc = scrollParentOf(el);
+  if (!sc) return;
+  watchScrolled(sc);
+  const top = offsetWithin(el, sc);
+  const bottom = top + el.offsetHeight;
+  const viewTop = sc.scrollTop;
+  const viewBottom = viewTop + sc.clientHeight;
+
+  let next = null;
+  // Snap fully to the ends, so the first row keeps its focus-glow padding and the
+  // last one is not left hanging a few pixels short.
+  if (top - REVEAL_MARGIN <= 0) next = 0;
+  else if (bottom + REVEAL_MARGIN >= sc.scrollHeight) next = sc.scrollHeight;
+  else if (top - REVEAL_MARGIN < viewTop) next = top - REVEAL_MARGIN;
+  else if (bottom + REVEAL_MARGIN > viewBottom) next = bottom + REVEAL_MARGIN - sc.clientHeight;
+  if (next === null) return;
+
+  const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
+  sc.scrollTo({ top: Math.max(0, Math.min(next, max)), behavior: "smooth" });
+}
+
+/** Move the highlight one step. Returns false when there is nowhere to go. */
+function navMove(dir) {
+  const scope = Nav.activeScope();
+  const list = Nav.focusables(scope);
+  if (!list.length) return false;
+
+  const cur = focusEl();
+  if (!cur) { setFocusEl(list[0]); afterFocusMove(); return true; }
+
+  const horizontal = dir === "Left" || dir === "Right";
+  const axis = horizontal ? "y" : "x";
+  const from = cur.getBoundingClientRect();
+  // A change of axis starts a new run, and the anchor is re-taken from where we are.
+  if (navAnchor === null || navAnchorAxis !== axis) {
+    const c = Nav.centre(from);
+    navAnchor = horizontal ? c.y : c.x;
+    navAnchorAxis = axis;
+  }
+
+  /* Left/Right stay in their row while the row has anywhere left to go.
+
+     Without this, Right off the last tile of a grid row scored some item on a
+     different line as "to the right and a bit up" and jumped there -- pressing
+     Right on the last tile threw you into the carousel. Confining the pool to
+     things that share the row keeps the common case sane; when the row really is
+     exhausted the wrap below takes over, and only if there is nothing to wrap to
+     does it fall back to the whole scope (which is what lets a theme put a
+     sidebar to the left of a grid and have Right cross into it). */
+  let pool = list.filter(el => el !== cur);
+  if (horizontal) {
+    const sameBand = pool.filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.bottom > from.top && r.top < from.bottom;
+    });
+    if (sameBand.length) pool = sameBand;
+  }
+
+  const pick = (candidates) => {
+    let best = null, bestScore = Infinity;
+    for (const el of candidates) {
+      const s = Nav.score(from, el.getBoundingClientRect(), dir, navAnchor);
+      if (s < bestScore) { bestScore = s; best = el; }
+    }
+    return best;
+  };
+
+  let best = pick(pool);
+  if (!best) best = Nav.wrapTarget(list, cur, dir);
+  if (!best && pool.length !== list.length - 1) best = pick(list.filter(el => el !== cur));
+  if (!best) return false;
+
+  focusKey = Nav.keyOf(best);
+  afterFocusMove();
+  return true;
+}
+
+function afterFocusMove() {
+  paintNav();
+  const el = focusEl();
+  if (el) revealFocus(el);
+}
+
+/** Apply the highlight, the section dimming and the backdrop from the DOM alone. */
+function paintNav() {
+  const scope = Nav.activeScope();
+  if (!scope) return;
+  const show = focusVisible();
+  const cur = focusEl();
+
+  Nav.focusables(scope).forEach(el => el.classList.toggle("focused", show && el === cur));
+  // Anything marked as a dim group fades unless the highlight is inside it. Themes opt
+  // in by adding data-dim-group; nothing here knows what a "Continue row" is.
+  scope.querySelectorAll("[data-dim-group]").forEach(g =>
+    g.classList.toggle("zone-dim", !!cur && !g.contains(cur)));
+
+  updateContinueScroll(true);
+  setBackdrop(focusedGame());
+}
+
+/** The game the highlight is on, straight off the element. */
+function focusedGame() {
+  if (view === "detail") return gameById(detailGameId);
+  // Collections still runs the old index navigation, so its highlight is not an element
+  // this engine knows about. Remove this branch when that screen is migrated too.
+  if (view === "collections")
+    return collMode === "grid" ? (collGridRows[collFocus.row] || [])[collFocus.col] || null : null;
+  const el = focusEl();
+  return el && el.dataset.gameId ? gameById(el.dataset.gameId) : null;
 }
 
 /* ============================== theme ============================== */
@@ -371,7 +524,8 @@ let guideOpen = false;
 let settingsIdx = 0;
 let saveTimer = null;
 
-/* layout caches */
+/* Kept only for the carousel geometry (how many tiles fit, how far it can slide).
+   Focus no longer indexes into either of these. */
 let contItems = [];
 let gridRows = [];
 
@@ -607,9 +761,13 @@ function renderTabbars() {
       el.className = "tab" + (t.id === active ? " tab-active" : "");
       el.textContent = t.label;
       el.dataset.tab = t.id;
+      // Tabs are ordinary focusables now, so Up from the top row reaches them by geometry
+      // rather than by a hardcoded zone list.
+      el.dataset.focusable = "";
+      el.dataset.action = "tab:" + t.id;
       el.addEventListener("mouseenter", () => {
         if (!hoverEnabled()) return;
-        if (view === "library") { focus = { zone: "tabs", row: 0, col: 0 }; tabIdx = i; updateLibraryFocus(true); }
+        if (view === "library") { setFocusEl(el); updateLibraryFocus(true); }
       });
       el.addEventListener("click", () => { if (t.id !== view) switchView(t.id); });
       bar.appendChild(el);
@@ -622,9 +780,11 @@ function renderTabbars() {
 function makeAddTile(onHover, onClick) {
   const item = document.createElement("div");
   item.className = "grid-item add-tile";
+  item.dataset.focusable = "";
+  item.dataset.action = "addGame";
   item.innerHTML = `<div class="add-plus">+</div><div class="add-label">Add game</div>`;
-  item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
-  item.addEventListener("click", onClick);
+  if (onHover) item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
+  if (onClick) item.addEventListener("click", onClick);
   return item;
 }
 
@@ -633,6 +793,9 @@ function makeGridTile(g, onHover, onClick, onDetails) {
 
   const item = document.createElement("div");
   item.className = "grid-item" + (g.installed ? "" : " uninstalled");
+  // What makes the tile navigable and activatable; see the contract in nav.js.
+  item.dataset.focusable = "";
+  item.dataset.gameId = g.id;
 
   const art = document.createElement("div");
   art.className = "grid-art";
@@ -652,8 +815,8 @@ function makeGridTile(g, onHover, onClick, onDetails) {
     item.appendChild(star);
   }
 
-  item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
-  item.addEventListener("click", onClick);
+  if (onHover) item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
+  if (onClick) item.addEventListener("click", onClick);
   if (onDetails) item.addEventListener("contextmenu", (e) => { e.preventDefault(); onDetails(); });
   return item;
 }
@@ -690,14 +853,22 @@ function contMaxScroll() { return Math.max(0, contItems.length - contPerView());
  * `follow` is false for hover: letting the mouse drag the carousel makes tiles slide out
  * from under the cursor, which fires another hover and runs away.
  */
+/** The carousel index the highlight is on, or null when it is elsewhere. */
+function focusedContIndex() {
+  const el = focusEl();
+  if (!el || el.dataset.contIndex === undefined) return null;
+  return parseInt(el.dataset.contIndex, 10);
+}
+
 function updateContinueScroll(follow) {
   const track = $("continueTrack");
   if (!track) return;
   const perView = contPerView();
 
-  if (follow && focus.zone === "cont") {
-    if (focus.col < contScroll) contScroll = focus.col;
-    else if (focus.col > contScroll + perView - 1) contScroll = focus.col - perView + 1;
+  const i = focusedContIndex();
+  if (follow && i !== null) {
+    if (i < contScroll) contScroll = i;
+    else if (i > contScroll + perView - 1) contScroll = i - perView + 1;
   }
   contScroll = Math.max(0, Math.min(contScroll, contMaxScroll()));
   track.style.transform = `translateX(${-contScroll * CONT_STEP}px)`;
@@ -714,16 +885,18 @@ function overlayOpen() {
 window.addEventListener("wheel", (e) => {
   if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical intent: let it scroll normally
   if (overlayOpen() || view !== "library") return;
-  if (focus.zone !== "cont" || !contItems.length) return;
+  if (focusedContIndex() === null) return;
 
   hWheelAccum += e.deltaX;
   let moved = false;
   while (Math.abs(hWheelAccum) >= 120) {
     const dir = Math.sign(hWheelAccum);
     hWheelAccum -= dir * 120;
-    const next = Math.max(0, Math.min(contItems.length - 1, focus.col + dir));
-    if (next === focus.col) { hWheelAccum = 0; break; }   // already at an end
-    focus.col = next;
+    // Step along the carousel by moving focus, so the wheel and the D-pad end up in
+    // exactly the same place rather than keeping two ideas of where the highlight is.
+    if (!navMove(dir > 0 ? "Right" : "Left")) { hWheelAccum = 0; break; }
+    const next = focusedContIndex();
+    if (next === null) break;   // walked out of the carousel; stop rather than drift
     moved = true;
   }
   if (moved) {
@@ -783,8 +956,11 @@ function renderPlaying() {
   $("playingMeta").textContent = (g.platform + " · RUNNING").toUpperCase();
 
   const card = $("playingCard");
-  card.onmouseenter = () => { if (hoverEnabled()) { focus = { zone: "playing", row: 0, col: 0 }; updateLibraryFocus(true); } };
-  card.onclick = () => { focus = { zone: "playing", row: 0, col: 0 }; updateLibraryFocus(true); send({ cmd: "resumeGame" }); };
+  // data-role tells libraryAccept this tile resumes rather than relaunches.
+  card.dataset.gameId = g.id;
+  card.dataset.role = "playing";
+  card.onmouseenter = () => { if (hoverEnabled()) { setFocusEl(card); updateLibraryFocus(true); } };
+  card.onclick = () => { setFocusEl(card); updateLibraryFocus(true); send({ cmd: "resumeGame" }); };
 }
 
 function renderLibrary() {
@@ -821,11 +997,17 @@ function renderLibrary() {
     meta.innerHTML = `<div class="cont-title">${esc(g.title)}</div><div class="cont-sub">${esc(shortMeta(g))}</div>`;
 
     item.appendChild(art); item.appendChild(meta);
+    // A game can sit in both the carousel and the grid, so the key has to say which one
+    // this is -- on the bare game id the highlight would jump between them.
+    item.dataset.focusable = "";
+    item.dataset.gameId = g.id;
+    item.dataset.focusKey = "cont:" + g.id;
+    item.dataset.contIndex = i;
     item.addEventListener("mouseenter", () => {
       if (!hoverEnabled()) return;
-      focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true);
+      setFocusEl(item); updateLibraryFocus(true);
     });
-    item.addEventListener("click", () => { focus = { zone: "cont", row: 0, col: i }; updateLibraryFocus(true); libraryAccept("A"); });
+    item.addEventListener("click", () => { setFocusEl(item); updateLibraryFocus(true); libraryAccept("A"); });
     track.appendChild(item);
   });
 
@@ -845,10 +1027,12 @@ function renderLibrary() {
   rows.forEach((row, r) => {
     const rowDiv = document.createElement("div");
     rowDiv.className = "grid-row";
+    rowDiv.dataset.dimGroup = "";
     row.forEach((g, c) => {
-      const item = makeGridTile(g,
-        () => { focus = { zone: "grid", row: r, col: c }; updateLibraryFocus(true); },
-        () => { focus = { zone: "grid", row: r, col: c }; updateLibraryFocus(true); libraryAccept("A"); });
+      const item = makeGridTile(g, null, null);
+      item.dataset.focusKey = g.__add ? "action:addGame" : "tile:" + g.id;
+      item.addEventListener("mouseenter", () => { if (hoverEnabled()) { setFocusEl(item); updateLibraryFocus(true); } });
+      item.addEventListener("click", () => { setFocusEl(item); updateLibraryFocus(true); libraryAccept("A"); });
       rowDiv.appendChild(item);
     });
     scroll.appendChild(rowDiv);
@@ -858,144 +1042,71 @@ function renderLibrary() {
   updateLibraryFocus();
 }
 
-function focusedGame() {
-  if (view === "detail") return gameById(detailGameId);
-  if (view === "library" && focus.zone === "playing") return gameById(S.runningGameId);
-  if (view === "collections") {
-    if (collMode === "grid") return (collGridRows[collFocus.row] || [])[collFocus.col] || null;
-    return null;
-  }
-  if (focus.zone === "cont") return contItems[focus.col] || null;
-  if (focus.zone === "grid") {
-    const it = (gridRows[focus.row] || [])[focus.col];
-    return it && !it.__add ? it : null;
-  }
-  return null;
-}
-
-/** The focused grid cell, including the trailing "add game" tile. */
+/** The focused element's game, including the trailing "add game" tile as null. */
 function focusedCell() {
-  if (focus.zone === "grid") return (gridRows[focus.row] || [])[focus.col] || null;
-  if (focus.zone === "cont") return contItems[focus.col] || null;
-  return null;
+  const el = focusEl();
+  if (!el) return null;
+  if (el.dataset.action === "addGame") return { __add: true };
+  return el.dataset.gameId ? gameById(el.dataset.gameId) : null;
 }
 
+/* Focus survives a re-render by key, but the thing it was on can disappear -- a filter
+   change, a game uninstalled, the running game exiting. Fall back to the first focusable
+   rather than leaving the highlight nowhere. */
 function clampFocus() {
-  if (focus.zone === "cont") {
-    if (!contItems.length) focus = { zone: gridRows.length ? "grid" : "tabs", row: 0, col: 0 };
-    else focus.col = Math.min(focus.col, contItems.length - 1);
-  }
-  if (focus.zone === "grid") {
-    if (!gridRows.length) focus = { zone: contItems.length ? "cont" : "tabs", row: 0, col: 0 };
-    else {
-      focus.row = Math.min(focus.row, gridRows.length - 1);
-      focus.col = Math.min(focus.col, gridRows[focus.row].length - 1);
-    }
-  }
+  if (focusEl()) return;
+  const list = Nav.focusables(Nav.activeScope());
+  // A game, not the tab bar: landing on "Library" and having to press Down to reach the
+  // shelf is the wrong first impression, and after a filter wipes the highlight it is
+  // still the game list you want to be in.
+  setFocusEl(list.find(el => el.dataset.gameId) || list[0]);
+  if (!list.length) focusKey = null;
 }
 
 function updateLibraryFocus(noScroll) {
-  const show = focusVisible();
-  const playingCard = $("playingCard");
-  if (playingCard) playingCard.classList.toggle("focused", show && focus.zone === "playing");
-  const tabs = document.querySelectorAll("#screen-library [data-tabbar] .tab");
-  tabs.forEach((t, i) => t.classList.toggle("focused", show && focus.zone === "tabs" && i === tabIdx));
-
-  const contFocused = focus.zone === "cont";
-  $("continueSection").classList.toggle("zone-dim", !contFocused && contItems.length > 0);
-  document.querySelectorAll("#continueRow .cont-item").forEach((el, i) => {
-    el.classList.toggle("focused", show && contFocused && i === focus.col);
-  });
-  updateContinueScroll(!noScroll);
-
-  const scroller = $("gridScroll");
-  document.querySelectorAll("#gridScroll .grid-row").forEach((rowEl, r) => {
-    const rowFocused = focus.zone === "grid" && r === focus.row;
-    rowEl.classList.toggle("zone-dim", !rowFocused);
-    rowEl.querySelectorAll(".grid-item").forEach((el, c) => {
-      const f = rowFocused && c === focus.col;
-      el.classList.toggle("focused", show && f);
-      if (show && f && !noScroll) revealIn(scroller, el, r === 0, r === gridRows.length - 1);
-    });
-  });
-
-  setBackdrop(focusedGame());
+  paintNav();
+  if (noScroll) return;
+  const el = focusEl();
+  if (el) revealFocus(el);
 }
 
 /* ============================== library nav ============================== */
 
-function libraryNav(btn) {
-  const zones = ["tabs"];
-  if (S.gameRunning && gameById(S.runningGameId)) zones.push("playing");
-  if (contItems.length) zones.push("cont");
-  for (let i = 0; i < gridRows.length; i++) zones.push("grid" + i);
+function libraryNav(btn) { navMove(btn); }
 
-  const zoneIndex = () => {
-    if (focus.zone === "tabs" || focus.zone === "playing" || focus.zone === "cont")
-      return zones.indexOf(focus.zone);
-    return zones.indexOf("grid" + focus.row);
-  };
-
-  if (btn === "Left" || btn === "Right") {
-    const dir = btn === "Right" ? 1 : -1;
-    if (focus.zone === "tabs") tabIdx = Math.max(0, Math.min(TAB_DEFS.length - 1, tabIdx + dir));
-    else if (focus.zone === "playing") { /* single card: nothing to move to */ }
-    else if (focus.zone === "cont") focus.col = Math.max(0, Math.min(contItems.length - 1, focus.col + dir));
-    else focus.col = Math.max(0, Math.min(gridRows[focus.row].length - 1, focus.col + dir));
-    updateLibraryFocus();
-    return;
-  }
-
-  if (btn === "Up" || btn === "Down") {
-    const dir = btn === "Down" ? 1 : -1;
-    const zi = Math.max(0, Math.min(zones.length - 1, zoneIndex() + dir));
-    const z = zones[zi];
-    // Positions are on-screen, so the carousel offset has to be folded in both ways.
-    const xCenter = focus.zone === "cont" ? (focus.col - contScroll) * CONT_STEP + 150
-                  : focus.zone === "grid" ? focus.col * 223 + 100 : 0;
-    if (z === "tabs") { focus = { zone: "tabs", row: 0, col: 0 }; }
-    else if (z === "playing") { focus = { zone: "playing", row: 0, col: 0 }; }
-    else if (z === "cont") {
-      const col = focus.zone === "tabs" ? contScroll : contScroll + Math.round((xCenter - 150) / CONT_STEP);
-      focus = { zone: "cont", row: 0, col: Math.max(0, Math.min(contItems.length - 1, col)) };
-    } else {
-      const r = parseInt(z.slice(4), 10);
-      const col = focus.zone === "tabs" ? 0
-                : focus.zone === "cont" ? Math.round((xCenter - 100) / 223) : focus.col;
-      focus = { zone: "grid", row: r, col: Math.max(0, Math.min(gridRows[r].length - 1, col)) };
-    }
-    updateLibraryFocus();
-  }
-}
+/* What A / Y do is read off the focused element, not inferred from which zone the
+   highlight is in. That is the whole point: a theme can put a launchable tile
+   anywhere, or invent a row of its own, and activation still works. */
+const ACTIONS = {
+  addGame: () => send({ cmd: "addManual" }),
+  resume: () => send({ cmd: "resumeGame" }),
+  "tab:library": () => switchView("library"),
+  "tab:collections": () => switchView("collections"),
+  "tab:settings": () => switchView("settings"),
+};
 
 function libraryAccept(btn) {
   if (!focusVisible()) return;   // pointer is over empty space: nothing is armed
-  if (focus.zone === "playing") {
-    const g = gameById(S.runningGameId);
-    if (!g) return;
-    if (btn === "A") send({ cmd: "resumeGame" });
-    else if (btn === "Y") openGameMenu(g.id, "library");
+  const el = focusEl();
+  if (!el) return;
+
+  const g = el.dataset.gameId ? gameById(el.dataset.gameId) : null;
+  if (g) {
+    // The running game resumes rather than relaunching; the element says which it is.
+    const running = el.dataset.role === "playing";
+    if (btn === "A") {
+      if (running) send({ cmd: "resumeGame" });
+      else if (!g.installed) toast(`${g.title} is not installed`);
+      else launchGame(g);
+    } else if (btn === "Y") {
+      openGameMenu(g.id, "library");
+    }
     return;
   }
-  if (focus.zone === "tabs") {
-    if (btn !== "A") return;
-    const target = TAB_DEFS[tabIdx].id;
-    if (target !== "library") switchView(target);
-    return;
-  }
-  const cell = focusedCell();
-  if (cell && cell.__add) {
-    if (btn === "A") send({ cmd: "addManual" });
-    return;
-  }
-  const g = focusedGame();
-  if (!g) return;
-  if (btn === "A") {
-    if (!g.installed) { toast(`${g.title} is not installed`); return; }
-    launchGame(g);
-  } else if (btn === "Y") {
-    openGameMenu(g.id, "library");
-  }
+
+  if (btn !== "A") return;
+  const act = ACTIONS[el.dataset.action];
+  if (act) act();
 }
 
 function libraryInput(btn) {
@@ -1003,10 +1114,20 @@ function libraryInput(btn) {
     case "Up": case "Down": case "Left": case "Right": libraryNav(btn); break;
     case "A": case "Y": libraryAccept(btn); break;
     case "X": openFilter(); break;
-    case "B":
-      if (focus.zone === "grid" && focus.row > 0) { focus.row = 0; focus.col = 0; updateLibraryFocus(); }
-      else if (focus.zone === "grid" && contItems.length) { focus = { zone: "cont", row: 0, col: 0 }; updateLibraryFocus(); }
+    // B walks back out of the grid: to its top, then up to the carousel.
+    case "B": {
+      const list = Nav.focusables(Nav.activeScope());
+      const cur = focusEl();
+      if (!cur || !list.length) break;
+      const inGrid = !!cur.closest("#gridScroll");
+      if (inGrid) {
+        const first = list.find(el => el.closest("#gridScroll"));
+        if (first && first !== cur) { setFocusEl(first); afterFocusMove(); break; }
+      }
+      const above = list.find(el => el.closest("#continueRow"));
+      if (above) { setFocusEl(above); afterFocusMove(); }
       break;
+    }
   }
 }
 
@@ -2183,8 +2304,9 @@ function handleHostMessage(m) {
       S.scanning = m.scanning;
       if (S.settings) S.settings.launchOnStartup = m.startupRegistered;
       applyTheme();
-      if ((firstState || wasEmpty) && focus.zone === "tabs" && S.games.length)
-        focus = { zone: "cont", row: 0, col: 0 };
+      // First real library: let clampFocus drop the highlight onto the first game rather
+      // than leaving it wherever the empty screen had put it.
+      if ((firstState || wasEmpty) && S.games.length) focusKey = null;
       renderLibrary();
       if (view === "collections") renderCollections();
       if (view === "settings") renderSettings();

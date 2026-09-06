@@ -23,7 +23,7 @@
 <div id="stage">
 
   <!-- ============ LIBRARY ============ -->
-  <div class="screen" id="screen-library">
+  <div class="screen" id="screen-library" data-focus-scope>
     <header class="topbar">
       <div class="topbar-left" data-tabbar="library"></div>
       <div class="topbar-right mono">
@@ -42,7 +42,7 @@
           <div class="section-title">Playing</div>
           <div class="section-label mono">RUNNING NOW</div>
         </div>
-        <div class="playing-card" id="playingCard">
+        <div class="playing-card" id="playingCard" data-focusable data-focus-key="playing">
           <div class="playing-art" id="playingArt"></div>
           <div class="playing-info">
             <div class="playing-name" id="playingName">—</div>
@@ -57,7 +57,7 @@
           <div class="section-title">Continue</div>
           <div class="section-label mono">RECENTLY PLAYED</div>
         </div>
-        <div class="continue-row" id="continueRow"></div>
+        <div class="continue-row" id="continueRow" data-dim-group></div>
       </section>
 
       <section class="lib-section lib-grid-section">
@@ -264,6 +264,7 @@
   <div id="toast" class="mono"></div>
 </div>
 
+<script src="nav.js"></script>
 <script src="app.js"></script>
 <script src="radial.js"></script>
 </body>
