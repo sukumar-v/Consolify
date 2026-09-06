@@ -39,6 +39,9 @@ public class AppSettings
     public int KeyRepeatIntervalMs { get; set; } = 90;
     public string KeyboardToggleButton { get; set; } = "Start";
     public int KeyboardToggleHoldMs { get; set; } = 600;
-    /// <summary>Builtin (the gamepad-driven on-screen keyboard) | TabTip | Osk.</summary>
+    /// <summary>Builtin (the Consolify keyboard) | TabTip | Osk.</summary>
     public string KeyboardApp { get; set; } = "Builtin";
+    /// <summary>Multiplier on the Consolify keyboard's key size, 0.6 .. 1.6. The base size is a
+    /// fraction of the display height, so this only nudges it away from that.</summary>
+    public double KeyboardScale { get; set; } = 1.0;
 }

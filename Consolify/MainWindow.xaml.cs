@@ -69,12 +69,15 @@ public partial class MainWindow : Window
         {
             _cursor.SetPadMode(mode == "pad");
             _bridge?.PushInputMode(mode);
+            // The keyboard follows the same pad/pointer split as the launcher UI.
+            _kb?.SetInputMode(mode);
         });
 
         _keyboard.BuiltinShow = ShowBuiltinKeyboard;
         _keyboard.BuiltinHide = HideBuiltinKeyboard;
         _keyboard.BuiltinVisible = () => _kb is { IsVisible: true };
         _gamepad.KeyboardInput += what => Dispatcher.BeginInvoke(() => OnKeyboardInput(what));
+        _gamepad.KeyboardArmed = () => _kb?.Armed ?? true;
 
         SourceInitialized += OnSourceInitialized;
         Loaded += async (_, _) => await InitWebViewAsync();
@@ -317,10 +320,16 @@ public partial class MainWindow : Window
         }
         var target = (_settings.Settings.TvDeviceName is { } name ? _displays.GetDisplay(name) : null)
                      ?? _displays.GetDisplays().FirstOrDefault(d => d.IsPrimary);
-        if (target is not null) _kb.ShowOn(target);
+        if (target is not null) _kb.ShowOn(target, Math.Clamp(_settings.Settings.KeyboardScale, 0.6, 1.6));
         // Hand the pad over. Nothing else can read it until the keyboard closes, which is what
         // makes A "press this key" rather than "launch the highlighted game".
         _gamepad.KeyboardOwnsPad = true;
+    }
+
+    /// <summary>Re-apply the keyboard settings while it is up, so the size slider is live.</summary>
+    public void RefreshBuiltinKeyboard()
+    {
+        if (_kb is { IsVisible: true }) ShowBuiltinKeyboard();
     }
 
     private void HideBuiltinKeyboard()

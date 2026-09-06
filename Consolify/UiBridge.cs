@@ -134,6 +134,8 @@ public class UiBridge
                     catch (Exception ex) { Push(new { type = "toast", message = $"Startup registration failed: {ex.Message}" }); }
                 }
                 if (displayChanged) _window.PositionOnTargetDisplay();
+                // The size slider is only worth having if it moves the keyboard you are looking at.
+                _window.RefreshBuiltinKeyboard();
                 PushState();
                 break;
             }
@@ -356,6 +358,7 @@ public class UiBridge
         t.KeyboardToggleButton = s.KeyboardToggleButton;
         t.KeyboardToggleHoldMs = Math.Clamp(s.KeyboardToggleHoldMs, 200, 2000);
         t.KeyboardApp = s.KeyboardApp;
+        t.KeyboardScale = Math.Clamp(s.KeyboardScale, 0.6, 1.6);
     }
 
     private void StartScan()

@@ -64,6 +64,14 @@ public class GamepadService : IDisposable
     /// <summary>A direction or button for the on-screen keyboard while it owns the pad.</summary>
     public event Action<string>? KeyboardInput;
 
+    /// <summary>
+    /// Whether the keyboard currently has a highlighted key. It does not while the pointer is
+    /// driving and rests on no key, and the buttons then go back to being a mouse -- otherwise
+    /// there is no way to click the text field you are typing into once focus wanders off it.
+    /// Polled from the input thread, so it must not touch the UI tree.
+    /// </summary>
+    public Func<bool>? KeyboardArmed;
+
     public bool Connected { get; private set; }
 
     /// <summary>Latest reading, so the UI can ask for it after the bridge is up. The pad is
@@ -288,8 +296,13 @@ public class GamepadService : IDisposable
             // as walked to -- and it stands down entirely while a menu is up, so the Power Wheel
             // opened on top of it still gets the stick and the buttons.
             bool keyboardDriving = KeyboardOwnsPad && !MenuOwnsStick;
+            // Armed = a key is highlighted. Unarmed the buttons are a mouse again (below), so the
+            // pointer can go and click a text field the keyboard is not attached to.
+            bool keyboardArmed = keyboardDriving && (KeyboardArmed?.Invoke() ?? true);
             if (keyboardDriving)
             {
+                // The D-pad always reaches the keyboard: it is what re-arms the highlight after
+                // the pointer has cleared it.
                 foreach (var (mask, name) in NavButtons)
                 {
                     if ((pressed & mask) != 0)
@@ -305,13 +318,15 @@ public class GamepadService : IDisposable
                     if ((released & mask) != 0) repeat.Remove(mask);
                 }
 
+                // Close is the exception to arming: B has to shut the keyboard whether or not a
+                // key is lit, or a pointer resting on nothing would strand it on screen.
                 foreach (var (mask, name) in KeyboardButtons)
-                    if ((pressed & mask) != 0)
+                    if ((pressed & mask) != 0 && (keyboardArmed || name == "Close"))
                         KeyboardInput?.Invoke(name);
 
                 // LT switches layer, on its own edge because a trigger has no button bit.
                 bool ltNow = state.Gamepad.bLeftTrigger >= TriggerThreshold;
-                if (ltNow && !ltLatched) KeyboardInput?.Invoke("Layer");
+                if (ltNow && !ltLatched && keyboardArmed) KeyboardInput?.Invoke("Layer");
                 ltLatched = ltNow;
             }
 
@@ -376,11 +391,18 @@ public class GamepadService : IDisposable
             else
             {
                 // ---- desktop mouse clicks ----
-                // Not while the keyboard is driving: A and B are its own keys there, and a stray
-                // click would land on the app underneath instead of on a key.
-                if (s.GamepadMouseEnabled && !keyboardDriving)
+                // Not while a key is lit: A is that key's own press there, and a stray click would
+                // land on the app underneath instead. With nothing lit the pointer is in charge,
+                // and clicking is exactly what it is for.
+                if (s.GamepadMouseEnabled && !keyboardArmed)
                 {
                     ushort lMask = ButtonMask(s.LeftClickButton), rMask = ButtonMask(s.RightClickButton);
+                    // B still closes the keyboard, so it cannot also be a click while one is up.
+                    if (keyboardDriving)
+                    {
+                        if (lMask == NativeMethods.XINPUT_GAMEPAD_B) lMask = 0;
+                        if (rMask == NativeMethods.XINPUT_GAMEPAD_B) rMask = 0;
+                    }
                     if ((pressed & lMask) != 0 && !leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTDOWN); leftDown = true; }
                     if ((released & lMask) != 0 && leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
                     if ((pressed & rMask) != 0 && !rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTDOWN); rightDown = true; }

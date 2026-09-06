@@ -1334,24 +1334,28 @@ function allSettingsRows() {
 
   rows.push({ section: "KEYBOARD", cat: "keyboard" });
   rows.push(cycleRow("Keyboard app", ["Builtin", "TabTip", "Osk"], () => s.keyboardApp, v => set(() => s.keyboardApp = v),
-    "Builtin is Consolify's own gamepad keyboard: it never takes focus, so it keeps working over a game. " +
-    "TabTip is the Windows touch keyboard, which does not"));
+    "The Consolify Keyboard never takes focus, so it keeps working over a game and leaves the caret " +
+    "where it was. TabTip is the Windows touch keyboard; Osk is the classic on-screen keyboard",
+    s.keyboardApp === "Builtin" ? null
+      : "Windows' own keyboards are not built for a gamepad: TabTip only accepts one on its Gamepad " +
+        "layout, which has to be picked by hand in its settings, and Osk accepts none at all — it " +
+        "needs a real mouse. Both also take the foreground, so the field you were typing into can " +
+        "lose its caret.",
+    KEYBOARD_APP_LABELS));
   rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
-    "Hold this button to show or hide the Windows touch keyboard (it supports gamepad input)"));
+    "Hold this button to show or hide the keyboard, from anywhere — including inside a game"));
   rows.push(sliderRow("Hold time", () => s.keyboardToggleHoldMs, 200, 2000, 100, v => set(() => s.keyboardToggleHoldMs = v), v => Math.round(v) + " ms"));
 
-  rows.push({ section: "ON-SCREEN KEYBOARD", cat: "keyboard" });
-  rows.push({
-    name: "Controls", type: "static",
-    value: "A press  ·  B close  ·  X back  ·  Y space  ·  LS shift  ·  LT symbols  ·  LB/RB caret  ·  Menu enter",
-    hint: "The Xbox keyboard's own bindings; each is also printed on the key it drives",
-  });
+  rows.push({ section: "CONSOLIFY KEYBOARD", cat: "keyboard" });
+  rows.push(sliderRow("Keyboard size", () => s.keyboardScale, 0.6, 1.6, 0.05,
+    v => set(() => s.keyboardScale = v), v => Math.round(v * 100) + "%",
+    "Scales the keys up or down from the size Consolify picks for the TV"));
   rows.push(sliderRow("D-pad repeat delay", () => s.keyRepeatDelayMs, 120, 900, 10,
     v => set(() => s.keyRepeatDelayMs = v), v => Math.round(v) + " ms",
     "How long a direction is held before the highlight starts moving on its own"));
   rows.push(sliderRow("D-pad repeat speed", () => s.keyRepeatIntervalMs, 20, 300, 5,
     v => set(() => s.keyRepeatIntervalMs = v), v => Math.round(v) + " ms",
-    "Gap between steps once it is moving 2014 lower is faster"));
+    "Gap between steps once it is moving — lower is faster"));
   rows.push({
     name: "Show keyboard now", type: "action", label: "Toggle",
     action: () => send({ cmd: "toggleKeyboard" }),
@@ -1408,16 +1412,24 @@ function sliderRow(name, get, min, max, step, setV, fmt, hint) {
   };
 }
 
-function cycleRow(name, options, get, setV, hint, warn) {
+/* `labels` renames an option on screen without changing what is stored: "Builtin" is the value
+   the host has always written to settings.json, but "Consolify Keyboard" is what it is called. */
+function cycleRow(name, options, get, setV, hint, warn, labels) {
   const cur = () => (options.includes(get()) ? get() : options[0]);
   return {
-    name, hint, warn, type: "select", value: cur(),
+    name, hint, warn, type: "select", value: (labels && labels[cur()]) || cur(),
     adjust: (dir) => {
       const i = (options.indexOf(cur()) + dir + options.length) % options.length;
       setV(options[i]);
     },
   };
 }
+
+const KEYBOARD_APP_LABELS = {
+  Builtin: "Consolify Keyboard",
+  TabTip: "Windows touch keyboard",
+  Osk: "Windows on-screen keyboard",
+};
 
 /* ---- settings categories ----
    One screen of every setting had become unreadable. The rows are unchanged; they are just
@@ -1532,9 +1544,7 @@ function renderSettings() {
       const pct = ((r.value - r.min) / (r.max - r.min)) * 100;
       right = `<div class="slider"><span class="arrow">◂</span><div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div><span class="arrow">▸</span><span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
     } else if (r.type === "action") {
-      right = `<span class="set-action-label"${r.danger ? ' style="color:#E97A6C"' : ""}>${esc(r.label)}</span>`;
-    } else if (r.type === "static") {
-      right = `<span class="mono" style="font-size:18px;letter-spacing:0.1em;color:rgba(246,245,243,0.6)">${esc(r.value)}</span>`;
+      right = `<span class="set-action-label${r.danger ? " danger" : ""}">${esc(r.label)}</span>`;
     }
 
     el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${esc(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
@@ -2218,6 +2228,7 @@ function mockHandle(msg) {
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
+        keyboardApp: "Builtin", keyboardScale: 1.0, keyRepeatDelayMs: 350, keyRepeatIntervalMs: 90,
       },
       displays: [
         { deviceName: "\\\\.\\DISPLAY1", friendlyName: "Dell U2723QE", x: 0, y: 0, width: 3840, height: 2160, isPrimary: true },

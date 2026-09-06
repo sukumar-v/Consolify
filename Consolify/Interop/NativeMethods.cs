@@ -364,6 +364,8 @@ internal static class NativeMethods
     public const uint WM_MOUSEACTIVATE = 0x0021;
     public const int MA_NOACTIVATE = 3;
 
+    public const int WM_CAPTURECHANGED = 0x0215;
+
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
@@ -371,7 +373,7 @@ internal static class NativeMethods
     public const uint KEYEVENTF_UNICODE = 0x0004;
 
     public const ushort VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0D, VK_ESCAPE = 0x1B;
-    public const ushort VK_LEFT = 0x25, VK_RIGHT = 0x27, VK_HOME = 0x24, VK_END = 0x23;
+    public const ushort VK_LEFT = 0x25, VK_RIGHT = 0x27, VK_HOME = 0x24, VK_END = 0x23, VK_DELETE = 0x2E;
 
     /// <summary>
     /// Type one character as injected keyboard input. KEYEVENTF_UNICODE carries the character
