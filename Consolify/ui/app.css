@@ -1,13 +1,34 @@
 /* Consolify — visual language from the imported design (Couch Launcher.dc.html)
-   Base #08080A · Surface #141417 · Card #101012 · Text #F6F5F3 · Accent #F0A253
    Manrope + IBM Plex Mono. Focus: 180ms cubic-bezier(0.2,0.9,0.2,1), scale 1.05,
    3px accent ring + 44px glow. Backdrop: focused art, blur 64px @ 22%, 240ms crossfade. */
+
+/* ---- palette ----
+   Every colour in this file resolves to one of these, so the whole UI can be recoloured by
+   overriding the tokens and nothing else. Treat the names as a public contract: user themes
+   will be written against them, and renaming one silently breaks every theme that used it.
+
+   Tints and shades go through color-mix rather than a second rgba token. rgba() cannot take a
+   hex custom property -- rgba(var(--accent), 0.3) is not a thing -- and the alternative is
+   shipping a parallel "240,162,83" triplet for every colour and keeping the two in step by hand.
+   --accent is set at runtime from settings; see applyTheme() in app.js. */
+:root {
+  --bg: #08080A;          /* the base the whole stage sits on */
+  --bg-deep: #0B0B0C;     /* scrims that need to read as darker than the base */
+  --surface: #141417;     /* raised panels, rows, empty art */
+  --surface-hi: #1A1A1E;  /* a surface that is hovered or selected */
+  --card: #101012;        /* game tiles and other content cards */
+  --ink: #F6F5F3;         /* text and icons; alphas below it are muted text */
+  --edge: #FFFFFF;        /* hairline borders and separators, always at low alpha */
+  --danger: #E97A6C;      /* destructive actions only */
+  --accent: #F0A253;      /* focus rings, active tabs, sliders — the one the user picks */
+  --on-accent: var(--bg-deep);  /* text sitting on an accent fill; flipped for a dark accent */
+}
 
 * { box-sizing: border-box; user-select: none; -webkit-user-drag: none; }
 
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%;
-  background: #08080A; color: #F6F5F3; overflow: hidden;
+  background: var(--bg); color: var(--ink); overflow: hidden;
   font-family: Manrope, "Segoe UI", system-ui, sans-serif;
   cursor: default;
 }
@@ -15,8 +36,8 @@ html, body {
 .mono { font-family: "IBM Plex Mono", Consolas, monospace; }
 
 @keyframes focusPulse {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(240,162,83,0.95), 0 0 44px 6px rgba(240,162,83,0.28); }
-  50% { box-shadow: 0 0 0 3px rgba(240,162,83,0.75), 0 0 64px 12px rgba(240,162,83,0.40); }
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 95%, transparent), 0 0 44px 6px color-mix(in srgb, var(--accent) 28%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 75%, transparent), 0 0 64px 12px color-mix(in srgb, var(--accent) 40%, transparent); }
 }
 
 /* ---- fixed 1920x1080 stage, scaled to the window ---- */
@@ -27,7 +48,7 @@ html, body {
 }
 
 /* ---- backdrop (focused title art, blurred) ---- */
-#backdrop { position: fixed; inset: 0; overflow: hidden; background: #08080A; }
+#backdrop { position: fixed; inset: 0; overflow: hidden; background: var(--bg); }
 .bd {
   position: absolute; inset: -80px;
   background-size: cover; background-position: center;
@@ -48,21 +69,21 @@ html, body {
   padding: 56px 80px 0; flex: 0 0 auto;
 }
 .topbar-left { display: flex; align-items: baseline; gap: 40px; }
-.tab { font-size: 24px; color: rgba(246,245,243,0.42); transition: color 180ms linear, font-size 180ms linear; }
-.tab.tab-active { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: #F6F5F3; }
-.tab.focused { color: #F0A253; }
+.tab { font-size: 24px; color: color-mix(in srgb, var(--ink) 42%, transparent); transition: color 180ms linear, font-size 180ms linear; }
+.tab.tab-active { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.tab.focused { color: var(--accent); }
 .topbar-right {
   display: flex; align-items: center; gap: 28px;
-  font-size: 18px; letter-spacing: 0.1em; color: rgba(246,245,243,0.45);
+  font-size: 18px; letter-spacing: 0.1em; color: color-mix(in srgb, var(--ink) 45%, transparent);
 }
-.vsep { width: 1px; height: 20px; background: rgba(255,255,255,0.15); }
+.vsep { width: 1px; height: 20px; background: color-mix(in srgb, var(--edge) 15%, transparent); }
 /* An empty flex item still gets a gap on each side, so the idle scan slot was opening a 56px
    hole between the battery and the title count while every other pair sat at 28px -- which is
    what made the controller readout look detached from the rest of the bar. */
 #scanStatus:empty, .pad-status:empty { display: none; }
 /* ---- controller + battery readout in the top bar ----
    It sits among the title count and the clock, so it has to carry the same visual weight as
-   they do. Those are rgba(246,245,243,0.45); the alphas below are the ones that land the red
+   they do. Those sit at 45% ink; the alphas below are the ones that land the red
    and the accent at the same perceived brightness on this background, rather than the same
    number -- a saturated colour at 0.45 reads far dimmer than white at 0.45, and at full
    strength the low-battery red was shouting over everything else in the bar. */
@@ -70,9 +91,9 @@ html, body {
 /* inherit, so the pad, the bar and the number all shift together rather than the icon
    staying grey next to a coloured bar */
 .pad-status .ov-icon { width: 26px; height: 26px; flex: 0 0 auto; color: inherit; }
-.pad-status.off { color: rgba(246,245,243,0.32); }       /* nothing connected: quieter still */
-.pad-status.low { color: rgba(233,122,108,0.78); }
-.pad-status.charging { color: rgba(240,162,83,0.65); }
+.pad-status.off { color: color-mix(in srgb, var(--ink) 32%, transparent); }       /* nothing connected: quieter still */
+.pad-status.low { color: color-mix(in srgb, var(--danger) 78%, transparent); }
+.pad-status.charging { color: color-mix(in srgb, var(--accent) 65%, transparent); }
 .batt {
   position: relative; width: 40px; height: 18px; border-radius: 4px;
   border: 2px solid currentColor; padding: 2px;
@@ -90,7 +111,7 @@ html, body {
    the gap to the next item. The readout is the leftmost thing in a right-anchored row, so a
    changing width only nudges its own left edge -- nothing else moves. */
 .batt-pct { font-size: 18px; letter-spacing: 0.06em; }
-#scanStatus { color: #F0A253; }
+#scanStatus { color: var(--accent); }
 
 /* ---- library body ---- */
 .lib-body {
@@ -101,7 +122,7 @@ html, body {
 .lib-grid-section { flex: 1 1 auto; min-height: 0; }
 .section-head { display: flex; align-items: baseline; gap: 18px; height: 30px; }
 .section-title { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
-.section-label { font-size: 16px; letter-spacing: 0.14em; color: rgba(246,245,243,0.35); }
+.section-label { font-size: 16px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 35%, transparent); }
 
 /* Continue carousel — the track is translated rather than scrolled with overflow-x, because
    any non-visible overflow on one axis forces the other to clip too, which would cut off the
@@ -121,7 +142,7 @@ html, body {
 .cont-item.focused { transform: scale(1.05); z-index: 3; }
 .cont-art {
   position: relative; width: 300px; height: 168px; border-radius: 14px;
-  overflow: hidden; background-color: #141417;
+  overflow: hidden; background-color: var(--surface);
   background-size: cover; background-position: center;
   transition: opacity 200ms linear;
 }
@@ -132,11 +153,11 @@ html, body {
 }
 .zone-dim .cont-meta { opacity: 0.5; }
 .cont-title { font-size: 21px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
-.cont-sub { font-size: 17px; color: rgba(246,245,243,0.42); }
+.cont-sub { font-size: 17px; color: color-mix(in srgb, var(--ink) 42%, transparent); }
 
 /* focus ring + glow — box-shadow on the element so the glow is never clipped */
 .cont-item.focused .cont-art {
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* All-games grid */
@@ -162,32 +183,32 @@ html, body {
 .grid-row { display: flex; gap: 24px; flex: 0 0 auto; }
 .grid-item {
   position: relative; width: 199px; height: 240px; border-radius: 14px;
-  overflow: hidden; flex: 0 0 auto; background-color: #141417;
+  overflow: hidden; flex: 0 0 auto; background-color: var(--surface);
   transform-origin: center bottom;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), opacity 200ms linear;
 }
 .grid-item.focused {
   transform: scale(1.05); z-index: 3;
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .zone-dim .grid-item { opacity: 0.62; }
 .zone-dim .grid-item.uninstalled { opacity: 0.5; }
 .grid-art { position: absolute; inset: 0; background-size: cover; background-position: center; }
 .grid-item.uninstalled .grid-art { filter: grayscale(0.7) brightness(0.62); }
-.grid-item.uninstalled { border: 1px solid rgba(246,245,243,0.16); }
+.grid-item.uninstalled { border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); }
 .grid-label {
   position: absolute; left: 0; right: 0; bottom: 0;
   padding: 34px 14px 12px;
-  background: linear-gradient(180deg, rgba(8,8,10,0) 0%, rgba(8,8,10,0.9) 62%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 0%, transparent) 0%, color-mix(in srgb, var(--bg) 90%, transparent) 62%);
 }
 .grid-title { font-size: 19px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.grid-meta { font-size: 16px; color: rgba(246,245,243,0.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid-meta { font-size: 16px; color: color-mix(in srgb, var(--ink) 45%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* cover placeholder (no art available) */
 .ph { display: flex; align-items: center; justify-content: center; }
 .ph span {
   font-size: 44px; font-weight: 700; letter-spacing: 0.04em;
-  color: rgba(246,245,243,0.5);
+  color: color-mix(in srgb, var(--ink) 50%, transparent);
 }
 .cont-art .ph span { font-size: 36px; }
 
@@ -197,36 +218,36 @@ html, body {
   padding: 30px 80px 34px; flex: 0 0 auto;
 }
 .legend-item { display: flex; align-items: center; gap: 14px; }
-.legend-item > span { font-size: 22px; color: rgba(246,245,243,0.8); }
+.legend-item > span { font-size: 22px; color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .btn-badge {
   width: 40px; height: 40px; border-radius: 50%;
-  border: 2px solid rgba(246,245,243,0.4);
+  border: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; font-weight: 600; color: rgba(246,245,243,0.8);
+  font-size: 20px; font-weight: 600; color: color-mix(in srgb, var(--ink) 80%, transparent);
 }
-.btn-badge.btn-a { background: #F0A253; border: none; color: #0B0B0C; font-weight: 700; }
+.btn-badge.btn-a { background: var(--accent); border: none; color: var(--on-accent); font-weight: 700; }
 .btn-pill, .dpad-badge {
   height: 40px; padding: 0 16px; border-radius: 20px;
-  border: 2px solid rgba(246,245,243,0.4);
+  border: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
   display: flex; align-items: center;
-  font-size: 16px; letter-spacing: 0.08em; color: rgba(246,245,243,0.8);
+  font-size: 16px; letter-spacing: 0.08em; color: color-mix(in srgb, var(--ink) 80%, transparent);
 }
 
 /* ---- detail screen ---- */
-#screen-detail { background: #08080A; }
+#screen-detail { background: var(--bg); }
 .detail-art {
   position: absolute; inset: 0;
-  background-size: cover; background-position: center; background-color: #141417;
+  background-size: cover; background-position: center; background-color: var(--surface);
 }
-.detail-shade-x { position: absolute; inset: 0; background: linear-gradient(90deg, #08080A 26%, rgba(8,8,10,0.72) 58%, rgba(8,8,10,0.25) 100%); }
-.detail-shade-y { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(8,8,10,0.85) 0%, rgba(8,8,10,0) 40%); }
+.detail-shade-x { position: absolute; inset: 0; background: linear-gradient(90deg, var(--bg) 26%, color-mix(in srgb, var(--bg) 72%, transparent) 58%, color-mix(in srgb, var(--bg) 25%, transparent) 100%); }
+.detail-shade-y { position: absolute; inset: 0; background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 40%); }
 .detail-content {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   justify-content: space-between; padding: 72px 80px 34px;
 }
 .detail-content .legend { padding: 30px 0 0; }
-.crumb { display: flex; align-items: center; gap: 16px; font-size: 18px; letter-spacing: 0.14em; color: rgba(246,245,243,0.45); }
-.crumb-here { color: rgba(246,245,243,0.8); }
+.crumb { display: flex; align-items: center; gap: 16px; font-size: 18px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 45%, transparent); }
+.crumb-here { color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .detail-main { display: flex; flex-direction: column; gap: 44px; align-items: flex-start; }
 .detail-titleblock { display: flex; flex-direction: column; gap: 22px; max-width: 920px; }
 .detail-titleblock h1 {
@@ -235,11 +256,11 @@ html, body {
 }
 .detail-titleblock p {
   margin: 0; font-size: 26px; line-height: 1.6;
-  color: rgba(246,245,243,0.62); text-wrap: pretty; max-width: 760px;
+  color: color-mix(in srgb, var(--ink) 62%, transparent); text-wrap: pretty; max-width: 760px;
 }
 .detail-stats { display: flex; gap: 64px; }
 .stat { display: flex; flex-direction: column; gap: 8px; }
-.stat-label { font-size: 16px; letter-spacing: 0.14em; color: rgba(246,245,243,0.4); }
+.stat-label { font-size: 16px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 40%, transparent); }
 .stat-value { font-size: 34px; font-weight: 500; }
 
 .detail-actions { display: flex; align-items: center; gap: 24px; }
@@ -249,23 +270,23 @@ html, body {
   transition: box-shadow 180ms linear, border-color 180ms linear;
 }
 .pill-primary {
-  gap: 18px; padding: 0 52px; background: #F0A253; color: #0B0B0C;
+  gap: 18px; padding: 0 52px; background: var(--accent); color: var(--on-accent);
 }
 .pill-primary span { font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
 .pill-primary.focused { animation: focusPulse 2.4s ease-in-out infinite; }
 .pill-a-badge {
   width: 38px; height: 38px; border-radius: 50%;
-  background: rgba(11,11,12,0.85); color: #F0A253;
+  background: color-mix(in srgb, var(--bg-deep) 85%, transparent); color: var(--accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 19px; font-weight: 700; flex: 0 0 auto;
 }
 .pill-secondary {
-  padding: 0 40px; border: 2px solid rgba(246,245,243,0.22);
-  font-size: 28px; font-weight: 500; color: rgba(246,245,243,0.85);
+  padding: 0 40px; border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  font-size: 28px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
 }
 .pill-secondary.focused {
-  border-color: #F0A253;
-  box-shadow: 0 0 0 1px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ---- settings ---- */
@@ -278,87 +299,104 @@ html, body {
 .settings-scroll::-webkit-scrollbar { display: none; }
 .set-section {
   font-family: "IBM Plex Mono", monospace; font-size: 16px;
-  letter-spacing: 0.16em; color: rgba(246,245,243,0.42);
+  letter-spacing: 0.16em; color: color-mix(in srgb, var(--ink) 42%, transparent);
   padding: 26px 0 2px;
 }
 .set-row {
   position: relative;
   display: flex; align-items: center; justify-content: space-between; gap: 40px;
   min-height: 84px; padding: 0 36px; border-radius: 14px;
-  background: #101012; border: 1px solid rgba(255,255,255,0.07);
+  background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   flex: 0 0 auto;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
 }
 .set-row.focused {
-  transform: scale(1.012); background: #141417;
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  transform: scale(1.012); background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .set-name { font-size: 24px; font-weight: 500; }
-.set-hint { font-size: 17px; color: rgba(246,245,243,0.42); margin-top: 3px; }
+.set-hint { font-size: 17px; color: color-mix(in srgb, var(--ink) 42%, transparent); margin-top: 3px; }
 .set-left { display: flex; flex-direction: column; padding: 18px 0; min-width: 0; }
-.set-value { display: flex; align-items: center; gap: 22px; font-size: 24px; color: rgba(246,245,243,0.85); flex: 0 0 auto; }
-.set-value .arrow { color: rgba(246,245,243,0.35); font-size: 20px; }
-.set-row.focused .set-value .arrow { color: #F0A253; }
-.set-toggle-on { color: #F0A253; font-weight: 600; }
-.set-toggle-off { color: rgba(246,245,243,0.45); }
+.set-value { display: flex; align-items: center; gap: 22px; font-size: 24px; color: color-mix(in srgb, var(--ink) 85%, transparent); flex: 0 0 auto; }
+.set-value .arrow { color: color-mix(in srgb, var(--ink) 35%, transparent); font-size: 20px; }
+.set-row.focused .set-value .arrow { color: var(--accent); }
+.set-toggle-on { color: var(--accent); font-weight: 600; }
+.set-toggle-off { color: color-mix(in srgb, var(--ink) 45%, transparent); }
 .slider { display: flex; align-items: center; gap: 20px; }
-.slider-track { position: relative; width: 340px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.14); }
-.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: #F0A253; }
-.slider-val { font-family: "IBM Plex Mono", monospace; font-size: 18px; width: 84px; text-align: right; color: rgba(246,245,243,0.75); }
-.set-action-label { font-size: 24px; font-weight: 500; color: #F0A253; }
+.slider-track { position: relative; width: 340px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--edge) 14%, transparent); }
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+.slider-val { font-family: "IBM Plex Mono", monospace; font-size: 18px; width: 84px; text-align: right; color: color-mix(in srgb, var(--ink) 75%, transparent); }
+.set-action-label { font-size: 24px; font-weight: 500; color: var(--accent); }
+.set-action-label.danger { color: var(--danger); }
+
+/* Accent picker. The dots are literal colours, so they are the one place in the UI that does not
+   go through the palette tokens -- the point is to show what each token would become. */
+.swatch-strip { display: flex; align-items: center; gap: 12px; }
+.swatch {
+  width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--edge) 22%, transparent);
+  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+}
+/* The ring is drawn in the page background so it reads as a gap around the dot rather than a
+   second colour competing with it. */
+.swatch.on {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--ink);
+}
+.swatch-name { font-size: 20px; width: 96px; color: color-mix(in srgb, var(--ink) 75%, transparent); }
 
 /* ---- overlays ---- */
 /* z-index sits above focused tiles (which lift to 3 so their glow isn't clipped) */
 .overlay {
   position: absolute; inset: 0; display: none;
   align-items: center; justify-content: center;
-  background: rgba(8,8,10,0.82);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
   z-index: 100;
 }
 .overlay.active { display: flex; }
 .quick-card {
-  width: 560px; background: #101012;
-  border: 1px solid rgba(255,255,255,0.09); border-radius: 20px;
+  width: 560px; background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--edge) 9%, transparent); border-radius: 20px;
   padding: 40px 40px 28px; display: flex; flex-direction: column; gap: 26px;
 }
-.quick-title { font-size: 15px; letter-spacing: 0.16em; color: rgba(246,245,243,0.42); }
+.quick-title { font-size: 15px; letter-spacing: 0.16em; color: color-mix(in srgb, var(--ink) 42%, transparent); }
 .quick-item {
   position: relative; display: flex; align-items: center; justify-content: space-between;
   height: 76px; padding: 0 26px; border-radius: 14px;
-  font-size: 25px; font-weight: 500; color: rgba(246,245,243,0.85);
+  font-size: 25px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
 }
-.quick-item.focused { background: #141417; transform: scale(1.02); }
-.quick-item .quick-sub { font-size: 17px; color: rgba(246,245,243,0.4); font-weight: 400; }
-.quick-item.danger { color: #E97A6C; }
+.quick-item.focused { background: var(--surface); transform: scale(1.02); }
+.quick-item .quick-sub { font-size: 17px; color: color-mix(in srgb, var(--ink) 40%, transparent); font-weight: 400; }
+.quick-item.danger { color: var(--danger); }
 #quickList, #manageList { display: flex; flex-direction: column; gap: 10px; }
 
 .guide-card {
   /* Tall enough that the four steps fit without scrolling. It still scrolls if the text grows. */
-  width: 1080px; max-height: 940px; background: #101012;
-  border: 1px solid rgba(255,255,255,0.09); border-radius: 20px;
+  width: 1080px; max-height: 940px; background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--edge) 9%, transparent); border-radius: 20px;
   padding: 48px 48px 32px; display: flex; flex-direction: column; gap: 28px;
 }
 .guide-body { overflow-y: auto; display: flex; flex-direction: column; gap: 26px; scrollbar-width: none; }
 .guide-body::-webkit-scrollbar { display: none; }
 .guide-step { display: flex; gap: 24px; }
 .guide-num {
-  font-family: "IBM Plex Mono", monospace; font-size: 17px; color: #F0A253;
+  font-family: "IBM Plex Mono", monospace; font-size: 17px; color: var(--accent);
   flex: 0 0 44px; padding-top: 4px;
 }
 .guide-step-body { display: flex; flex-direction: column; gap: 8px; }
 .guide-step-title { font-size: 24px; font-weight: 600; }
-.guide-step-text { font-size: 20px; line-height: 1.55; color: rgba(246,245,243,0.62); }
-.guide-step-text b { color: rgba(246,245,243,0.9); font-weight: 600; }
-.guide-foot { display: flex; align-items: center; gap: 14px; font-size: 20px; color: rgba(246,245,243,0.7); }
+.guide-step-text { font-size: 20px; line-height: 1.55; color: color-mix(in srgb, var(--ink) 62%, transparent); }
+.guide-step-text b { color: color-mix(in srgb, var(--ink) 90%, transparent); font-weight: 600; }
+.guide-foot { display: flex; align-items: center; gap: 14px; font-size: 20px; color: color-mix(in srgb, var(--ink) 70%, transparent); }
 
 /* ---- toast ---- */
 #toast {
   position: absolute; left: 50%; bottom: 140px; transform: translateX(-50%) translateY(20px);
   z-index: 200;
   padding: 18px 34px; border-radius: 14px;
-  background: #141417; border: 1px solid rgba(240,162,83,0.5);
-  font-size: 18px; letter-spacing: 0.06em; color: #F6F5F3;
+  background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  font-size: 18px; letter-spacing: 0.06em; color: var(--ink);
   opacity: 0; pointer-events: none;
   transition: opacity 240ms linear, transform 240ms cubic-bezier(0.2,0.9,0.2,1);
 }
@@ -381,37 +419,37 @@ html, body {
   position: relative;
   display: flex; align-items: center; justify-content: space-between;
   min-height: 132px; padding: 0 40px; border-radius: 20px;
-  background: #101012; border: 1px solid rgba(255,255,255,0.07);
+  background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   flex: 0 0 auto;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
 }
 .coll-card.focused {
-  transform: scale(1.012); background: #141417; z-index: 2;
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  transform: scale(1.012); background: var(--surface); z-index: 2;
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .coll-info { display: flex; flex-direction: column; gap: 6px; }
 .coll-name { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
 .coll-name .fav-star { margin-right: 12px; }
-.coll-meta { font-size: 17px; color: rgba(246,245,243,0.42); font-family: "IBM Plex Mono", monospace; letter-spacing: 0.1em; }
+.coll-meta { font-size: 17px; color: color-mix(in srgb, var(--ink) 42%, transparent); font-family: "IBM Plex Mono", monospace; letter-spacing: 0.1em; }
 .coll-thumbs { display: flex; gap: 10px; }
 .coll-thumb {
   width: 58px; height: 74px; border-radius: 8px; overflow: hidden;
-  background-color: #1A1A1E; background-size: cover; background-position: center;
+  background-color: var(--surface-hi); background-size: cover; background-position: center;
   display: flex; align-items: center; justify-content: center;
 }
-.coll-thumb span { font-size: 16px; font-weight: 700; color: rgba(246,245,243,0.4); }
+.coll-thumb span { font-size: 16px; font-weight: 700; color: color-mix(in srgb, var(--ink) 40%, transparent); }
 .coll-grid-wrap { flex: 1; min-height: 0; display: none; flex-direction: column; gap: 16px; }
 .coll-grid-wrap.active { display: flex; }
 .coll-list.hidden { display: none; }
 
 /* ---- favorite star ---- */
-.fav-star { color: #F0A253; }
+.fav-star { color: var(--accent); }
 .tile-fav {
   position: absolute; top: 10px; right: 10px;
   width: 34px; height: 34px; border-radius: 50%;
-  background: rgba(8,8,10,0.72);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; color: #F0A253;
+  font-size: 18px; color: var(--accent);
 }
 .detail-titleblock h1 .fav-star { font-size: 60px; vertical-align: middle; margin-right: 18px; }
 
@@ -420,30 +458,30 @@ html, body {
 .ov-row {
   position: relative; display: flex; align-items: center; justify-content: space-between;
   min-height: 74px; padding: 0 26px; border-radius: 14px;
-  font-size: 24px; font-weight: 500; color: rgba(246,245,243,0.85);
+  font-size: 24px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
 }
 .ov-row.focused {
-  background: #141417; transform: scale(1.015); z-index: 2;
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  background: var(--surface); transform: scale(1.015); z-index: 2;
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
-.ov-row .ov-value { display: flex; align-items: center; gap: 18px; font-size: 22px; color: rgba(246,245,243,0.8); }
-.ov-row .arrow { color: rgba(246,245,243,0.35); font-size: 19px; }
-.ov-row.focused .arrow { color: #F0A253; }
-.ov-row .ov-action { color: #F0A253; font-weight: 600; }
+.ov-row .ov-value { display: flex; align-items: center; gap: 18px; font-size: 22px; color: color-mix(in srgb, var(--ink) 80%, transparent); }
+.ov-row .arrow { color: color-mix(in srgb, var(--ink) 35%, transparent); font-size: 19px; }
+.ov-row.focused .arrow { color: var(--accent); }
+.ov-row .ov-action { color: var(--accent); font-weight: 600; }
 #filterList, #collectList, #confirmList { display: flex; flex-direction: column; gap: 10px; }
-.ov-check { color: #F0A253; font-size: 24px; width: 32px; text-align: center; }
-.ov-check.off { color: rgba(246,245,243,0.25); }
+.ov-check { color: var(--accent); font-size: 24px; width: 32px; text-align: center; }
+.ov-check.off { color: color-mix(in srgb, var(--ink) 25%, transparent); }
 
 /* ---- text input overlay ---- */
 .text-input {
   height: 84px; border-radius: 14px; padding: 0 28px;
-  background: #08080A; border: 2px solid rgba(246,245,243,0.22);
-  color: #F6F5F3; font-size: 28px; font-family: Manrope, system-ui, sans-serif;
+  background: var(--bg); border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  color: var(--ink); font-size: 28px; font-family: Manrope, system-ui, sans-serif;
   outline: none;
 }
-.text-input:focus { border-color: #F0A253; box-shadow: 0 0 0 1px #F0A253, 0 0 44px 6px rgba(240,162,83,0.2); }
-.input-hint { font-size: 15px; letter-spacing: 0.1em; color: rgba(246,245,243,0.4); }
+.text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 20%, transparent); }
+.input-hint { font-size: 15px; letter-spacing: 0.1em; color: color-mix(in srgb, var(--ink) 40%, transparent); }
 
 /* ---- pad mode: the pointer gets out of the way while the D-pad drives ---- */
 body.pad-mode, body.pad-mode * { cursor: none !important; }
@@ -451,7 +489,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 /* ---- dropdown menus (filter / sort / game context) ---- */
 .ov-cat {
   font-family: "IBM Plex Mono", monospace; font-size: 14px;
-  letter-spacing: 0.18em; color: rgba(246,245,243,0.38);
+  letter-spacing: 0.18em; color: color-mix(in srgb, var(--ink) 38%, transparent);
   padding: 22px 26px 6px;
 }
 .ov-cat:first-child { padding-top: 4px; }
@@ -466,71 +504,71 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .ov-foot {
   display: flex; align-items: center; gap: 32px;
   margin-top: 10px; padding-top: 26px;
-  border-top: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
 }
 .ov-foot .legend-item > span { font-size: 19px; }
 .ov-foot .btn-badge { width: 34px; height: 34px; font-size: 17px; }
-.ov-sub { font-size: 17px; color: rgba(246,245,243,0.4); font-weight: 400; }
-.ov-row.danger { color: #E97A6C; }
+.ov-sub { font-size: 17px; color: color-mix(in srgb, var(--ink) 40%, transparent); font-weight: 400; }
+.ov-row.danger { color: var(--danger); }
 
 /* Menu icons: muted by default, accent on focus — the ring stays the primary focus signal */
 .ov-label { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .ov-label > span { overflow: hidden; text-overflow: ellipsis; }
 .ov-icon {
   flex: 0 0 auto; width: 25px; height: 25px;
-  color: rgba(246,245,243,0.45);
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
   transition: color 180ms linear;
 }
-.ov-row.focused .ov-icon { color: #F0A253; }
-.ov-row.danger .ov-icon { color: #E97A6C; }
-.ov-summary { font-size: 20px; color: rgba(246,245,243,0.5); }
+.ov-row.focused .ov-icon { color: var(--accent); }
+.ov-row.danger .ov-icon { color: var(--danger); }
+.ov-summary { font-size: 20px; color: color-mix(in srgb, var(--ink) 50%, transparent); }
 .menu-card { width: 640px; }
 
 /* ---- "add game" tile in the library grid ---- */
 .grid-item.add-tile {
   background: transparent;
-  border: 2px dashed rgba(246,245,243,0.22);
+  border: 2px dashed color-mix(in srgb, var(--ink) 22%, transparent);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
 }
 .grid-item.add-tile .add-plus {
   font-size: 58px; font-weight: 300; line-height: 1;
-  color: rgba(246,245,243,0.5);
+  color: color-mix(in srgb, var(--ink) 50%, transparent);
 }
 .grid-item.add-tile .add-label {
-  font-size: 19px; font-weight: 500; color: rgba(246,245,243,0.6);
+  font-size: 19px; font-weight: 500; color: color-mix(in srgb, var(--ink) 60%, transparent);
 }
-.grid-item.add-tile.focused { border-color: #F0A253; }
+.grid-item.add-tile.focused { border-color: var(--accent); }
 .grid-item.add-tile.focused .add-plus,
-.grid-item.add-tile.focused .add-label { color: #F0A253; }
+.grid-item.add-tile.focused .add-label { color: var(--accent); }
 
 /* ---- empty state ---- */
 .empty-note {
-  font-size: 24px; color: rgba(246,245,243,0.5); line-height: 1.6;
+  font-size: 24px; color: color-mix(in srgb, var(--ink) 50%, transparent); line-height: 1.6;
   padding: 30px 0;
 }
-.empty-note b { color: #F0A253; font-weight: 600; }
+.empty-note b { color: var(--accent); font-weight: 600; }
 
 /* ---- Playing section (shown while a game is running) ---- */
 .playing-card {
   position: relative; display: flex; align-items: center; gap: 34px;
   height: 210px; padding: 0 34px 0 0; border-radius: 18px; overflow: hidden;
-  background: #101012; border: 1px solid rgba(255,255,255,0.07);
+  background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   transform-origin: center left;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
 }
 .playing-card.focused {
   transform: scale(1.01);
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .playing-art {
   width: 374px; height: 100%; flex: 0 0 auto;
-  background-color: #141417; background-size: cover; background-position: center;
+  background-color: var(--surface); background-size: cover; background-position: center;
 }
 .playing-info { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .playing-name { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
-.playing-meta { font-size: 17px; letter-spacing: 0.14em; color: #F0A253; }
+.playing-meta { font-size: 17px; letter-spacing: 0.14em; color: var(--accent); }
 .playing-hint { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
-.playing-hint > span:not(.btn-badge) { font-size: 20px; color: rgba(246,245,243,0.7); margin-right: 14px; }
+.playing-hint > span:not(.btn-badge) { font-size: 20px; color: color-mix(in srgb, var(--ink) 70%, transparent); margin-right: 14px; }
 .playing-hint .btn-badge { width: 34px; height: 34px; font-size: 17px; }
 /* ---- Power Wheel (the radial) ---- */
 .radial-wrap {
@@ -539,13 +577,13 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 }
 .radial-title {
   position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  font-size: 15px; letter-spacing: 0.18em; color: rgba(246,245,243,0.42);
+  font-size: 15px; letter-spacing: 0.18em; color: color-mix(in srgb, var(--ink) 42%, transparent);
 }
 .radial { position: absolute; inset: 0; }
 .radial-item {
   position: absolute; width: 196px; height: 112px; margin: -56px 0 0 -98px;
-  border-radius: 16px; background: #101012;
-  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px; background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
 }
@@ -555,14 +593,14 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
    The same glow on the grid tiles is invisible because it sits over lit artwork. Left at the
    design's values rather than distorting the focus treatment to chase it. */
 .radial-item.focused {
-  background: #141417; transform: scale(1.06);
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  background: var(--surface); transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .radial-item .ov-icon { width: 34px; height: 34px; }
-.radial-item.focused .ov-icon { color: #F0A253; }
-.radial-item span { font-size: 19px; font-weight: 500; color: rgba(246,245,243,0.82); }
-.radial-item.danger .ov-icon, .radial-item.danger span { color: #E97A6C; }
+.radial-item.focused .ov-icon { color: var(--accent); }
+.radial-item span { font-size: 19px; font-weight: 500; color: color-mix(in srgb, var(--ink) 82%, transparent); }
+.radial-item.danger .ov-icon, .radial-item.danger span { color: var(--danger); }
 
 .radial-center {
   position: relative; width: 366px; text-align: center;
@@ -571,11 +609,11 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .radial-sel { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
 /* Fixed height so the ring never shifts as the description changes length spoke to spoke. */
 .radial-desc {
-  font-size: 18px; line-height: 1.35; color: rgba(246,245,243,0.62);
+  font-size: 18px; line-height: 1.35; color: color-mix(in srgb, var(--ink) 62%, transparent);
   height: 56px; display: flex; align-items: center; justify-content: center;
 }
 .radial-target {
-  font-size: 16px; letter-spacing: 0.1em; color: rgba(246,245,243,0.42);
+  font-size: 16px; letter-spacing: 0.1em; color: color-mix(in srgb, var(--ink) 42%, transparent);
   height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .radial-foot {
@@ -584,7 +622,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 }
 
 /* the radial needs more contrast than a list menu, since it floats over the whole screen */
-#overlay-radial { background: rgba(8,8,10,0.90); }
+#overlay-radial { background: color-mix(in srgb, var(--bg) 90%, transparent); }
 
 /* ---- in-game menu: a console-style bar along the bottom ---- */
 #overlay-ingame { align-items: flex-end; justify-content: flex-start; }
@@ -593,31 +631,31 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   display: flex; flex-direction: column; gap: 22px;
   /* Lift the bar off the paused frame without a hard edge, so the game is still readable
      above it but the labels never sit on a bright patch of artwork. */
-  background: linear-gradient(0deg, rgba(8,8,10,0.97) 42%, rgba(8,8,10,0.72) 74%, rgba(8,8,10,0) 100%);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 97%, transparent) 42%, color-mix(in srgb, var(--bg) 72%, transparent) 74%, color-mix(in srgb, var(--bg) 0%, transparent) 100%);
   padding-top: 150px;
 }
 .ingame-head { display: flex; flex-direction: column; gap: 7px; min-height: 62px; }
 .ingame-title {
   font-family: "IBM Plex Mono", Consolas, monospace;
-  font-size: 16px; letter-spacing: 0.18em; color: rgba(246,245,243,0.5);
+  font-size: 16px; letter-spacing: 0.18em; color: color-mix(in srgb, var(--ink) 50%, transparent);
 }
-.ingame-desc { font-size: 21px; color: rgba(246,245,243,0.72); }
+.ingame-desc { font-size: 21px; color: color-mix(in srgb, var(--ink) 72%, transparent); }
 .ingame-row { display: flex; gap: 22px; }
 .ingame-tile {
   width: 176px; height: 128px; border-radius: 16px;
-  background: #101012; border: 1px solid rgba(255,255,255,0.08);
+  background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 8%, transparent);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   transform-origin: center bottom;
   transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
 }
 .ingame-tile.focused {
-  background: #141417; transform: scale(1.06);
-  box-shadow: 0 0 0 3px #F0A253, 0 0 44px 6px rgba(240,162,83,0.30);
+  background: var(--surface); transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .ingame-tile .ov-icon { width: 34px; height: 34px; }
-.ingame-tile.focused .ov-icon { color: #F0A253; }
-.ingame-tile span { font-size: 20px; font-weight: 500; color: rgba(246,245,243,0.85); }
-.ingame-tile.danger .ov-icon, .ingame-tile.danger span { color: #E97A6C; }
+.ingame-tile.focused .ov-icon { color: var(--accent); }
+.ingame-tile span { font-size: 20px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent); }
+.ingame-tile.danger .ov-icon, .ingame-tile.danger span { color: var(--danger); }
 .ingame-foot { border-top: none; padding-top: 4px; margin-top: 0; }
 
 /* ---- overlay mode: the launcher floats over whatever is behind it ----
@@ -637,25 +675,25 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 }
 body.overlay-mode #overlayShot.has-shot { display: block; }
 
-html.overlay-mode, body.overlay-mode { background: #08080A; cursor: none; }
+html.overlay-mode, body.overlay-mode { background: var(--bg); cursor: none; }
 body.overlay-mode #backdrop { display: none; }
 body.overlay-mode .screen { display: none !important; }
 body.overlay-mode * { cursor: none !important; }
 
 /* Dim, not black. With a still behind them these can be see-through again -- the menu cards
    are opaque, so the contrast complaint that pushed this to 0.93 does not apply. */
-body.overlay-mode #overlay-radial { background: rgba(8,8,10,0.74); }
-body.overlay-mode #overlay-radialsub { background: rgba(8,8,10,0.74); }
+body.overlay-mode #overlay-radial { background: color-mix(in srgb, var(--bg) 74%, transparent); }
+body.overlay-mode #overlay-radialsub { background: color-mix(in srgb, var(--bg) 74%, transparent); }
 /* Lighter still: the in-game bar has its own gradient and lives at the bottom, so the paused
    game stays readable above it. */
-body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
+body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%, transparent); }
 
 /* Inline warning inside a settings row, so the row grows instead of spawning a second one */
 .set-warn {
   margin-top: 12px; padding: 14px 18px;
-  border-left: 3px solid #E97A6C; border-radius: 6px;
-  background: rgba(233,122,108,0.08);
-  font-size: 17px; line-height: 1.55; color: rgba(246,245,243,0.72);
+  border-left: 3px solid var(--danger); border-radius: 6px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: 17px; line-height: 1.55; color: color-mix(in srgb, var(--ink) 72%, transparent);
   max-width: 1180px; white-space: normal;
 }
 
@@ -668,27 +706,27 @@ body.overlay-mode #overlay-ingame { background: rgba(8,8,10,0.34); }
 .settings-body .settings-scroll { padding: 6px 16px; }
 .settings-nav {
   flex: 0 0 300px; display: flex; flex-direction: column; gap: 6px;
-  border-right: 1px solid rgba(246,245,243,0.10); padding-right: 22px;
+  border-right: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); padding-right: 22px;
 }
 .set-tab {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 20px; border-radius: 14px; cursor: pointer;
-  font-size: 22px; color: rgba(246,245,243,0.62);
+  font-size: 22px; color: color-mix(in srgb, var(--ink) 62%, transparent);
   border: 1px solid transparent;
 }
 .set-tab .set-tab-count {
   margin-left: auto; font-family: "IBM Plex Mono", monospace;
-  font-size: 15px; color: rgba(246,245,243,0.34);
+  font-size: 15px; color: color-mix(in srgb, var(--ink) 34%, transparent);
 }
-.set-tab.active { background: rgba(240,162,83,0.12); color: #F6F5F3; border-color: rgba(240,162,83,0.34); }
-.set-tab.active .set-tab-count { color: rgba(240,162,83,0.8); }
+.set-tab.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); border-color: color-mix(in srgb, var(--accent) 34%, transparent); }
+.set-tab.active .set-tab-count { color: color-mix(in srgb, var(--accent) 80%, transparent); }
 /* The nav itself never takes the highlight -- LB/RB switch category, so a focus ring here would
    suggest a third thing the D-pad has to walk through. */
-.set-tab:hover { color: #F6F5F3; }
+.set-tab:hover { color: var(--ink); }
 /* The sidebar takes the highlight in its own right now: focus lands here first, and B from the
    options comes back to it. */
 .set-tab.focused {
-  background: rgba(240,162,83,0.16); color: #F6F5F3;
-  border-color: #F0A253;
-  box-shadow: 0 0 0 2px #F0A253, 0 0 30px 4px rgba(240,162,83,0.22);
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 30px 4px color-mix(in srgb, var(--accent) 22%, transparent);
 }

@@ -2,6 +2,13 @@ namespace Consolify.Models;
 
 public class AppSettings
 {
+    // Appearance
+    /// <summary>
+    /// The one colour the UI is built around -- focus rings, active tabs, sliders. "#RRGGBB";
+    /// the UI overrides its --accent token with it and derives every tint from there.
+    /// </summary>
+    public string AccentColor { get; set; } = "#F0A253";
+
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"
     public bool SwitchPrimaryOnLaunch { get; set; } = true;

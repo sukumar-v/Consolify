@@ -120,6 +120,56 @@ function repaintFocus() {
   else if (view === "settings") renderSettings();
 }
 
+/* ============================== theme ============================== */
+
+/* The presets. Every one is a light, saturated tone: the accent is used as a fill behind dark
+   text (the A badge, the Play button) as well as for rings and glows, so a dark accent would
+   take the label down with it. A custom colour is allowed to be anything -- see accentRow. */
+const ACCENTS = [
+  { name: "Ember", hex: "#F0A253" },   // the default; the design's own colour
+  { name: "Coral", hex: "#E97A6C" },
+  { name: "Rose", hex: "#F07AA8" },
+  { name: "Orchid", hex: "#C78BE8" },
+  { name: "Indigo", hex: "#8098F0" },
+  { name: "Aqua", hex: "#5FC9D6" },
+  { name: "Mint", hex: "#6FCF97" },
+  { name: "Lime", hex: "#B8D96B" },
+];
+const DEFAULT_ACCENT = ACCENTS[0].hex;
+
+function accentName(hex) {
+  const preset = ACCENTS.find(a => a.hex.toUpperCase() === String(hex).toUpperCase());
+  return preset ? preset.name : "Custom";
+}
+
+/** Only "#RRGGBB" reaches the stylesheet. Mirrors SettingsStore.IsHexColor on the host. */
+function isHexColor(v) { return typeof v === "string" && /^#[0-9A-Fa-f]{6}$/.test(v); }
+
+/* Relative luminance, WCAG's formula. Used only to decide what colour sits legibly *on* the
+   accent: the presets are all light enough for dark text, but a custom colour can be anything,
+   and a navy accent with near-black text on it is an unreadable Play button. */
+function luminance(hex) {
+  const ch = i => {
+    const v = parseInt(hex.substr(1 + i * 2, 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2);
+}
+
+/* Push the settings' colours onto the :root tokens. Everything in app.css resolves to those, so
+   this one call recolours the whole UI -- no re-render, and nothing else has to know a theme
+   exists. Setting a token to "" removes the override and falls back to the stylesheet's own
+   value, which is what makes a bad or missing colour a no-op rather than a blank screen. */
+function applyTheme() {
+  const hex = S.settings && S.settings.accentColor;
+  const ok = isHexColor(hex);
+  const root = document.documentElement.style;
+  root.setProperty("--accent", ok ? hex : "");
+  // 0.5 rather than WCAG's 0.179 contrast crossover: the ink is off-white and the deep is
+  // near-black, so both are legible over a mid-tone and the eye prefers dark ink there.
+  root.setProperty("--on-accent", ok && luminance(hex) < 0.5 ? "var(--ink)" : "");
+}
+
 window.addEventListener("mousemove", (e) => {
   const wasPad = inputMode === "pad";
   setInputMode("pointer");
@@ -1264,7 +1314,9 @@ function detailInput(btn) {
 function allSettingsRows() {
   const s = S.settings;
   if (!s) return [];
-  const set = (fn) => { fn(); scheduleSave(); renderSettings(); };
+  // applyTheme here as well as on the host's state push: the push is 350ms of debounce away, and
+  // the accent has to move with the ◂ ▸ that changed it or the picker looks broken.
+  const set = (fn) => { fn(); applyTheme(); scheduleSave(); renderSettings(); };
   const displayLabel = (d) => {
     if (!d) return "None";
     const num = d.deviceName.replace(/\D/g, "");
@@ -1272,6 +1324,9 @@ function allSettingsRows() {
   };
 
   const rows = [];
+  rows.push({ section: "APPEARANCE", cat: "general" });
+  rows.push(accentRow(s, set));
+
   rows.push({ section: "DISPLAY", cat: "general" });
   rows.push({
     name: "TV display", hint: "Consolify opens here, and games are steered onto it",
@@ -1425,6 +1480,37 @@ function cycleRow(name, options, get, setV, hint, warn, labels) {
   };
 }
 
+/* The accent picker. ◂ ▸ walk the presets so the common case never needs a keyboard, and A opens
+   a text prompt for a hex code from anywhere on the row.
+
+   A hand-typed colour joins the strip as an extra stop on the end rather than snapping to the
+   nearest preset, and cycling off it drops it again -- so the strip only ever shows colours you
+   can actually land on, and there is no dead stop to press through. */
+function accentRow(s, set) {
+  const cur = () => (isHexColor(s.accentColor) ? s.accentColor.toUpperCase() : DEFAULT_ACCENT);
+  const custom = () => !ACCENTS.some(a => a.hex === cur());
+  const stops = () => (custom() ? [...ACCENTS.map(a => a.hex), cur()] : ACCENTS.map(a => a.hex));
+
+  return {
+    name: "Accent colour",
+    hint: "Focus rings, active tabs and sliders. Every shade of it is derived from this one value",
+    type: "swatch",
+    swatches: ACCENTS.map(a => a.hex),
+    value: cur(),
+    label: accentName(cur()),
+    custom: custom(),
+    adjust: (dir) => set(() => {
+      const list = stops();
+      s.accentColor = list[(list.indexOf(cur()) + dir + list.length) % list.length];
+    }),
+    action: () => openInput("Accent colour (hex, e.g. #F0A253)", cur(), (v) => {
+      const hex = v.startsWith("#") ? v : "#" + v;
+      if (isHexColor(hex)) set(() => s.accentColor = hex.toUpperCase());
+      else toast("Enter a colour as #RRGGBB");
+    }),
+  };
+}
+
 const KEYBOARD_APP_LABELS = {
   Builtin: "Consolify Keyboard",
   TabTip: "Windows touch keyboard",
@@ -1540,6 +1626,15 @@ function renderSettings() {
         : `<span class="arrow">◂</span><span class="set-toggle-off">OFF</span><span class="arrow">▸</span>`;
     } else if (r.type === "select") {
       right = `<span class="arrow">◂</span><span>${esc(r.value)}</span><span class="arrow">▸</span>`;
+    } else if (r.type === "swatch") {
+      // The presets are shown as dots, the selected one ringed, with a trailing dot for a custom
+      // colour so the strip reads as the row's full range rather than a value plus a mystery.
+      const dot = (hex, on) =>
+        `<span class="swatch${on ? " on" : ""}" style="background:${esc(hex)}"></span>`;
+      const dots = r.swatches.map(hex => dot(hex, hex === r.value)).join("")
+        + (r.custom ? dot(r.value, true) : "");
+      right = `<span class="arrow">◂</span><span class="swatch-strip">${dots}</span>`
+        + `<span class="swatch-name">${esc(r.label)}</span><span class="arrow">▸</span>`;
     } else if (r.type === "slider") {
       const pct = ((r.value - r.min) / (r.max - r.min)) * 100;
       right = `<div class="slider"><span class="arrow">◂</span><div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div><span class="arrow">▸</span><span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
@@ -2087,6 +2182,7 @@ function handleHostMessage(m) {
       S.runningGameId = m.runningGameId;
       S.scanning = m.scanning;
       if (S.settings) S.settings.launchOnStartup = m.startupRegistered;
+      applyTheme();
       if ((firstState || wasEmpty) && focus.zone === "tabs" && S.games.length)
         focus = { zone: "cont", row: 0, col: 0 };
       renderLibrary();

@@ -104,12 +104,21 @@ public class SettingsStore
 
     public AppSettings Settings { get; private set; } = new();
 
+    /// <summary>"#RRGGBB", and nothing else.</summary>
+    public static bool IsHexColor(string? value) =>
+        value is not null && value.Length == 7 && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit);
+
     public void Load()
     {
         try
         {
             if (File.Exists(Paths.SettingsFile))
                 Settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Paths.SettingsFile)) ?? new AppSettings();
+
+            // The accent reaches the UI as a CSS value, so a hand-edited file must not be able to
+            // put anything but a hex colour there. Checked on the way in as well as on save,
+            // because a file edited by hand never passes through the save path at all.
+            if (!IsHexColor(Settings.AccentColor)) Settings.AccentColor = new AppSettings().AccentColor;
         }
         catch (Exception ex)
         {

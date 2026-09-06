@@ -337,6 +337,9 @@ public class UiBridge
     private void CopySettings(AppSettings s)
     {
         var t = _settings.Settings;
+        // The accent is written straight into a CSS custom property, so only a hex colour may
+        // get through; anything else keeps whatever was already there.
+        if (SettingsStore.IsHexColor(s.AccentColor)) t.AccentColor = s.AccentColor.ToUpperInvariant();
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
