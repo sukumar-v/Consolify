@@ -24,6 +24,24 @@ written to sit well inside that:
 The practical ceiling is IGDB's, not Cloudflare's: 4 requests/second across the whole credential,
 shared by everyone. The cache is what keeps you under it.
 
+## Getting the credentials
+
+IGDB is not signed up for at igdb.com -- API access goes through Twitch, who own it. You need a
+Twitch account with 2FA enabled, then an application registered at dev.twitch.tv. SteamGridDB is
+its own account and takes about a minute.
+
+Once you have them, check they work before deploying anything:
+
+```powershell
+$env:IGDB_CLIENT_ID = "..."
+$env:IGDB_CLIENT_SECRET = "..."
+$env:SGDB_KEY = "..."
+.\verify-credentials.ps1
+```
+
+It reads from the environment so the values stay out of your shell history, and prints nothing but
+pass/fail and the titles that came back.
+
 ## Deploying
 
 You need a Cloudflare account (free), an IGDB client id/secret, and a SteamGridDB key.
