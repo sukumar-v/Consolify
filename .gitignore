@@ -70,3 +70,6 @@ $RECYCLE.BIN/
 
 # Packaging output
 dist/
+
+# Wrangler's local state for the metadata proxy (build output, dev cache)
+.wrangler/

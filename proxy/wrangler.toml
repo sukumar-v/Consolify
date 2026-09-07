@@ -19,7 +19,7 @@ compatibility_date = "2024-11-01"
 # then paste the id it prints in below.
 [[kv_namespaces]]
 binding = "METADATA"
-id = "PUT_YOUR_KV_NAMESPACE_ID_HERE"
+id = "d7caac270d6543ebb25ca428d26075f6"
 
 # Credentials are NOT set here -- this file is committed. They are set once, encrypted, with:
 #   npx wrangler secret put IGDB_CLIENT_ID
