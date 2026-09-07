@@ -26,6 +26,13 @@
 
 * { box-sizing: border-box; user-select: none; -webkit-user-drag: none; }
 
+/* The UA sheet's [hidden] rule is `display: none` at UA weight, so any author `display` beats
+   it -- and nearly every box here sets one. Sections carrying `display: flex` therefore stayed
+   fully visible with the attribute set, which is how a theme that left a region unslotted still
+   showed it, and how an emptied wrapper still claimed its share of a flex column.
+   `hidden` is used as the real "not part of the layout" switch, so make it mean that. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%;
   background: var(--bg); color: var(--ink); overflow: hidden;

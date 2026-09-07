@@ -151,6 +151,13 @@ window.Theme = (() => {
     if (!screen.__regionHome) {
       screen.__regionHome = regions.map(el =>
         ({ el, parent: el.parentNode, next: el.nextSibling, hidden: el.hidden }));
+      // The screen's own top-level boxes, so the scaffolding they form can be put out of the
+      // way. Regions nest inside these (.lib-body wraps four of them), and lifting a region
+      // into a slot leaves its wrapper behind -- still a flex child of the screen, still
+      // claiming its share of the height, now with nothing in it. That cost the theme
+      // exactly half the screen, silently, and it is not something a theme should have to
+      // know the class name of.
+      screen.__shellHome = [...screen.children].map(el => ({ el, hidden: el.hidden }));
     }
 
     const tpl = templates[name];
@@ -160,6 +167,7 @@ window.Theme = (() => {
         el.hidden = hidden;
         parent.insertBefore(el, next);
       });
+      screen.__shellHome.forEach(({ el, hidden }) => { el.hidden = hidden; });
       // Anything the theme added is not ours to keep.
       [...screen.children].forEach(c => { if (c.dataset.themeLayout !== undefined) c.remove(); });
       screen.__themed = false;
@@ -187,6 +195,10 @@ window.Theme = (() => {
 
     [...screen.children].forEach(c => { if (c.dataset.themeLayout !== undefined) c.remove(); });
     screen.append(layout);
+    // Whatever is still a direct child is scaffolding the theme has replaced. A wrapper whose
+    // regions all moved into slots is now empty; one the theme did not ask for is hidden
+    // anyway. Either way it must stop taking up room.
+    screen.__shellHome.forEach(({ el }) => { if (el.parentNode === screen) el.hidden = true; });
     screen.__themed = true;
     return true;
   }
