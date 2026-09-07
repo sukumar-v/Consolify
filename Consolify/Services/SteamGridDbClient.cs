@@ -51,7 +51,7 @@ public class SteamGridDbClient : IArtProvider
     /// confidently. Art is looked up by SteamGridDB's own game id once the title has matched, so
     /// the only guess in the whole exchange is the one TitleMatch adjudicates.
     /// </summary>
-    public async Task<SteamGridArt?> FindArtAsync(string title, CancellationToken ct)
+    public async Task<SteamGridArt?> FindArtAsync(string title, string? steamAppId, CancellationToken ct)
     {
         var id = await SearchAsync(title, ct);
         if (id is null) return null;

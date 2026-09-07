@@ -24,7 +24,7 @@
 const CACHE_TTL = 60 * 60 * 24 * 30;   // 30 days. Game facts do not change; art rarely does.
 const MISS_TTL = 60 * 60 * 24 * 3;     // Remember "no match" too, but re-check sooner: a game may
                                        // be added to a database after we first ask for it.
-const SCHEMA = "v2";                   // bump when a fetcher changes shape or its picking
+const SCHEMA = "v3";                   // bump when a fetcher changes shape or its picking
                                        // rules; it is part of every cache key, so stale answers retire
 const RATE_LIMIT = 240;                // requests per IP per window
 const RATE_WINDOW = 60;                // seconds
@@ -37,19 +37,24 @@ export default {
     if (url.pathname === "/v1/health") return json({ ok: true });
 
     const title = (url.searchParams.get("title") || "").trim();
-    if (!title) return json({ error: "title is required" }, 400);
+    // A Steam app id, when the caller has one. Worth far more than a title: both upstreams can be
+    // asked by it directly, so there is no name matching and therefore no way to answer with a
+    // different game. The title is still sent alongside as the fallback.
+    const appid = (url.searchParams.get("appid") || "").trim();
+    if (!title && !appid) return json({ error: "title or appid is required" }, 400);
     if (title.length > 200) return json({ error: "title too long" }, 400);
+    if (appid && !/^\d{1,10}$/.test(appid)) return json({ error: "appid must be a number" }, 400);
 
     const limited = await rateLimited(request, env);
     if (limited) return json({ error: "slow down" }, 429, { "Retry-After": String(RATE_WINDOW) });
 
     try {
-      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, igdbFacts);
-      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, gridArt);
+      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, appid, igdbFacts);
+      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, appid, gridArt);
       return json({ error: "not found" }, 404);
     } catch (err) {
       // Never leak an upstream error body: it can carry our own credentials back to the caller.
-      console.error(`${url.pathname} "${title}": ${err && err.message}`);
+      console.error(`${url.pathname} "${title || appid}": ${err && err.message}`);
       return json({ error: "upstream failed" }, 502);
     }
   },
@@ -60,9 +65,15 @@ export default {
 /**
  * Cache-first. A hit costs one KV read and no upstream call at all, which is what keeps this
  * inside both IGDB's rate limit and a free hosting tier.
+ *
+ * Keyed on the app id when there is one. Two people who own the same game on Steam share a cache
+ * entry even if their launchers spell the title differently, and the entry cannot be poisoned by
+ * a near-miss title.
  */
-async function serve(env, ctx, kind, title, fetcher) {
-  const key = `${kind}:${SCHEMA}:${normalise(title)}`;
+async function serve(env, ctx, kind, title, appid, fetcher) {
+  const key = appid
+    ? `${kind}:${SCHEMA}:steam:${appid}`
+    : `${kind}:${SCHEMA}:${normalise(title)}`;
 
   const cached = await env.METADATA.get(key, { type: "json" });
   if (cached) {
@@ -71,7 +82,7 @@ async function serve(env, ctx, kind, title, fetcher) {
       : json(cached.data, 200, { "X-Cache": "HIT" });
   }
 
-  const data = await fetcher(env, title);
+  const data = await fetcher(env, title, appid);
 
   // Written after the response is on its way, so a cache write never delays the caller.
   ctx.waitUntil(env.METADATA.put(
@@ -101,18 +112,42 @@ function normalise(title) {
 
 /* ------------------------------------------------------------------- IGDB */
 
-async function igdbFacts(env, title) {
+const IGDB_FIELDS =
+  "fields name, summary, first_release_date, aggregated_rating, category, " +
+  "follows, total_rating_count, version_parent, " +
+  "genres.name, cover.image_id, artworks.image_id, " +
+  "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; ";
+
+async function igdbFacts(env, title, appid) {
   const token = await igdbToken(env);
   if (!token) return null;
 
-  const body =
-    `search "${title.replace(/"/g, " ")}"; ` +
-    "fields name, summary, first_release_date, aggregated_rating, category, " +
-    "follows, total_rating_count, version_parent, " +
-    "genres.name, cover.image_id, artworks.image_id, " +
-    "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; " +
-    "limit 20;";
+  // By app id first. IGDB records a game's storefront ids in external_games, category 1 being
+  // Steam, so this is an exact lookup with no title involved -- the same guarantee the launcher
+  // gets from Steam itself, which is what makes it safe to ask this service first.
+  if (appid) {
+    const byId = await igdbQuery(env, token,
+      `where external_games.category = 1 & external_games.uid = "${appid}"; ${IGDB_FIELDS} limit 5;`);
+    const main = (byId || []).filter(g => g.version_parent === undefined);
+    if (main.length) return shape(main.sort(popularityFirst)[0]);
+  }
 
+  if (!title) return null;
+
+  const all = await igdbQuery(env, token,
+    `search "${title.replace(/"/g, " ")}"; ${IGDB_FIELDS} limit 20;`);
+  if (!all) return null;
+
+  // category 0 is a main game. The rest are DLC, bundles, ports and episodes, which share their
+  // parent's title and would otherwise win the match on a coin toss. version_parent marks an
+  // edition or regional variant of another entry; those inherit their parent's title too.
+  const games = all.filter(g =>
+    (g.category === undefined || g.category === 0) && g.version_parent === undefined);
+  const hit = pick(title, games, g => g.name);
+  return hit ? shape(hit) : null;
+}
+
+async function igdbQuery(env, token, body) {
   const res = await fetch("https://api.igdb.com/v4/games", {
     method: "POST",
     headers: {
@@ -123,17 +158,10 @@ async function igdbFacts(env, title) {
     body,
   });
   if (!res.ok) throw new Error(`igdb ${res.status}`);
+  return res.json();
+}
 
-  const all = await res.json();
-  // category 0 is a main game. The rest are DLC, bundles, ports and episodes, which share their
-  // parent's title and would otherwise win the match on a coin toss.
-  // version_parent marks an edition or regional variant of another entry; those inherit their
-  // parent's title and are never the one wanted.
-  const games = all.filter(g =>
-    (g.category === undefined || g.category === 0) && g.version_parent === undefined);
-  const hit = pick(title, games, g => g.name);
-  if (!hit) return null;
-
+function shape(hit) {
   const companies = hit.involved_companies || [];
   const named = (flag) => {
     const c = companies.find(x => x[flag] && x.company && x.company.name);
@@ -189,23 +217,36 @@ async function igdbToken(env) {
 
 /* ------------------------------------------------------------ SteamGridDB */
 
-async function gridArt(env, title) {
-  const search = await sgdb(env, `/search/autocomplete/${encodeURIComponent(title)}`);
-  if (!search || !Array.isArray(search.data)) return null;
+async function gridArt(env, title, appid) {
+  // SteamGridDB indexes by Steam app id directly, so when the launcher has one there is no search
+  // and no matching -- the art is definitionally the right game's.
+  let id = null;
+  let name = null;
+  if (appid) {
+    const g = await sgdb(env, `/games/steam/${appid}`);
+    if (g && g.data && g.data.id) { id = g.data.id; name = g.data.name || null; }
+  }
 
-  const hit = pick(title, search.data, g => g.name);
-  if (!hit || !hit.id) return null;
+  if (id === null) {
+    if (!title) return null;
+    const search = await sgdb(env, `/search/autocomplete/${encodeURIComponent(title)}`);
+    if (!search || !Array.isArray(search.data)) return null;
+    const hit = pick(title, search.data, g => g.name);
+    if (!hit || !hit.id) return null;
+    id = hit.id;
+    name = hit.name;
+  }
 
   // Each shape is independent: a game with no art at a given size answers empty, which is normal.
   const [portrait, tile, hero, logo] = await Promise.all([
-    firstUrl(env, `/grids/game/${hit.id}?dimensions=600x900`),
-    firstUrl(env, `/grids/game/${hit.id}?dimensions=920x430,460x215`),
-    firstUrl(env, `/heroes/game/${hit.id}`),
-    firstUrl(env, `/logos/game/${hit.id}`),
+    firstUrl(env, `/grids/game/${id}?dimensions=600x900`),
+    firstUrl(env, `/grids/game/${id}?dimensions=920x430,460x215`),
+    firstUrl(env, `/heroes/game/${id}`),
+    firstUrl(env, `/logos/game/${id}`),
   ]);
 
   if (!portrait && !tile && !hero && !logo) return null;
-  return { name: hit.name, portrait, tile, hero, logo };
+  return { name, portrait, tile, hero, logo };
 }
 
 async function firstUrl(env, path) {

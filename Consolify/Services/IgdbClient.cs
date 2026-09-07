@@ -76,7 +76,7 @@ public class IgdbClient : IFactsProvider
     /// rule lives in TitleMatch and is deliberately unforgiving -- see the note there about why a
     /// near miss is worse than nothing.
     /// </summary>
-    public async Task<IgdbGame?> FindAsync(string title, CancellationToken ct)
+    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct)
     {
         if (!await EnsureTokenAsync(ct)) return null;
 

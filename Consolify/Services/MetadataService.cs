@@ -122,18 +122,27 @@ public class MetadataService
             {
                 var appId = SteamAppId(g);
 
-                // Tier two: a non-Steam game that Steam nonetheless sells. Costs nothing, needs no
-                // key, and gives the same full-resolution art as a Steam copy -- so most Epic and
-                // GOG entries never reach the shared service at all.
+                // A non-Steam game that Steam nonetheless sells. Resolved first even though Steam
+                // is now the fallback, because an app id is worth having either way: the service
+                // is asked by id rather than by title, which removes the matching from the whole
+                // exchange, and Steam can then fill anything the service leaves empty.
                 if (appId is null)
                 {
                     await PaceStoreAsync(ct);
                     appId = await search.FindAppIdAsync(g.Title, ct);
                 }
 
-                var touched = appId is not null
-                    ? await EnrichSteamAsync(g, appId, ct)
-                    : await EnrichElsewhereAsync(g, facts, art, ct);
+                // The service first, then Steam for whatever it did not answer. SteamGridDB's art
+                // is often better shaped than Steam's own -- a proper landscape tile for a game
+                // that only publishes a 2.14:1 header -- while Steam still holds the Metacritic
+                // score and the controller-support flag, which IGDB has no equivalent of.
+                var filled = new HashSet<Slot>();
+                var (touched, serviceFacts) = await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
+
+                // Steam runs after, as the fallback: it fills every art slot and every field the
+                // service left empty, and it always supplies controller support, which IGDB has
+                // no equivalent of.
+                if (appId is not null) touched |= await EnrichSteamAsync(g, appId, filled, serviceFacts, ct);
 
                 // Stamped even when nothing was found, so a game that genuinely has no metadata is
                 // not looked up again on every launch -- but NOT when every source that could have
@@ -216,26 +225,25 @@ public class MetadataService
     /// library_hero.jpg there, and 404s for the capsule and the header -- but appdetails always
     /// names a working header_image under store_item_assets, hashed per release.
     /// </summary>
-    private async Task<bool> EnrichSteamAsync(Game g, string appId, CancellationToken ct)
+    private async Task<bool> EnrichSteamAsync(Game g, string appId, HashSet<Slot> filled,
+        bool serviceAnswered, CancellationToken ct)
     {
         await PaceStoreAsync(ct);
-        var (gotFacts, headerImage) = await FetchSteamFactsAsync(g, appId, ct);
-        if (gotFacts) g.MetadataSource = "steam";
+        var (gotFacts, headerImage) = await FetchSteamFactsAsync(g, appId, serviceAnswered, ct);
+        if (gotFacts && g.MetadataSource is null) g.MetadataSource = "steam";
 
-        var gotArt = await FetchSteamArtAsync(g, appId, headerImage, ct);
+        var gotArt = await FetchSteamArtAsync(g, appId, headerImage, filled, ct);
         return gotArt || gotFacts;
     }
 
     private async Task<bool> FetchSteamArtAsync(Game g, string appId, string? headerImage,
-        CancellationToken ct)
+        HashSet<Slot> filled, CancellationToken ct)
     {
         var any = false;
 
         // Which slots this pass has already filled. Several entries compete for one slot -- the
         // capsule then header.jpg, the 2x hero then the 1x -- and they are listed best first, so
         // the first to succeed wins and the rest are skipped for that slot.
-        var filled = new HashSet<Slot>();
-
         foreach (var (remote, slot, suffix) in SteamArt)
         {
             if (ct.IsCancellationRequested) break;
@@ -259,7 +267,7 @@ public class MetadataService
         // the game rather than a filename because the loop above may have written a tile from a
         // legacy path already, and that one is the better shape.
         if (!filled.Contains(Slot.Tile) && !string.IsNullOrWhiteSpace(headerImage))
-            any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, ct);
+            any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, filled, ct);
 
         return any;
     }
@@ -267,7 +275,7 @@ public class MetadataService
     /// <summary>Facts, plus the header image URL appdetails names -- the art step needs it as a
     /// fallback for apps that no longer publish to the legacy CDN paths.</summary>
     private async Task<(bool Ok, string? HeaderImage)> FetchSteamFactsAsync(Game g, string appId,
-        CancellationToken ct)
+        bool serviceAnswered, CancellationToken ct)
     {
         var url = $"https://store.steampowered.com/api/appdetails?appids={appId}&l=english" +
                   "&filters=basic,genres,metacritic,release_date,developers,publishers,controller_support";
@@ -287,14 +295,33 @@ public class MetadataService
             d.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Array
                 ? v.EnumerateArray().FirstOrDefault().GetString() : null;
 
+        // Controller support is taken whatever else happened: IGDB has no equivalent of it, and on
+        // a couch it is the most useful line on the detail page. This is the reason Steam is still
+        // worth asking for a game the service has already answered.
+        g.ControllerSupport = Str("controller_support");
+
+        // Steam carries Metacritic's score for the games that have one -- most big releases and
+        // almost no indies. Taken only when the service produced no score of its own, and always
+        // labelled for whichever actually answered.
+        var metacritic = d.TryGetProperty("metacritic", out var mc) ? JsonNum.Int(mc, "score") : null;
+        if (g.CriticScore is null && metacritic is { } n)
+        {
+            g.CriticScore = n;
+            g.CriticSource = "Metacritic";
+        }
+
+        // The rest is Steam's only when the service did not answer at all. Keyed on that rather
+        // than on whether each field happens to be empty: a field left over from a previous run is
+        // also non-empty, and testing emptiness would make stale values impossible to correct.
+        if (serviceAnswered) return (true, Str("header_image"));
+
         g.Description = Clean(Str("short_description"));
         g.Developer = First("developers");
         g.Publisher = First("publishers");
-        g.ControllerSupport = Str("controller_support");
 
         if (d.TryGetProperty("genres", out var genres) && genres.ValueKind == JsonValueKind.Array)
             g.Genres = genres.EnumerateArray()
-                .Select(x => x.TryGetProperty("description", out var n) ? n.GetString() : null)
+                .Select(x => x.TryGetProperty("description", out var n2) ? n2.GetString() : null)
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(x => x!)
                 .ToList();
@@ -306,38 +333,28 @@ public class MetadataService
             g.ReleaseDate = string.IsNullOrWhiteSpace(text) ? null : text;
         }
 
-        // Steam carries Metacritic's score for the games that have one, which is most big
-        // releases and almost no indies. Absent is the normal case, not a failure.
-        if (d.TryGetProperty("metacritic", out var mc)
-            && JsonNum.Int(mc, "score") is { } n)
-        {
-            g.CriticScore = n;
-            g.CriticSource = "Metacritic";
-        }
-        else
-        {
-            g.CriticScore = null;
-            g.CriticSource = null;
-        }
-
         return (true, Str("header_image"));
     }
 
     // ---------- Everything else ----------
 
     /// <summary>
-    /// The last tier: a game that is not on Steam at all. Facts and art come from whichever source
-    /// is configured -- the shared proxy by default, the user's own credentials if they set any --
-    /// and either may be absent, in which case that half is simply missing.
+    /// The shared service: IGDB for the facts, SteamGridDB for the art. Asked first, and asked by
+    /// Steam app id whenever there is one, which is what makes asking it first safe -- an id
+    /// lookup cannot come back with a different game the way a title search can.
+    ///
+    /// Either half may be absent, in which case that half is simply missing and Steam fills it.
     /// </summary>
-    private async Task<bool> EnrichElsewhereAsync(Game g, IFactsProvider? facts, IArtProvider? art,
+    private async Task<(bool Touched, bool Facts)> EnrichElsewhereAsync(Game g,
+        IFactsProvider? facts, IArtProvider? art, string? appId, HashSet<Slot> filled,
         CancellationToken ct)
     {
         var any = false;
+        var gotFacts = false;
 
         if (facts is not null && !facts.Unavailable)
         {
-            var hit = await facts.FindAsync(g.Title, ct);
+            var hit = await facts.FindAsync(g.Title, appId, ct);
             if (hit is not null)
             {
                 g.Description = Clean(hit.Summary);
@@ -351,32 +368,33 @@ public class MetadataService
                 g.CriticSource = hit.CriticScore is null ? null : "IGDB critics";
                 g.MetadataSource = "igdb";
                 any = true;
+                gotFacts = true;
 
-                // IGDB's art is the fallback of the fallback: its covers are portrait box art and
-                // its artworks are wide key art, neither shaped like a tile. Fetched first so the
-                // art provider below can overwrite any slot it has something better for.
-                if (hit.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, ct);
+                // IGDB's art is the weakest of the three: its covers are portrait box art and its
+                // artworks are wide key art, neither shaped like a tile. Written first so
+                // SteamGridDB below, and Steam after that, can both improve on it.
+                if (hit.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, filled, ct);
                 if (hit.ArtworkUrl is { } wide)
                 {
-                    any |= await StoreRemoteAsync(g, Slot.Tile, wide, ct);
-                    any |= await StoreRemoteAsync(g, Slot.Hero, wide, ct);
+                    any |= await StoreRemoteAsync(g, Slot.Tile, wide, filled, ct);
+                    any |= await StoreRemoteAsync(g, Slot.Hero, wide, filled, ct);
                 }
             }
         }
 
         if (art is not null && !art.Unavailable)
         {
-            var found = await art.FindArtAsync(g.Title, ct);
+            var found = await art.FindArtAsync(g.Title, appId, ct);
             if (found is not null)
             {
-                if (found.Portrait is { } p) any |= await StoreRemoteAsync(g, Slot.Cover, p, ct);
-                if (found.Tile is { } t) any |= await StoreRemoteAsync(g, Slot.Tile, t, ct);
-                if (found.Hero is { } h) any |= await StoreRemoteAsync(g, Slot.Hero, h, ct);
-                if (found.Logo is { } l) any |= await StoreRemoteAsync(g, Slot.Logo, l, ct);
+                if (found.Portrait is { } p) any |= await StoreRemoteAsync(g, Slot.Cover, p, filled, ct);
+                if (found.Tile is { } t) any |= await StoreRemoteAsync(g, Slot.Tile, t, filled, ct);
+                if (found.Hero is { } h) any |= await StoreRemoteAsync(g, Slot.Hero, h, filled, ct);
+                if (found.Logo is { } l) any |= await StoreRemoteAsync(g, Slot.Logo, l, filled, ct);
             }
         }
 
-        return any;
+        return (any, gotFacts);
     }
 
     // ---------- Art plumbing ----------
@@ -385,7 +403,8 @@ public class MetadataService
     /// Downloads one picture into a slot, overwriting whatever was there. Callers run worst source
     /// first, so the last one to fill a slot wins it.
     /// </summary>
-    private static async Task<bool> StoreRemoteAsync(Game g, Slot slot, string url, CancellationToken ct)
+    private static async Task<bool> StoreRemoteAsync(Game g, Slot slot, string url,
+        HashSet<Slot> filled, CancellationToken ct)
     {
         var name = ArtPrefix(g) + SuffixFor(slot, ExtensionOf(url));
         var dest = Path.Combine(Paths.CoversDir, name);
@@ -393,6 +412,7 @@ public class MetadataService
         // Assign returns false when the name has not changed, but the bytes on disk are new, so
         // the slot still counts as filled.
         Assign(g, slot, name);
+        filled.Add(slot);
         return true;
     }
 

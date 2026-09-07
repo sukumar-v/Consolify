@@ -127,3 +127,14 @@ Stop the scrolled grid from clipping through the All games header
   still skipping downloads for art it already has; one shared name per slot forced a
   choice between the two. Renaming a suffix orphans the old files in the covers dir,
   which is a cache and harmless.
+- The shared service is asked **first**, Steam second as the fallback. What makes that safe
+  is that both are asked by Steam app id when there is one: IGDB via
+  `external_games.category = 1`, SteamGridDB via `/games/steam/<appid>`. An id lookup
+  cannot answer with a different game, so proxy-first does not reintroduce the title
+  matching that produced the wrong Fortnite. The title is still sent as the fallback for
+  games the upstream does not index under that id.
+- "Fallback" means fills gaps, not overwrites. Steam skips any art slot the service
+  filled, and skips the text fields entirely when the service answered — keyed on whether
+  the service answered, not on whether a field is empty, because a value left over from a
+  previous run is also non-empty and testing emptiness would make stale data
+  uncorrectable. Controller support is always Steam's: IGDB has no equivalent.

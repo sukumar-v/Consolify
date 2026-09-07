@@ -6,7 +6,7 @@ namespace Consolify.Services;
 /// <summary>Somewhere facts can come from: our proxy, or the user's own IGDB credentials.</summary>
 public interface IFactsProvider
 {
-    Task<IgdbGame?> FindAsync(string title, CancellationToken ct);
+    Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct);
     /// <summary>True once this source has failed in a way that will repeat for every game, so the
     /// pass can stop asking rather than failing once per title.</summary>
     bool Unavailable { get; }
@@ -15,7 +15,7 @@ public interface IFactsProvider
 /// <summary>Somewhere art can come from: our proxy, or the user's own SteamGridDB key.</summary>
 public interface IArtProvider
 {
-    Task<SteamGridArt?> FindArtAsync(string title, CancellationToken ct);
+    Task<SteamGridArt?> FindArtAsync(string title, string? steamAppId, CancellationToken ct);
     bool Unavailable { get; }
 }
 
@@ -55,17 +55,19 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
         && Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
         && (u.Scheme == Uri.UriSchemeHttps || u.IsLoopback);
 
-    public async Task<IgdbGame?> FindAsync(string title, CancellationToken ct)
+    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct)
     {
-        var d = await GetAsync("facts", title, ct);
+        var d = await GetAsync("facts", title, steamAppId, ct);
         if (d is null) return null;
 
         using (d)
         {
             var root = d.RootElement;
+            // The proxy said this was the game. We do not take its word for it -- unless it was
+            // asked by Steam app id, in which case there was no matching to second-guess and the
+            // upstream name may legitimately differ from the one Steam prints.
             var name = Str(root, "name");
-            // The proxy said this was the game. We do not take its word for it.
-            if (!TitleMatch.IsConfident(title, name))
+            if (steamAppId is null && !TitleMatch.IsConfident(title, name))
             {
                 Log.Info($"Proxy: returned '{name}' for '{title}', which is not a confident match");
                 return null;
@@ -96,16 +98,16 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
         }
     }
 
-    public async Task<SteamGridArt?> FindArtAsync(string title, CancellationToken ct)
+    public async Task<SteamGridArt?> FindArtAsync(string title, string? steamAppId, CancellationToken ct)
     {
-        var d = await GetAsync("art", title, ct);
+        var d = await GetAsync("art", title, steamAppId, ct);
         if (d is null) return null;
 
         using (d)
         {
             var root = d.RootElement;
             var name = Str(root, "name");
-            if (!TitleMatch.IsConfident(title, name))
+            if (steamAppId is null && !TitleMatch.IsConfident(title, name))
             {
                 Log.Info($"Proxy: art for '{name}' does not confidently match '{title}'");
                 return null;
@@ -121,12 +123,16 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
         }
     }
 
-    private async Task<JsonDocument?> GetAsync(string kind, string title, CancellationToken ct)
+    private async Task<JsonDocument?> GetAsync(string kind, string title, string? steamAppId,
+        CancellationToken ct)
     {
         if (Unavailable) return null;
         try
         {
+            // Both are sent when both are known: the id is what the service looks up, and the
+            // title is its fallback when that game is not in the upstream database under that id.
             var url = $"{_endpoint}/v1/{kind}?title={Uri.EscapeDataString(title)}";
+            if (steamAppId is not null) url += $"&appid={Uri.EscapeDataString(steamAppId)}";
             using var res = await _http.GetAsync(url, ct);
 
             // 404 is the service saying "no confident answer", which is an ordinary outcome.

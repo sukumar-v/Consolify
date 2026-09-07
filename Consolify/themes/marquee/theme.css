@@ -65,18 +65,39 @@ body.no-legend .tv-foot { display: none; }
 /* ---------------------------------------------------------------- backdrop --
    The whole point of the resting state: the art is the screen, not a wash behind
    it. Scoped to the library being the active screen so the detail view and the
-   collections screen keep their own treatment. */
+   collections screen keep their own treatment.
+
+   Shaped the way tvOS shapes it: the art hangs from the top at its own aspect,
+   fitted to the full width, and dissolves into the background before the dock
+   rather than being stretched behind it.
+
+   The element is 58% of the height on purpose. Steam's hero is 3.1:1, so at 1920
+   wide it is 620px tall -- 57.4% of 1080 -- and an element cut to match means
+   `cover` has nothing to crop: the whole width is visible at 1:1. Filling the
+   entire screen with it instead meant a 2x upscale showing 54% of the width,
+   which is what "zoomed in and low quality" was. Art of another shape crops a
+   little here rather than leaving a gap, which is the safer way round. */
 
 body:has(#screen-library.active) .bd {
+  inset: 0 0 auto 0;
+  height: 58%;
   filter: none;
+  background-position: top center;
+  /* The fade is a share of this element, not of the screen, which is the reason
+     the element is cut to the art: put it on a full-height box and the gradient
+     lands below the picture and never touches it. */
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 64%, transparent 99%);
+          mask-image: linear-gradient(180deg, #000 0, #000 64%, transparent 99%);
   transition: opacity 300ms linear, filter 380ms var(--ease), transform 380ms var(--ease);
 }
 body:has(#screen-library.active) .bd.visible { opacity: 1; }
 
-/* Browsing: the art recedes to a wash so 20-odd tiles are not competing with it. */
+/* Browsing: the art recedes to a wash so 20-odd tiles are not competing with it.
+   Scaled up rather than just blurred -- the element stops at 58% and blur would
+   otherwise bleed a soft edge along the sides and top. */
 body:has(#screen-library.active[data-focus-region="grid"]) .bd {
   filter: blur(28px) saturate(1.1) brightness(0.5);
-  transform: scale(1.04);
+  transform: scale(1.08);
 }
 body:has(#screen-library.active[data-focus-region="grid"]) .bd.visible { opacity: 0.8; }
 
