@@ -118,6 +118,39 @@ public class ThemeService : IDisposable
     }
 
     /// <summary>
+    /// Copy the themes that ship with the app into the user's themes folder.
+    ///
+    /// A folder that is already there is left completely alone -- these are starting points,
+    /// and silently overwriting someone's edits to one would be the worst possible behaviour
+    /// for a theme engine. Delete a folder to get the shipped version back.
+    /// </summary>
+    public static void SeedBuiltIn()
+    {
+        try
+        {
+            var src = Path.Combine(AppContext.BaseDirectory, "themes");
+            if (!Directory.Exists(src)) return;
+            Directory.CreateDirectory(Paths.ThemesDir);
+
+            foreach (var dir in Directory.GetDirectories(src))
+            {
+                var dst = Path.Combine(Paths.ThemesDir, Path.GetFileName(dir));
+                if (Directory.Exists(dst)) continue;
+
+                Directory.CreateDirectory(dst);
+                foreach (var f in Directory.GetFiles(dir))
+                    File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: true);
+                Log.Info($"Installed the bundled theme '{Path.GetFileName(dir)}'");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Never block startup over a theme; the launcher just opens with fewer of them.
+            Log.Info($"Seeding bundled themes failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// A theme file's URL, stamped with its own mtime.
     ///
     /// The stamp is what makes hot reload work: without it the WebView keeps serving the copy

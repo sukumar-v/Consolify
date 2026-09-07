@@ -1,0 +1,105 @@
+/* Marquee — console-style layout.
+
+   Three ideas, none of which need any app change:
+     1. The focused game's art fills the screen, not a 22% wash behind it.
+     2. Its details sit large on the left, from the opt-in focus-detail region.
+     3. The library scrolls sideways instead of down, which the navigation engine
+        follows on its own because it reads geometry rather than a row index. */
+
+/* ---- 1. the backdrop becomes the wallpaper ---- */
+.bd.visible { opacity: 0.62; }
+.bd { filter: blur(18px) saturate(1.15); transform: scale(1.06); }
+/* A scrim so text stays readable over whatever the art happens to be. */
+#backdrop::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(100deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 88%, transparent) 34%,
+                    color-mix(in srgb, var(--bg) 30%, transparent) 62%, transparent 100%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 42%);
+}
+
+/* ---- layout skeleton ---- */
+.mq { display: flex; flex-direction: column; height: 100%; }
+.mq-top { flex: 0 0 auto; }
+.mq-body { flex: 1; min-height: 0; display: flex; gap: 56px; padding: 8px 80px 0; }
+.mq-foot { flex: 0 0 auto; }
+
+/* ---- 2. the focused game, large ---- */
+.mq-detail { flex: 0 0 500px; display: flex; flex-direction: column; justify-content: center; }
+.focus-detail { display: flex; flex-direction: column; gap: 18px; }
+.fd-logo {
+  font-size: 62px; font-weight: 700; line-height: 1.02; letter-spacing: -0.025em;
+  text-shadow: 0 4px 30px color-mix(in srgb, var(--bg) 80%, transparent);
+}
+.fd-meta { font-size: 17px; letter-spacing: 0.14em; color: var(--accent); }
+.fd-desc {
+  font-size: 15px; color: color-mix(in srgb, var(--ink) 40%, transparent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fd-stats { display: flex; gap: 26px; font-size: 16px;
+            color: color-mix(in srgb, var(--ink) 62%, transparent); }
+.fd-stats span:empty { display: none; }
+
+/* ---- shelves ---- */
+.mq-shelves { flex: 1; min-width: 0; display: flex; flex-direction: column;
+              gap: 30px; justify-content: center; }
+
+/* Recent row: wide banners, no section header. */
+.mq-recent .section-head { display: none; }
+.mq-recent-tile { display: flex; flex-direction: column; gap: 9px; width: 296px; }
+.mq-recent-art  { width: 296px; height: 166px; border-radius: 12px; background-color: var(--surface);
+                  background-size: cover; background-position: center; }
+.mq-recent-name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cont-item.focused .mq-recent-art {
+  box-shadow: 0 0 0 3px var(--accent), 0 18px 44px -14px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* ---- 3. the grid on its side ----
+   display:contents dissolves the row wrappers so every tile becomes a direct child of
+   the scroller, which can then be laid out as two rows flowing left to right. The app
+   still chunks the games into rows of eight; that chunking simply stops mattering. */
+.mq-all .section-head { margin-bottom: 10px; }
+.mq-all .grid-row { display: contents; }
+.mq-all .grid-scroll {
+  display: grid; grid-auto-flow: column; grid-auto-columns: max-content;
+  grid-template-rows: repeat(2, max-content); gap: 18px;
+  overflow-x: auto; overflow-y: hidden;
+  padding: 14px 12px 20px; margin: 0 -12px;
+}
+/* Row dimming is a vertical-grid idea and display:contents drops it anyway. */
+.mq-all .zone-dim { opacity: 1; }
+
+.mq-tile { position: relative; width: 152px; height: 152px; }
+.mq-art {
+  width: 100%; height: 100%; border-radius: 12px; overflow: hidden;
+  background-color: var(--surface); background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+}
+.mq-initials { font-size: 32px; font-weight: 700;
+               color: color-mix(in srgb, var(--ink) 20%, transparent); }
+.mq-pip {
+  position: absolute; left: 8px; bottom: 8px;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.1em;
+  padding: 2px 7px; border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-deep) 78%, transparent);
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+  opacity: 0; transition: opacity 160ms linear;
+}
+.mq-star { position: absolute; top: 7px; right: 9px; font-size: 15px; color: var(--accent); }
+.mq-dim  { position: absolute; inset: 0; border-radius: 12px;
+           background: color-mix(in srgb, var(--bg) 55%, transparent); }
+
+.grid-item.focused .mq-art {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--accent), 0 18px 44px -14px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.grid-item.focused .mq-pip { opacity: 1; }
+
+/* The add-game tile keeps the built-in markup, so give it the same footprint. */
+.mq-all .add-tile { width: 152px; height: 152px; border-radius: 12px; }
+
+/* ---- chrome ---- */
+.topbar { padding: 38px 80px 0; }
+.legend { padding-bottom: 30px; }
+.set-row, .coll-card { border-radius: 16px; }

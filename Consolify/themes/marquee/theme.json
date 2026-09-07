@@ -1,0 +1,15 @@
+{
+  "name": "Marquee",
+  "author": "Consolify",
+  "version": "1.0",
+  "description": "Console-style: full-bleed art, focused game up front, sideways grid",
+  "tokens": {
+    "--bg": "#05070B",
+    "--bg-deep": "#020306",
+    "--surface": "#10141D",
+    "--surface-hi": "#1A2130",
+    "--card": "#0B0F16",
+    "--ink": "#EEF2F8",
+    "--edge": "#FFFFFF"
+  }
+}

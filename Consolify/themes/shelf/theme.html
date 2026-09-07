@@ -1,0 +1,39 @@
+<!-- Shelf — a structural theme.
+
+     Two things are going on here:
+       * screen-library rearranges the app's own regions with <div data-slot>.
+         The app moves the real regions in, so every id and handler survives.
+         There is no slot for "playing", so that region is simply hidden.
+       * game-tile and continue-tile replace the markup of one item outright. -->
+
+<template data-template="screen-library">
+  <div class="shelf-screen">
+    <div data-slot="topbar"></div>
+    <div class="shelf-main">
+      <div class="shelf-hero" data-slot="continue"></div>
+      <div class="shelf-rest" data-slot="grid"></div>
+    </div>
+    <div data-slot="legend"></div>
+  </div>
+</template>
+
+<template data-template="game-tile">
+  <div class="shelf-tile">
+    <div class="shelf-art" style="background-image:url({{cover}})">
+      <span class="shelf-initials">{{initials}}</span>
+    </div>
+    <div class="shelf-fav" data-if="favorite">★</div>
+    <div class="shelf-name">{{title}}</div>
+  </div>
+</template>
+
+<template data-template="continue-tile">
+  <div class="shelf-hero-tile">
+    <div class="shelf-hero-art" style="background-image:url({{banner}})"></div>
+    <div class="shelf-hero-text">
+      <div class="shelf-hero-title">{{title}}</div>
+      <div class="shelf-hero-meta">{{platform}} · {{playtime}}</div>
+      <div class="shelf-hero-warn" data-unless="installed">Not installed</div>
+    </div>
+  </div>
+</template>

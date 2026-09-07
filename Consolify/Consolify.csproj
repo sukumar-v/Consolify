@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <None Include="ui\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Themes that ship with the app. Copied next to the exe, then seeded into the user's
+         themes folder on first run so they are discoverable without hunting for AppData. -->
+    <None Include="themes\**\*" CopyToOutputDirectory="PreserveNewest" />
     <!-- ApplicationIcon gives the exe its icon; Resource also embeds it so the window itself
          (and therefore Alt-Tab) can use it, since there is no taskbar button to carry one -->
     <Resource Include="Consolify.ico" />

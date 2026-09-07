@@ -17,6 +17,7 @@ public partial class App : Application
         }
 
         Paths.EnsureCreated();
+        ThemeService.SeedBuiltIn();
         Log.Info("---- Consolify starting ----");
         StartupService.MigrateOldEntry();
 

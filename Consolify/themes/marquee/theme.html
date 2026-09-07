@@ -1,0 +1,45 @@
+<!-- Marquee — a console-style layout in the spirit of the ReMiX family of Playnite
+     themes: the selected game fills the screen behind everything, its details sit
+     large on the left, and the library scrolls sideways underneath.
+
+     Written from scratch against Consolify's own template contract; no code or assets
+     from those themes are used here. -->
+
+<template data-template="screen-library">
+  <div class="mq">
+    <div class="mq-top" data-slot="topbar"></div>
+
+    <div class="mq-body">
+      <!-- The opt-in region: the app keeps this filled with whatever the highlight is on.
+           The built-in layout never shows it; asking for it here is what turns it on. -->
+      <div class="mq-detail" data-slot="focus-detail"></div>
+
+      <div class="mq-shelves">
+        <div class="mq-recent" data-slot="continue"></div>
+        <div class="mq-all" data-slot="grid"></div>
+      </div>
+    </div>
+
+    <div class="mq-foot" data-slot="legend"></div>
+  </div>
+</template>
+
+<!-- Square box art with no chrome: the details live in the panel, so a tile is just the
+     cover, a platform pip and a favourite star. -->
+<template data-template="game-tile">
+  <div class="mq-tile">
+    <div class="mq-art" style="background-image:url({{cover}})">
+      <span class="mq-initials">{{initials}}</span>
+    </div>
+    <div class="mq-pip">{{platform}}</div>
+    <div class="mq-star" data-if="favorite">★</div>
+    <div class="mq-dim" data-unless="installed"></div>
+  </div>
+</template>
+
+<template data-template="continue-tile">
+  <div class="mq-recent-tile">
+    <div class="mq-recent-art" style="background-image:url({{banner}})"></div>
+    <div class="mq-recent-name">{{title}}</div>
+  </div>
+</template>

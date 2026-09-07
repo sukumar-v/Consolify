@@ -1,0 +1,15 @@
+{
+  "name": "Midnight",
+  "author": "Consolify",
+  "version": "1.0",
+  "description": "Cool blues, softer cards",
+  "tokens": {
+    "--bg": "#070912",
+    "--bg-deep": "#04050B",
+    "--surface": "#111629",
+    "--surface-hi": "#182040",
+    "--card": "#0C1020",
+    "--ink": "#E8ECFA",
+    "--accent": "#6E9BFF"
+  }
+}
