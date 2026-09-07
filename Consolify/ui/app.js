@@ -787,7 +787,13 @@ function pumpImgQueue() {
     const job = imgQueue.shift();
     imgActive++;
     const probe = new Image();
-    probe.onload = () => { imgActive--; job.done(probe.src); pumpImgQueue(); };
+    probe.onload = () => {
+      imgActive--;
+      // The natural size goes back with the URL so the caller can decide whether this picture
+      // survives a cover-crop into its box.
+      job.done(probe.src, probe.naturalWidth, probe.naturalHeight);
+      pumpImgQueue();
+    };
     probe.onerror = () => {
       imgActive--;
       job.attempt++;
@@ -810,12 +816,34 @@ function paintPlaceholder(g, el) {
   el.innerHTML = `<span>${esc(initials(g.title))}</span>`;
 }
 
+/*
+ * How far a picture may be off its box before cover-cropping does visible damage.
+ *
+ * Landscape tile art has the game name burnt into it, running close to the edges. Steam capsules
+ * are 1.75:1 and land inside this; header.jpg is 2.14:1 and does not, and cover was shaving 18%
+ * off its width -- REANIMAL lost the end of its own name.
+ *
+ * Only landscape boxes get the treatment. Portrait box art is drawn to be cropped and always has
+ * been cropped here, so a portrait tile keeps cover and looks exactly as it did.
+ */
+const ART_FIT_TOLERANCE = 1.08;
+
+function artFit(el, w, h) {
+  if (!w || !h) return "cover";                     // never measured; keep the old behaviour
+  const box = el.clientWidth / el.clientHeight;
+  if (!isFinite(box) || box <= 1.2) return "cover"; // portrait or square: crop as before
+  const off = (w / h) / box;
+  return (off > 1 ? off : 1 / off) > ART_FIT_TOLERANCE ? "contain" : "cover";
+}
+
 function applyArt(g, el, url) {
   if (!url) { paintPlaceholder(g, el); return; }
-  queueArt(url, (src) => {
+  queueArt(url, (src, w, h) => {
     if (!el.isConnected) return;          // tile was re-rendered while loading
-    if (src) el.style.backgroundImage = `url('${src}')`;
-    else paintPlaceholder(g, el);
+    if (!src) { paintPlaceholder(g, el); return; }
+    el.style.backgroundImage = `url('${src}')`;
+    el.style.backgroundSize = artFit(el, w, h);
+    el.style.backgroundRepeat = "no-repeat";
   });
 }
 

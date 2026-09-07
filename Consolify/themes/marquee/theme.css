@@ -36,7 +36,9 @@
 
 .tv {
   --tile-w: 270px;
-  --art-h: 152px;     /* 16:9 of the tile width, which is the shape most banners are */
+  /* 1.75:1, which is Steam capsule_616x353 exactly rather than a rounded 16:9. Matching the
+     dominant asset means most tiles fill their box edge to edge with nothing trimmed. */
+  --art-h: 154px;
   --name-h: 26px;
   --gap: 28px;
   --dock-h: 228px;
@@ -269,9 +271,16 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--bg-deep) 90%, transparent);
   transition: box-shadow 220ms var(--ease);
 }
+/* contain, not cover.
+   Tile art has the game name burnt into it, usually running close to the edges, so cropping it
+   takes the title off. Most games give a 1.75:1 capsule and the box above is cut to match, so
+   contain and cover are the same picture there -- no bars, nothing lost. The ones that only
+   publish header.jpg are 2.14:1, and cover was shaving 18% off their width: REANIMAL lost the end
+   of its own name. Those now sit in the box whole, with a little of the tile showing above and
+   below, which is the cheaper of the two prices. */
 .tv-img {
   position: absolute; inset: 0;
-  background-size: cover; background-position: center;
+  background-size: contain; background-position: center; background-repeat: no-repeat;
 }
 .tv-initials {
   font-size: 40px; font-weight: 700; letter-spacing: 0.04em;

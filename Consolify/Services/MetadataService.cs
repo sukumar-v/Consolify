@@ -56,18 +56,28 @@ public class MetadataService
     /// Steam serves these straight off its CDN, unauthenticated, for any app id. The sizes are the
     /// originals rather than the half-size copies the client keeps on disk.
     ///
-    /// capsule_616x353 is the one that matters for a landscape tile: 1.75:1 is near enough 16:9 to
-    /// crop invisibly, and it has the logo burnt in, so a tile reads as the game at a glance from
-    /// across a room. Not every app has one -- header.jpg (2.14:1) is the fallback and always
-    /// exists.
+    /// capsule_616x353 is the one that matters for a landscape tile: it has the logo burnt in, so a
+    /// tile reads as the game at a glance from across a room. Not every app has one -- header.jpg
+    /// (2.14:1) is the fallback and always exists, and is why tiles must never be cover-cropped.
+    ///
+    /// The hero is taken at 2x. The backdrop element is inset -80px, so on a 1920x1080 stage it is
+    /// 2080x1240 -- and covering that from the 1920x620 hero meant a 2x upscale showing 54% of the
+    /// width, which is exactly the "zoomed in and blurry" it looked like. library_hero_2x is
+    /// 3840x1240: the same crop, but every pixel is now one pixel or better.
     /// </summary>
-    private static readonly (string Remote, Slot Slot)[] SteamArt =
+    /// Each carries its own file suffix rather than sharing one per slot, so a name on disk says
+    /// which source it came from. That is what lets an existing install pick up a better source --
+    /// the 2x hero did not exist here until recently -- while still skipping a download for art it
+    /// already has. Sharing one name per slot meant either re-downloading the library every pass or
+    /// never being able to improve it.
+    private static readonly (string Remote, Slot Slot, string Suffix)[] SteamArt =
     {
-        ("library_600x900_2x.jpg", Slot.Cover), // the full-size portrait, 600x900 up
-        ("capsule_616x353.jpg",    Slot.Tile),  // 616x353, the landscape tile
-        ("header.jpg",             Slot.Tile),  // fallback for the above
-        ("library_hero.jpg",       Slot.Hero),  // 1920x620 backdrop
-        ("logo.png",               Slot.Logo),  // transparent wordmark
+        ("library_600x900_2x.jpg", Slot.Cover, "_hd"),       // the full-size portrait, 600x900 up
+        ("capsule_616x353.jpg",    Slot.Tile,  "_hdtile"),   // 616x353, the landscape tile
+        ("header.jpg",             Slot.Tile,  "_hdhead"),   // 460x215 fallback for the above
+        ("library_hero_2x.jpg",    Slot.Hero,  "_hdhero2x"), // 3840x1240 -- see below
+        ("library_hero.jpg",       Slot.Hero,  "_hdhero"),   // 1920x620, the fallback
+        ("logo.png",               Slot.Logo,  "_hdlogo"),   // transparent wordmark
     };
 
     /// <summary>
@@ -220,38 +230,39 @@ public class MetadataService
         CancellationToken ct)
     {
         var any = false;
-        foreach (var (remote, slot) in SteamArt)
+
+        // Which slots this pass has already filled. Several entries compete for one slot -- the
+        // capsule then header.jpg, the 2x hero then the 1x -- and they are listed best first, so
+        // the first to succeed wins and the rest are skipped for that slot.
+        var filled = new HashSet<Slot>();
+
+        foreach (var (remote, slot, suffix) in SteamArt)
         {
             if (ct.IsCancellationRequested) break;
-            var name = ArtPrefix(g) + SuffixFor(slot, Path.GetExtension(remote));
+            if (filled.Contains(slot)) continue;
+
+            var name = ArtPrefix(g) + suffix + Path.GetExtension(remote);
             var dest = Path.Combine(Paths.CoversDir, name);
 
-            // header.jpg fills the same slot as the capsule and is only there for the apps that
-            // have no capsule, so it must not overwrite one we already have.
-            if (File.Exists(dest)) { any |= Assign(g, slot, name); continue; }
+            // Already have this exact asset, so nothing to fetch -- and because the name identifies
+            // the source, this cannot mask a better one that has not been tried yet.
+            if (File.Exists(dest)) { filled.Add(slot); any |= Assign(g, slot, name); continue; }
 
             var url = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/{remote}";
             if (!await DownloadAsync(url, dest, ct)) continue;
+
+            filled.Add(slot);
             any |= Assign(g, slot, name);
         }
 
         // Last resort for the tile, and the only art newer apps publish at all. Checked against
         // the game rather than a filename because the loop above may have written a tile from a
         // legacy path already, and that one is the better shape.
-        if (!HasSlot(g, Slot.Tile) && !string.IsNullOrWhiteSpace(headerImage))
+        if (!filled.Contains(Slot.Tile) && !string.IsNullOrWhiteSpace(headerImage))
             any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, ct);
 
         return any;
     }
-
-    private static bool HasSlot(Game g, Slot slot) => slot switch
-    {
-        Slot.Cover => g.CoverFile is not null,
-        Slot.Tile => g.BannerFile is not null,
-        Slot.Hero => g.HeroFile is not null,
-        Slot.Logo => g.LogoFile is not null,
-        _ => false,
-    };
 
     /// <summary>Facts, plus the header image URL appdetails names -- the art step needs it as a
     /// fallback for apps that no longer publish to the legacy CDN paths.</summary>

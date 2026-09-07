@@ -114,3 +114,16 @@ Stop the scrolled grid from clipping through the All games header
   version, developer "Tencent Games".
 - The worker's cache key carries a `SCHEMA` constant. Bump it whenever a fetcher's shape
   or picking rules change, or the old answers are served for another 30 days.
+- Tile art is never cover-cropped. It has the game's name burnt into it, close to the
+  edges: a 2.14:1 header.jpg in a 16:9 box lost 18% of its width and REANIMAL lost the
+  end of its own name. Marquee's tile is cut to 1.75:1 (Steam's capsule exactly) and uses
+  `contain`; the default theme decides per image in `artFit`, and only for landscape
+  boxes — portrait box art is drawn to be cropped and still is.
+- The hero is fetched at 2x (`library_hero_2x.jpg`, 3840x1240) where it exists. `.bd` is
+  inset -80px, so on a 1920x1080 stage it covers 2080x1240 — from the 1x hero that was a
+  2x upscale showing 54% of the width, which is what "zoomed in and blurry" was.
+- Each Steam art entry carries its own filename suffix, so a name on disk says which
+  source it came from. That is what lets an install pick up a better source later while
+  still skipping downloads for art it already has; one shared name per slot forced a
+  choice between the two. Renaming a suffix orphans the old files in the covers dir,
+  which is a cache and harmless.
