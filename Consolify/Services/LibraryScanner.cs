@@ -311,6 +311,7 @@ public class LibraryScanner
                 if (name is null || appName is null || installLocation is null) continue;
                 // Skip DLC / non-game entries that have no executable
                 if (string.IsNullOrWhiteSpace(launchExe)) continue;
+                if (!IsEpicGame(r)) continue;
 
                 long size = 0;
                 if (r.TryGetProperty("InstallSize", out var sz) && sz.ValueKind == JsonValueKind.Number)
@@ -331,6 +332,32 @@ public class LibraryScanner
             catch (Exception ex) { Log.Info($"Epic manifest {file} skipped: {ex.Message}"); }
         }
         return games;
+    }
+
+    /// <summary>
+    /// Epic's manifest folder holds more than games: Unreal Engine installs, Quixel Bridge, Fab
+    /// plugins. The engine ones even have a launch executable (UnrealEditor.exe), so the "has an
+    /// exe" test alone lets four copies of "Unreal Engine" into the library.
+    ///
+    /// Epic labels them itself, in AppCategories -- a game carries "games", an engine carries
+    /// "engines" -- so this reads that rather than pattern-matching the display name, which would
+    /// throw away a game legitimately called something with "engine" in it.
+    ///
+    /// An entry with no categories at all is kept: it has already passed the executable test, and
+    /// missing metadata is a weaker signal than a label that actively says "engine".
+    /// </summary>
+    private static bool IsEpicGame(JsonElement manifest)
+    {
+        if (!manifest.TryGetProperty("AppCategories", out var cats) || cats.ValueKind != JsonValueKind.Array)
+            return true;
+
+        var categories = cats.EnumerateArray()
+            .Where(c => c.ValueKind == JsonValueKind.String)
+            .Select(c => c.GetString()!)
+            .ToList();
+        if (categories.Count == 0) return true;
+
+        return categories.Any(c => c.Equals("games", StringComparison.OrdinalIgnoreCase));
     }
 
     // ---------- GOG ----------

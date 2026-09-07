@@ -15,6 +15,18 @@ public class AppSettings
     /// the only thing telling a new player what A and Y do, so it is opt-out, not opt-in.</summary>
     public bool HideLegend { get; set; }
 
+    // Metadata providers
+    // Steam needs nothing. These two are for everything else -- Epic, GOG, Xbox, manually added --
+    // which can only be looked up by title. Both are free but personal, so they are the user's to
+    // create; empty means that provider is simply off. Stored in plain text in settings.json,
+    // which is the same thing Playnite does, but worth knowing before pasting a secret in.
+    /// <summary>Twitch application client id, for IGDB. Free, non-commercial use only.</summary>
+    public string IgdbClientId { get; set; } = "";
+    /// <summary>Twitch application client secret, for IGDB.</summary>
+    public string IgdbClientSecret { get; set; } = "";
+    /// <summary>SteamGridDB API key. Art only, and the best source of it for non-Steam games.</summary>
+    public string SteamGridDbKey { get; set; } = "";
+
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"
     public bool SwitchPrimaryOnLaunch { get; set; } = true;

@@ -102,6 +102,14 @@ public class UiBridge
                 StartScan();
                 break;
 
+            // Credentials can be added long after a game was first looked up and written off, and
+            // a title that matched nothing today may match tomorrow. Clearing the timestamps is
+            // what makes the next pass reconsider everything rather than honouring the fortnight.
+            case "refreshMetadata":
+                foreach (var g in _library.Games) g.MetadataFetched = null;
+                _ = EnrichMetadata();
+                break;
+
             // Explorer on the themes folder: "put a folder here" is the whole install story,
             // so the launcher may as well open the place you put it.
             case "openThemesFolder":
@@ -357,6 +365,9 @@ public class UiBridge
         if (SettingsStore.IsHexColor(s.AccentColor)) t.AccentColor = s.AccentColor.ToUpperInvariant();
         t.Theme = s.Theme ?? "";
         t.HideLegend = s.HideLegend;
+        t.IgdbClientId = s.IgdbClientId.Trim();
+        t.IgdbClientSecret = s.IgdbClientSecret.Trim();
+        t.SteamGridDbKey = s.SteamGridDbKey.Trim();
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
@@ -421,7 +432,7 @@ public class UiBridge
         {
             // A snapshot: a rescan may replace the library while this is in flight, and its merge
             // carries across whatever has been written by then.
-            var changed = await _metadata.EnrichAsync(_library.Games.ToList());
+            var changed = await _metadata.EnrichAsync(_library.Games.ToList(), _settings.Settings);
             if (changed == 0) return;
             _library.Save();
             _ = _window.Dispatcher.BeginInvoke(PushState);

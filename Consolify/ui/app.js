@@ -1915,6 +1915,23 @@ function allSettingsRows() {
     action: () => send({ cmd: "addManual" }),
   });
 
+  rows.push({ section: "ARTWORK & METADATA", cat: "library" });
+  rows.push({
+    name: "Refresh artwork & metadata",
+    hint: "Steam games need nothing set up. The two keys below are only for Epic, GOG, Xbox and manually added games",
+    type: "action", label: "Refresh",
+    action: () => { send({ cmd: "refreshMetadata" }); toast("Fetching in the background"); },
+  });
+  rows.push(secretRow("SteamGridDB key", s,
+    "Community artwork for games that were never on Steam. Free key from steamgriddb.com",
+    () => s.steamGridDbKey, v => set(() => s.steamGridDbKey = v)));
+  rows.push(secretRow("IGDB client ID", s,
+    "Descriptions, genres and critic scores. Register an application at dev.twitch.tv to get one",
+    () => s.igdbClientId, v => set(() => s.igdbClientId = v)));
+  rows.push(secretRow("IGDB client secret", s,
+    "The secret from the same Twitch application. Stored in plain text in settings.json",
+    () => s.igdbClientSecret, v => set(() => s.igdbClientSecret = v)));
+
   rows.push({ section: "STARTUP, WAKE & LOCK SCREEN", cat: "general" });
   rows.push(toggleRow("Launch Consolify at login", "Registers a startup entry so the launcher is ready after wake or reboot",
     () => s.launchOnStartup, v => set(() => s.launchOnStartup = v)));
@@ -1930,6 +1947,22 @@ function allSettingsRows() {
   return rows;
 }
 
+
+/*
+ * A credential. Shown masked because these rows sit on a TV, which is the one screen in the house
+ * most likely to have someone else looking at it -- but the last four characters stay visible so
+ * you can tell a key that is set from a key that is set *wrong* without clearing it to find out.
+ *
+ * A is the only way in, and it opens the usual text prompt with the real value to edit.
+ */
+function secretRow(name, s, hint, get, setV) {
+  const cur = () => get() || "";
+  return {
+    name, hint, type: "action",
+    label: cur() ? (cur().length <= 4 ? "••••" : "••••" + cur().slice(-4)) : "Not set",
+    action: () => openInput(name.toUpperCase(), cur(), v => setV(v.trim())),
+  };
+}
 function toggleRow(name, hint, get, setV) {
   return {
     name, hint, type: "toggle", value: get(),
@@ -2876,7 +2909,7 @@ function mockHandle(msg) {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
-        boostButton: "RT", boostMultiplier: 2.5, hideLegend: false,
+        boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "",
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,

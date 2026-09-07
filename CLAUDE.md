@@ -79,3 +79,15 @@ Stop the scrolled grid from clipping through the All games header
 - Art the user picks by hand is written as `custom_<id>.<ext>`. That prefix is the only
   thing keeping it — nothing else ever writes that name, so neither a rescan nor an
   enrich can overwrite the file or point the game away from it.
+- Non-Steam games have only a title to match on, so both keyed providers go through
+  `TitleMatch`, which accepts nothing short of exact-after-normalising (accents, `&`,
+  apostrophes and punctuation folded; one trailing edition suffix discounted). "Portal"
+  does not match "Portal 2" and never should — a wrong cover is worse than a missing
+  one, because nothing about it looks wrong.
+- Epic's manifest folder is not a games list: it also holds Unreal Engine, Quixel Bridge
+  and Fab plugins, and the engine entries have a launch executable, so they pass the
+  "has an exe" test. `IsEpicGame` reads Epic's own `AppCategories` instead — a game
+  carries "games", an engine carries "engines".
+- Credentials for IGDB and SteamGridDB live in settings.json in plain text. A rejection
+  is latched per pass, so bad keys produce one log line rather than one per game, and
+  games skipped because of it are left unstamped so corrected keys retry at once.
