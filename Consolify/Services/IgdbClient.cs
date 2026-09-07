@@ -86,6 +86,7 @@ public class IgdbClient : IFactsProvider
         var body =
             $"search \"{term}\"; " +
             "fields name, summary, first_release_date, aggregated_rating, category, " +
+            "follows, total_rating_count, version_parent, " +
             "genres.name, cover.image_id, artworks.image_id, " +
             "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; " +
             "limit 20;";
@@ -109,9 +110,17 @@ public class IgdbClient : IFactsProvider
         if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
 
         // category 0 is a main game; the rest are DLC, bundles, episodes and ports, which share
-        // their parent's title and would otherwise win the match on a coin toss.
+        // their parent's title and would otherwise win the match on a coin toss. version_parent
+        // marks an edition or regional variant, which inherits its parent's title exactly.
+        //
+        // Ordered by popularity because an exact-title tie is real and not harmless: IGDB carries
+        // two entries named exactly "DOOM" (1993 and 2016) and more than one named "Fortnite".
+        // TitleMatch cannot separate those -- the names are identical -- so the order they arrive
+        // in decides, and most-followed is the canonical one every time.
         var games = doc.RootElement.EnumerateArray()
-            .Where(e => !e.TryGetProperty("category", out var c) || !c.TryGetInt32(out var n) || n == 0)
+            .Where(e => JsonNum.Int(e, "category") is null or 0)
+            .Where(e => !e.TryGetProperty("version_parent", out _))
+            .OrderByDescending(Popularity)
             .ToList();
         if (games.Count == 0) return null;
 
@@ -125,17 +134,26 @@ public class IgdbClient : IFactsProvider
         return Parse(hit);
     }
 
+    /// <summary>How well known an entry is, used only to break an exact-title tie. Follows are the
+    /// stronger signal, so they outweigh rating counts rather than being added to them.</summary>
+    private static long Popularity(JsonElement e)
+    {
+        long Get(string key) =>
+            JsonNum.Long(e, key) ?? 0;
+        return Get("follows") * 10 + Get("total_rating_count");
+    }
+
     private static IgdbGame Parse(JsonElement e)
     {
         string? Str(string key) =>
             e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
         DateTime? released = null;
-        if (e.TryGetProperty("first_release_date", out var rd) && rd.TryGetInt64(out var unix))
+        if (JsonNum.Long(e, "first_release_date") is { } unix)
             released = DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
 
         int? score = null;
-        if (e.TryGetProperty("aggregated_rating", out var ar) && ar.TryGetDouble(out var rating))
+        if (JsonNum.Double(e, "aggregated_rating") is { } rating)
             score = (int)Math.Round(rating);
 
         var genres = new List<string>();
@@ -213,8 +231,7 @@ public class IgdbClient : IFactsProvider
             var token = doc.RootElement.TryGetProperty("access_token", out var t) ? t.GetString() : null;
             if (string.IsNullOrWhiteSpace(token)) return false;
 
-            var seconds = doc.RootElement.TryGetProperty("expires_in", out var ex) && ex.TryGetInt64(out var s)
-                ? s : 3600;
+            var seconds = JsonNum.Long(doc.RootElement, "expires_in") ?? 3600;
             _token = token;
             _tokenExpires = DateTime.UtcNow.AddSeconds(Math.Max(60, seconds - 60));
             return true;

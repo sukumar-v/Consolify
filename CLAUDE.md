@@ -103,3 +103,14 @@ Stop the scrolled grid from clipping through the All games header
 - The proxy's title matching is a courtesy; the launcher re-checks every response
   against `TitleMatch` itself. A proxy that is wrong, stale or replaced still cannot put
   another game's art on a tile.
+- `JsonElement.TryGetInt32` and friends **throw** on a JSON `null` rather than returning
+  false — they return false only for a number that will not fit. A `"criticScore": null`,
+  which is most games, took out that game's whole enrichment silently. Read numbers
+  through `JsonNum.Int/Long/Double`, which check `ValueKind` first.
+- IGDB carries several entries with byte-identical titles: two named exactly "DOOM"
+  (1993 and 2016), more than one named "Fortnite". `TitleMatch` cannot separate those, so
+  the tie is broken on popularity (`follows`, then `total_rating_count`) and entries with
+  a `version_parent` are dropped. Without it, Fortnite came back as the delisted Chinese
+  version, developer "Tencent Games".
+- The worker's cache key carries a `SCHEMA` constant. Bump it whenever a fetcher's shape
+  or picking rules change, or the old answers are served for another 30 days.

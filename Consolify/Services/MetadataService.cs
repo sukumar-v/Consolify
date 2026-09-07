@@ -298,7 +298,7 @@ public class MetadataService
         // Steam carries Metacritic's score for the games that have one, which is most big
         // releases and almost no indies. Absent is the normal case, not a failure.
         if (d.TryGetProperty("metacritic", out var mc)
-            && mc.TryGetProperty("score", out var score) && score.TryGetInt32(out var n))
+            && JsonNum.Int(mc, "score") is { } n)
         {
             g.CriticScore = n;
             g.CriticSource = "Metacritic";

@@ -24,6 +24,8 @@
 const CACHE_TTL = 60 * 60 * 24 * 30;   // 30 days. Game facts do not change; art rarely does.
 const MISS_TTL = 60 * 60 * 24 * 3;     // Remember "no match" too, but re-check sooner: a game may
                                        // be added to a database after we first ask for it.
+const SCHEMA = "v2";                   // bump when a fetcher changes shape or its picking
+                                       // rules; it is part of every cache key, so stale answers retire
 const RATE_LIMIT = 240;                // requests per IP per window
 const RATE_WINDOW = 60;                // seconds
 
@@ -60,7 +62,7 @@ export default {
  * inside both IGDB's rate limit and a free hosting tier.
  */
 async function serve(env, ctx, kind, title, fetcher) {
-  const key = `${kind}:${normalise(title)}`;
+  const key = `${kind}:${SCHEMA}:${normalise(title)}`;
 
   const cached = await env.METADATA.get(key, { type: "json" });
   if (cached) {
@@ -106,6 +108,7 @@ async function igdbFacts(env, title) {
   const body =
     `search "${title.replace(/"/g, " ")}"; ` +
     "fields name, summary, first_release_date, aggregated_rating, category, " +
+    "follows, total_rating_count, version_parent, " +
     "genres.name, cover.image_id, artworks.image_id, " +
     "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; " +
     "limit 20;";
@@ -124,7 +127,10 @@ async function igdbFacts(env, title) {
   const all = await res.json();
   // category 0 is a main game. The rest are DLC, bundles, ports and episodes, which share their
   // parent's title and would otherwise win the match on a coin toss.
-  const games = all.filter(g => g.category === undefined || g.category === 0);
+  // version_parent marks an edition or regional variant of another entry; those inherit their
+  // parent's title and are never the one wanted.
+  const games = all.filter(g =>
+    (g.category === undefined || g.category === 0) && g.version_parent === undefined);
   const hit = pick(title, games, g => g.name);
   if (!hit) return null;
 
@@ -224,15 +230,24 @@ async function sgdb(env, path) {
  * Exact-after-normalising, preferring an exact hit. This mirrors the launcher's rule so the proxy
  * does not waste a cache slot on something the client will reject anyway -- but the client checks
  * again regardless, and its check is the one that counts.
+ *
+ * Ties are the interesting case and are NOT harmless. IGDB carries several entries named exactly
+ * "Fortnite" (the game, and the delisted Chinese version published by Tencent) and two named
+ * exactly "DOOM" (1993 and 2016). Taking whichever came back first gave Fortnite the wrong
+ * developer and a summary about a regional variant. Neither the proxy's title check nor the
+ * launcher's can see this -- the names really are identical -- so the tie has to be broken on
+ * something else, and popularity picks the canonical entry every time.
  */
 function pick(wanted, candidates, nameOf) {
   const want = normalise(wanted);
   if (!want) return null;
-  for (const c of candidates) {
-    if (normalise(nameOf(c) || "") === want) return c;
-  }
-  return null;
+  const exact = candidates.filter(c => normalise(nameOf(c) || "") === want);
+  if (exact.length === 0) return null;
+  return exact.sort(popularityFirst)[0];
 }
+
+const weight = (g) => (g.follows || 0) * 10 + (g.total_rating_count || 0);
+const popularityFirst = (a, b) => weight(b) - weight(a);
 
 /**
  * A crude per-IP cap. Not a security boundary -- an IP is cheap to change -- just enough that one

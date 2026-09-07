@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -126,4 +127,27 @@ public static class TitleMatch
         }
         return haveLoose;
     }
+}
+
+/// <summary>
+/// Reading numbers out of JSON that may legitimately carry null.
+///
+/// System.Text.Json's TryGetInt32 does not do what its name suggests: it *throws* when the element
+/// is null or a string, and returns false only for a number that will not fit. A "criticScore":
+/// null -- which is most games, since most are never scored -- therefore took out the whole
+/// enrichment for that game, silently, forever.
+/// </summary>
+internal static class JsonNum
+{
+    public static int? Int(JsonElement parent, string key) =>
+        parent.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number
+        && v.TryGetInt32(out var n) ? n : null;
+
+    public static long? Long(JsonElement parent, string key) =>
+        parent.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number
+        && v.TryGetInt64(out var n) ? n : null;
+
+    public static double? Double(JsonElement parent, string key) =>
+        parent.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number
+        && v.TryGetDouble(out var n) ? n : null;
 }

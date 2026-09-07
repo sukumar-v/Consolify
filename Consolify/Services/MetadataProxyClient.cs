@@ -33,11 +33,11 @@ public interface IArtProvider
 public class MetadataProxyClient : IFactsProvider, IArtProvider
 {
     /// <summary>
-    /// Where a shipped build looks. Set this to your deployed worker before publishing -- see
-    /// proxy/README.md. Left empty, the proxy tier is simply off, which is the right behaviour for
-    /// a fresh clone: it must not point at somebody else's service by default.
+    /// Where a shipped build looks, and the reason installing Consolify comes with no setup. Set
+    /// to empty to turn the proxy tier off entirely; a user can override it in Settings, and their
+    /// own credentials take priority over it either way. See proxy/README.md.
     /// </summary>
-    public const string DefaultEndpoint = "";
+    public const string DefaultEndpoint = "https://consolify-metadata.s-varmagt.workers.dev";
 
     private readonly HttpClient _http;
     private readonly string _endpoint;
@@ -87,7 +87,7 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
                 Publisher = Str(root, "publisher"),
                 Genres = genres,
                 Released = released,
-                CriticScore = root.TryGetProperty("criticScore", out var cs) && cs.TryGetInt32(out var n) ? n : null,
+                CriticScore = JsonNum.Int(root, "criticScore"),
                 // The proxy hands back finished URLs rather than image ids, so these go straight
                 // into the art slots without IgdbClient.ImageUrl in between.
                 CoverUrl = Str(root, "cover"),

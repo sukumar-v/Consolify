@@ -46,7 +46,7 @@ public class SteamSearchClient
                 return null;
             }
 
-            if (!hit.TryGetProperty("id", out var id) || !id.TryGetInt32(out var appId)) return null;
+            if (JsonNum.Int(hit, "id") is not { } appId) return null;
             Log.Info($"Steam search: '{title}' resolved to app {appId}");
             return appId.ToString();
         }

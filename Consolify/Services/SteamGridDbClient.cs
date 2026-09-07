@@ -84,7 +84,7 @@ public class SteamGridDbClient : IArtProvider
                 Log.Info($"SteamGridDB: no confident match for '{title}'");
                 return null;
             }
-            return hit.TryGetProperty("id", out var id) && id.TryGetInt32(out var n) ? n : null;
+            return JsonNum.Int(hit, "id");
         }
     }
 
