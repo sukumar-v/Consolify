@@ -27,10 +27,11 @@ public class UiBridge
     private readonly GameLaunchService _launcher;
     private readonly VirtualKeyboardService _keyboard;
     private readonly WindowService _windows;
+    private readonly ThemeService _themes;
     private bool _scanning;
 
     public UiBridge(MainWindow window, CoreWebView2 core, SettingsStore settings, LibraryStore library,
-        DisplayService displays, LibraryScanner scanner, GameLaunchService launcher, VirtualKeyboardService keyboard, WindowService windows)
+        DisplayService displays, LibraryScanner scanner, GameLaunchService launcher, VirtualKeyboardService keyboard, WindowService windows, ThemeService themes)
     {
         _window = window;
         _core = core;
@@ -41,6 +42,7 @@ public class UiBridge
         _launcher = launcher;
         _keyboard = keyboard;
         _windows = windows;
+        _themes = themes;
     }
 
     public void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -96,6 +98,17 @@ public class UiBridge
 
             case "rescan":
                 StartScan();
+                break;
+
+            // Explorer on the themes folder: "put a folder here" is the whole install story,
+            // so the launcher may as well open the place you put it.
+            case "openThemesFolder":
+                try
+                {
+                    Directory.CreateDirectory(Paths.ThemesDir);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Paths.ThemesDir) { UseShellExecute = true });
+                }
+                catch (Exception ex) { Push(new { type = "toast", message = $"Could not open the themes folder: {ex.Message}" }); }
                 break;
 
             case "addManual":
@@ -340,6 +353,7 @@ public class UiBridge
         // The accent is written straight into a CSS custom property, so only a hex colour may
         // get through; anything else keeps whatever was already there.
         if (SettingsStore.IsHexColor(s.AccentColor)) t.AccentColor = s.AccentColor.ToUpperInvariant();
+        t.Theme = s.Theme ?? "";
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
@@ -492,6 +506,7 @@ public class UiBridge
             settings = s,
             displays = _displays.GetDisplays(),
             startupRegistered = StartupService.IsRegistered(),
+            themes = _themes.List(),
             gameRunning = _launcher.GameRunning,
             runningGameId = _launcher.RunningGameId,
             scanning = _scanning
@@ -571,6 +586,9 @@ public class UiBridge
     public void PushDismiss() => Push(new { type = "dismiss" });
 
     public void PushInputMode(string mode) => Push(new { type = "inputMode", mode });
+
+    /// <summary>Re-send the theme list after a change on disk, so an edit reloads live.</summary>
+    public void PushThemes() => Push(new { type = "themes", themes = _themes.List() });
 
     public void PushGameState() =>
         Push(new { type = "game", running = _launcher.GameRunning, id = _launcher.RunningGameId });

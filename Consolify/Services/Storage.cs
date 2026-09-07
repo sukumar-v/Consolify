@@ -11,6 +11,22 @@ public static class Paths
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Consolify");
 
     public static string CoversDir { get; } = Path.Combine(DataDir, "covers");
+    /// <summary>One folder per theme. Reachable from the page as https://consolify.data/themes/…
+    /// because DataDir is mapped as a virtual host, so a theme's own files need no further
+    /// plumbing to load.</summary>
+    public static string ThemesDir { get; } = Path.Combine(DataDir, "themes");
+
+    /// <summary>
+    /// WebView2's profile. Deliberately NOT under DataDir: WebView2 refuses to serve a virtual
+    /// host mapping for a folder that contains its own user data folder, and DataDir is mapped
+    /// as consolify.data. With the profile inside it, every request to that host failed -- cover
+    /// art included -- which looked like missing art rather than a broken mapping.
+    ///
+    /// It is a rebuildable cache, so living somewhere else costs nothing; Local is where a cache
+    /// belongs anyway, and it keeps it out of a roaming profile.
+    /// </summary>
+    public static string WebViewDir { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Consolify", "webview2");
     public static string SettingsFile { get; } = Path.Combine(DataDir, "settings.json");
     public static string LibraryFile { get; } = Path.Combine(DataDir, "library.json");
     public static string LogFile { get; } = Path.Combine(DataDir, "consolify.log");
@@ -20,6 +36,7 @@ public static class Paths
         MigrateFromCouchLauncher();
         Directory.CreateDirectory(DataDir);
         Directory.CreateDirectory(CoversDir);
+        Directory.CreateDirectory(ThemesDir);
     }
 
     /// <summary>

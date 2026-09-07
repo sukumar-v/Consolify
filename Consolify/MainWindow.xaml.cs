@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly GameLaunchService _launcher;
     private readonly GamepadService _gamepad;
     private readonly CursorService _cursor;
+    private readonly ThemeService _themes = new();
     private readonly WindowService _windows;
     private bool _overlayWasMinimized;
     private bool _overlayActive;
@@ -121,8 +122,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var env = await CoreWebView2Environment.CreateAsync(
-                userDataFolder: Path.Combine(Paths.DataDir, "webview2"));
+            var env = await CoreWebView2Environment.CreateAsync(userDataFolder: Paths.WebViewDir);
             await WebView.EnsureCoreWebView2Async(env);
         }
         catch (WebView2RuntimeNotFoundException ex)
@@ -153,12 +153,71 @@ public partial class MainWindow : Window
 
         var uiDir = Path.Combine(AppContext.BaseDirectory, "ui");
         core.SetVirtualHostNameToFolderMapping("consolify.ui", uiDir, CoreWebView2HostResourceAccessKind.Allow);
-        core.SetVirtualHostNameToFolderMapping("consolify.data", Paths.DataDir, CoreWebView2HostResourceAccessKind.Allow);
+        ServeDataFolder(core);
 
-        _bridge = new UiBridge(this, core, _settings, _library, _displays, _scanner, _launcher, _keyboard, _windows);
+        _bridge = new UiBridge(this, core, _settings, _library, _displays, _scanner, _launcher, _keyboard, _windows, _themes);
+        // Saving a theme file should show up in the launcher, not after a restart.
+        _themes.Changed += () => Dispatcher.BeginInvoke(() => _bridge?.PushThemes());
+        _themes.Watch();
         core.WebMessageReceived += _bridge.OnWebMessageReceived;
 
         core.Navigate("https://consolify.ui/index.html");
+    }
+
+    private static readonly Dictionary<string, string> ContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".css"] = "text/css", [".js"] = "text/javascript", [".json"] = "application/json",
+        [".html"] = "text/html", [".txt"] = "text/plain", [".svg"] = "image/svg+xml",
+        [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif", [".webp"] = "image/webp", [".avif"] = "image/avif",
+        [".ico"] = "image/x-icon", [".mp4"] = "video/mp4", [".webm"] = "video/webm",
+        [".woff"] = "font/woff", [".woff2"] = "font/woff2", [".ttf"] = "font/ttf", [".otf"] = "font/otf",
+    };
+
+    /// <summary>
+    /// Serve https://consolify.data/... out of the data folder, by hand.
+    ///
+    /// SetVirtualHostNameToFolderMapping cannot do it: the folder is read by WebView2's own
+    /// sandboxed process, and it will not serve anything under %APPDATA%. The mapping is
+    /// accepted without complaint and then every single request to that host fails, which is
+    /// why cover art has never appeared from disk -- the placeholder initials looked like a
+    /// design choice rather than a broken host. Reading the file here instead puts it in this
+    /// process, which has no such restriction, and fixes covers and themes in one go.
+    /// </summary>
+    private static void ServeDataFolder(CoreWebView2 core)
+    {
+        core.AddWebResourceRequestedFilter("https://consolify.data/*", CoreWebView2WebResourceContext.All);
+        core.WebResourceRequested += (_, e) =>
+        {
+            try
+            {
+                var uri = new Uri(e.Request.Uri);
+                // Query is only ever a cache-busting stamp; the path alone names the file.
+                var rel = Uri.UnescapeDataString(uri.AbsolutePath).TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+                var full = Path.GetFullPath(Path.Combine(Paths.DataDir, rel));
+
+                // Refuse anything that resolves outside the data folder, so a crafted path in a
+                // theme cannot read the rest of the disk.
+                var root = Path.GetFullPath(Paths.DataDir) + Path.DirectorySeparatorChar;
+                if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
+                {
+                    e.Response = core.Environment.CreateWebResourceResponse(null, 404, "Not Found", "");
+                    return;
+                }
+
+                var type = ContentTypes.TryGetValue(Path.GetExtension(full), out var t) ? t : "application/octet-stream";
+                // Allow-Origin because the page is served from consolify.ui: without it a theme
+                // could not fetch its own JSON, and fonts would be refused outright.
+                var headers = $"Content-Type: {type}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache";
+                e.Response = core.Environment.CreateWebResourceResponse(
+                    new MemoryStream(File.ReadAllBytes(full)), 200, "OK", headers);
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"Serving {e.Request.Uri} failed: {ex.Message}");
+                e.Response = core.Environment.CreateWebResourceResponse(null, 500, "Error", "");
+            }
+        };
     }
 
     /// <summary>

@@ -8,6 +8,9 @@ public class AppSettings
     /// the UI overrides its --accent token with it and derives every tint from there.
     /// </summary>
     public string AccentColor { get; set; } = "#F0A253";
+    /// <summary>Folder name under %APPDATA%\Consolify\themes, or "" for the built-in look.
+    /// A theme that has been deleted falls back to the default rather than failing.</summary>
+    public string Theme { get; set; } = "";
 
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"

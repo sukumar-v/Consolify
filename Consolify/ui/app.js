@@ -1,3 +1,4 @@
+
 "use strict";
 
 /* ============================== bridge ============================== */
@@ -16,6 +17,7 @@ let S = {
   collections: [],
   settings: null,
   displays: [],
+  themes: [],
   startupRegistered: false,
   gameRunning: false,
   runningGameId: null,
@@ -355,13 +357,61 @@ function luminance(hex) {
    exists. Setting a token to "" removes the override and falls back to the stylesheet's own
    value, which is what makes a bad or missing colour a no-op rather than a blank screen. */
 function applyTheme() {
+  applyThemeSheet();
+
+  const root = document.documentElement.style;
+  // The theme's own tokens go on first so the accent setting still wins: a user who picks a
+  // colour expects it to hold whatever theme is loaded, and a theme that wants to own the
+  // accent simply ships a theme.css rule, which the stylesheet layer below cannot override.
+  const theme = currentTheme();
+  const tokens = (theme && theme.tokens) || {};
+  for (const [name, value] of Object.entries(appliedTokens))
+    if (!(name in tokens)) root.removeProperty(name);
+  appliedTokens = {};
+  for (const [name, value] of Object.entries(tokens)) {
+    if (!/^--[A-Za-z0-9_-]+$/.test(name) || typeof value !== "string") continue;
+    root.setProperty(name, value);
+    appliedTokens[name] = value;
+  }
+
   const hex = S.settings && S.settings.accentColor;
   const ok = isHexColor(hex);
-  const root = document.documentElement.style;
   root.setProperty("--accent", ok ? hex : "");
   // 0.5 rather than WCAG's 0.179 contrast crossover: the ink is off-white and the deep is
   // near-black, so both are legible over a mid-tone and the eye prefers dark ink there.
   root.setProperty("--on-accent", ok && luminance(hex) < 0.5 ? "var(--ink)" : "");
+}
+
+/* Tokens this theme set, so switching themes can take them off again -- otherwise a token
+   from the old theme survives into a new one that never mentions it. */
+let appliedTokens = {};
+
+function currentTheme() {
+  const id = (S.settings && S.settings.theme) || "";
+  return (S.themes || []).find(t => t.id === id) || null;
+}
+
+/* The theme's stylesheet is one <link> appended after app.css, so a theme overrides by
+   ordinary cascade order and needs no !important anywhere.
+
+   The href carries a cache-busting stamp from the host (the file's mtime). Re-setting the
+   same href would not reload, which is exactly what made saving a theme edit look like it
+   had done nothing. */
+function applyThemeSheet() {
+  const theme = currentTheme();
+  const href = theme && theme.css ? theme.css : null;
+  let link = document.getElementById("themeSheet");
+
+  if (!href) { if (link) link.remove(); return; }
+  if (link && link.getAttribute("href") === href) return;
+
+  if (!link) {
+    link = document.createElement("link");
+    link.id = "themeSheet";
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+  }
+  link.setAttribute("href", href);
 }
 
 window.addEventListener("mousemove", (e) => {
@@ -1500,6 +1550,21 @@ function allSettingsRows() {
 
   const rows = [];
   rows.push({ section: "APPEARANCE", cat: "general" });
+  const themes = S.themes && S.themes.length ? S.themes : [{ id: "", name: "Consolify (default)" }];
+  const theme = themes.find(t => t.id === (s.theme || "")) || themes[0];
+  rows.push(cycleRow("Theme", themes.map(t => t.id), () => (s.theme || ""), v => set(() => s.theme = v),
+    theme && theme.error ? null
+      : [theme && theme.author ? "by " + theme.author : null,
+         theme && theme.version ? "v" + theme.version : null,
+         theme && theme.description ? theme.description : null]
+        .filter(Boolean).join(" · ") || "Drop a theme folder into the themes directory to add one",
+    theme && theme.error ? theme.error : null,
+    Object.fromEntries(themes.map(t => [t.id, t.name]))));
+  rows.push({
+    name: "Themes folder", hint: "A theme is a folder with a theme.css and an optional theme.json. Edits apply as you save",
+    type: "action", label: "Open",
+    action: () => send({ cmd: "openThemesFolder" }),
+  });
   rows.push(accentRow(s, set));
 
   rows.push({ section: "DISPLAY", cat: "general" });
@@ -2389,6 +2454,9 @@ function handleHostMessage(m) {
       S.collections = m.collections || [];
       S.settings = m.settings;
       S.displays = m.displays || [];
+      // Keep whatever the last themes push carried if this state has none, so a state
+      // refresh cannot blank the list between watcher events.
+      S.themes = m.themes || S.themes;
       S.startupRegistered = m.startupRegistered;
       S.gameRunning = m.gameRunning;
       S.runningGameId = m.runningGameId;
@@ -2442,6 +2510,14 @@ function handleHostMessage(m) {
         if (i !== radialIdx) { radialIdx = i; renderRadial(); }
       }
       break;
+    // A theme file changed on disk. The list carries a fresh cache-busting stamp, so
+    // re-applying reloads the stylesheet without a restart.
+    case "themes":
+      S.themes = m.themes || [];
+      applyTheme();
+      if (view === "settings") renderSettings();
+      break;
+
     case "inputMode":
       // Only the host can tell us the stick moved the cursor, or that the launcher just came
       // back to the foreground and the pad should be driving again. It never pushes "pad" off
@@ -2538,6 +2614,7 @@ function mockHandle(msg) {
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
         keyboardApp: "Builtin", keyboardScale: 1.0, keyRepeatDelayMs: 350, keyRepeatIntervalMs: 90,
+        accentColor: "#F0A253", theme: "",
       },
       displays: [
         { deviceName: "\\\\.\\DISPLAY1", friendlyName: "Dell U2723QE", x: 0, y: 0, width: 3840, height: 2160, isPrimary: true },
