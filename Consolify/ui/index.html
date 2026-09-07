@@ -78,7 +78,7 @@
   </div>
 
   <!-- ============ COLLECTIONS ============ -->
-  <div class="screen" id="screen-collections">
+  <div class="screen" id="screen-collections" data-focus-scope>
     <header class="topbar">
       <div class="topbar-left" data-tabbar="collections"></div>
       <div class="topbar-right mono">
@@ -103,7 +103,7 @@
   </div>
 
   <!-- ============ DETAIL ============ -->
-  <div class="screen" id="screen-detail">
+  <div class="screen" id="screen-detail" data-focus-scope>
     <div class="detail-art" id="detailArt"></div>
     <div class="detail-shade-x"></div>
     <div class="detail-shade-y"></div>
@@ -125,12 +125,12 @@
         </div>
 
         <div class="detail-actions" id="detailActions">
-          <div class="pill-btn pill-primary" data-act="play">
+          <div class="pill-btn pill-primary" data-act="play" data-focusable data-focus-key="detail:play">
             <div class="pill-a-badge">A</div>
             <span id="playLabel">Play</span>
           </div>
-          <div class="pill-btn pill-secondary" data-act="collect">Add to Collection</div>
-          <div class="pill-btn pill-secondary" data-act="manage">Manage</div>
+          <div class="pill-btn pill-secondary" data-act="collect" data-focusable data-focus-key="detail:collect">Add to Collection</div>
+          <div class="pill-btn pill-secondary" data-act="manage" data-focusable data-focus-key="detail:manage">Manage</div>
         </div>
       </div>
 
@@ -143,7 +143,7 @@
   </div>
 
   <!-- ============ SETTINGS ============ -->
-  <div class="screen" id="screen-settings">
+  <div class="screen" id="screen-settings" data-focus-scope>
     <header class="topbar">
       <div class="topbar-left" data-tabbar="settings"></div>
       <div class="topbar-right mono">
@@ -162,7 +162,7 @@
   </div>
 
   <!-- ============ FILTER & SORT ============ -->
-  <div class="overlay" id="overlay-filter">
+  <div class="overlay" id="overlay-filter" data-focus-scope>
     <div class="quick-card filter-card">
       <div class="quick-title mono" id="filterTitle">FILTER &amp; SORT</div>
       <div class="ov-scroll" id="filterList"></div>
@@ -171,7 +171,7 @@
   </div>
 
   <!-- ============ GAME CONTEXT MENU ============ -->
-  <div class="overlay" id="overlay-gamemenu">
+  <div class="overlay" id="overlay-gamemenu" data-focus-scope>
     <div class="quick-card menu-card">
       <div class="quick-title mono" id="gameMenuTitle">GAME</div>
       <div class="ov-scroll" id="gameMenuList"></div>
@@ -180,7 +180,7 @@
   </div>
 
   <!-- ============ ADD TO COLLECTION ============ -->
-  <div class="overlay" id="overlay-collect">
+  <div class="overlay" id="overlay-collect" data-focus-scope>
     <div class="quick-card menu-card">
       <div class="quick-title mono">ADD TO COLLECTION</div>
       <div class="ov-scroll" id="collectList"></div>
@@ -189,7 +189,7 @@
   </div>
 
   <!-- ============ MANAGE ============ -->
-  <div class="overlay" id="overlay-manage">
+  <div class="overlay" id="overlay-manage" data-focus-scope>
     <div class="quick-card menu-card">
       <div class="quick-title mono">MANAGE</div>
       <div class="ov-scroll" id="manageList"></div>
@@ -198,7 +198,7 @@
   </div>
 
   <!-- ============ CONFIRM ============ -->
-  <div class="overlay" id="overlay-confirm">
+  <div class="overlay" id="overlay-confirm" data-focus-scope>
     <div class="quick-card menu-card">
       <div class="quick-title mono" id="confirmTitle">ARE YOU SURE?</div>
       <div class="ov-scroll" id="confirmList"></div>
