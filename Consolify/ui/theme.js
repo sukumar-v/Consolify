@@ -145,16 +145,19 @@ window.Theme = (() => {
     const regions = [...screen.querySelectorAll("[data-region]")];
     if (!regions.length) return false;
 
-    // Remember the original home once, so restoring is exact.
+    // Remember the original home once, so restoring is exact -- including whether the
+    // region was hidden to begin with. Some regions are opt-in: they exist for themes
+    // that want them and stay out of the built-in layout until one asks.
     if (!screen.__regionHome) {
-      screen.__regionHome = regions.map(el => ({ el, parent: el.parentNode, next: el.nextSibling }));
+      screen.__regionHome = regions.map(el =>
+        ({ el, parent: el.parentNode, next: el.nextSibling, hidden: el.hidden }));
     }
 
     const tpl = templates[name];
     if (!tpl) {
       if (!screen.__themed) return false;
-      screen.__regionHome.forEach(({ el, parent, next }) => {
-        el.hidden = false;
+      screen.__regionHome.forEach(({ el, parent, next, hidden }) => {
+        el.hidden = hidden;
         parent.insertBefore(el, next);
       });
       // Anything the theme added is not ours to keep.

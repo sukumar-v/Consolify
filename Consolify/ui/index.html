@@ -60,6 +60,20 @@
         <div class="continue-row" id="continueRow" data-dim-group></div>
       </section>
 
+      <!-- Opt-in: hidden until a theme gives it a slot. The app keeps it filled with whatever
+           the highlight is on, so a console-style layout can show the focused game large
+           without the app having to know that is what the theme is doing. -->
+      <section class="focus-detail" data-region="focus-detail" hidden>
+        <div class="fd-logo" id="fdTitle">—</div>
+        <div class="fd-meta mono" id="fdMeta"></div>
+        <div class="fd-desc" id="fdDesc"></div>
+        <div class="fd-stats mono">
+          <span id="fdPlaytime"></span>
+          <span id="fdLastPlayed"></span>
+          <span id="fdSize"></span>
+        </div>
+      </section>
+
       <section class="lib-section lib-grid-section" data-region="grid">
         <div class="section-head">
           <div class="section-title">All games</div>

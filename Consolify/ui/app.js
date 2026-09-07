@@ -197,42 +197,60 @@ function ensureFocus(scope) {
   if (el) setFocusEl(el); else clearFocus(scope);
 }
 
-/** Sum offsetTop up to the scroller. Layout pixels, to match scrollTop -- see nav.js. */
-function offsetWithin(el, container) {
-  let top = 0;
-  for (let n = el; n && n !== container; n = n.offsetParent) top += n.offsetTop;
-  return top;
-}
-
-function scrollParentOf(el) {
+/** Nearest ancestor that actually scrolls on the given axis. */
+function scrollParentOf(el, axis) {
   for (let p = el.parentElement; p; p = p.parentElement) {
     const s = getComputedStyle(p);
-    if (/(auto|scroll)/.test(s.overflowY) && p.scrollHeight > p.clientHeight + 1) return p;
+    if (axis === "x") {
+      if (/(auto|scroll)/.test(s.overflowX) && p.scrollWidth > p.clientWidth + 1) return p;
+    } else if (/(auto|scroll)/.test(s.overflowY) && p.scrollHeight > p.clientHeight + 1) return p;
   }
   return null;
 }
 
-/** Bring the focused element into view inside whatever is scrolling it. */
+/** Offset along one axis, summed to the scroller. Layout pixels, to match scrollTop/Left. */
+function offsetWithin(el, container, axis) {
+  let n = 0;
+  for (let e = el; e && e !== container; e = e.offsetParent) n += axis === "x" ? e.offsetLeft : e.offsetTop;
+  return n;
+}
+
+/* How far a scroller has to move to put an element in view, or null if it already is.
+   Snaps fully to either end so the first item keeps its focus-glow padding and the last
+   is not left hanging a few pixels short. */
+function revealOffset(sc, el, axis) {
+  const near = offsetWithin(el, sc, axis);
+  const far = near + (axis === "x" ? el.offsetWidth : el.offsetHeight);
+  const viewNear = axis === "x" ? sc.scrollLeft : sc.scrollTop;
+  const size = axis === "x" ? sc.clientWidth : sc.clientHeight;
+  const total = axis === "x" ? sc.scrollWidth : sc.scrollHeight;
+  const viewFar = viewNear + size;
+
+  if (near - REVEAL_MARGIN <= 0) return 0;
+  if (far + REVEAL_MARGIN >= total) return total;
+  if (near - REVEAL_MARGIN < viewNear) return near - REVEAL_MARGIN;
+  if (far + REVEAL_MARGIN > viewFar) return far + REVEAL_MARGIN - size;
+  return null;
+}
+
+/**
+ * Bring the focused element into view, on whichever axis its container scrolls.
+ *
+ * Both axes, because a theme is free to lay the grid out sideways -- flipping the scroller
+ * to horizontal is one of the easiest things a theme can do, and without this the highlight
+ * would walk straight off the edge of the screen.
+ */
 function revealFocus(el) {
-  const sc = scrollParentOf(el);
-  if (!sc) return;
-  watchScrolled(sc);
-  const top = offsetWithin(el, sc);
-  const bottom = top + el.offsetHeight;
-  const viewTop = sc.scrollTop;
-  const viewBottom = viewTop + sc.clientHeight;
-
-  let next = null;
-  // Snap fully to the ends, so the first row keeps its focus-glow padding and the
-  // last one is not left hanging a few pixels short.
-  if (top - REVEAL_MARGIN <= 0) next = 0;
-  else if (bottom + REVEAL_MARGIN >= sc.scrollHeight) next = sc.scrollHeight;
-  else if (top - REVEAL_MARGIN < viewTop) next = top - REVEAL_MARGIN;
-  else if (bottom + REVEAL_MARGIN > viewBottom) next = bottom + REVEAL_MARGIN - sc.clientHeight;
-  if (next === null) return;
-
-  const max = Math.max(0, sc.scrollHeight - sc.clientHeight);
-  sc.scrollTo({ top: Math.max(0, Math.min(next, max)), behavior: "smooth" });
+  for (const axis of ["y", "x"]) {
+    const sc = scrollParentOf(el, axis);
+    if (!sc) continue;
+    if (axis === "y") watchScrolled(sc);
+    const next = revealOffset(sc, el, axis);
+    if (next === null) continue;
+    const max = Math.max(0, (axis === "x" ? sc.scrollWidth - sc.clientWidth : sc.scrollHeight - sc.clientHeight));
+    const to = Math.max(0, Math.min(next, max));
+    sc.scrollTo(axis === "x" ? { left: to, behavior: "smooth" } : { top: to, behavior: "smooth" });
+  }
 }
 
 /** Move the highlight one step. Returns false when there is nowhere to go. */
@@ -315,7 +333,23 @@ function paintNav() {
     g.classList.toggle("zone-dim", !!cur && !g.contains(cur)));
 
   updateContinueScroll(true);
-  setBackdrop(focusedGame());
+  const g = focusedGame();
+  setBackdrop(g);
+  updateFocusDetail(g);
+}
+
+/* Keep the opt-in focus-detail region filled. Cheap enough to do on every move -- it is a
+   handful of textContent writes -- and doing it unconditionally means a theme can slot the
+   region in at any point and find it already correct. */
+function updateFocusDetail(g) {
+  const panel = $("fdTitle");
+  if (!panel) return;
+  panel.textContent = g ? g.title : "";
+  $("fdMeta").textContent = g ? (g.installed ? shortMeta(g) : `${g.platform} · NOT INSTALLED`).toUpperCase() : "";
+  $("fdDesc").textContent = g && g.installDir ? g.installDir : "";
+  $("fdPlaytime").textContent = g ? fmtPlaytime(g.playtimeMinutes) : "";
+  $("fdLastPlayed").textContent = g ? fmtLastPlayed(g.lastPlayed) : "";
+  $("fdSize").textContent = g ? fmtSize(g.sizeBytes) : "";
 }
 
 /** The game the highlight is on, straight off the element. */
