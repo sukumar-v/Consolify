@@ -18,6 +18,8 @@ public class ThemeInfo
     public string? Description { get; set; }
     /// <summary>URL of the theme's stylesheet on the consolify.data host, or null if it has none.</summary>
     public string? Css { get; set; }
+    /// <summary>URL of the theme's markup (its &lt;template&gt; blocks), or null if it has none.</summary>
+    public string? Html { get; set; }
     /// <summary>Tokens applied on top of the stylesheet, e.g. {"--accent": "#0FF"}.</summary>
     public Dictionary<string, string>? Tokens { get; set; }
     /// <summary>Set when the manifest could not be read; the theme still loads, badly named.</summary>
@@ -100,10 +102,8 @@ public class ThemeService : IDisposable
                 // Cache-busted on the file's own timestamp: without this the WebView keeps
                 // serving the stylesheet it already has, and saving a theme edit appears to do
                 // nothing until the app is restarted.
-                var css = Path.Combine(dir, "theme.css");
-                if (File.Exists(css))
-                    info.Css = $"https://consolify.data/themes/{Uri.EscapeDataString(id)}/theme.css"
-                             + $"?v={new FileInfo(css).LastWriteTimeUtc.Ticks}";
+                info.Css = FileUrl(dir, id, "theme.css");
+                info.Html = FileUrl(dir, id, "theme.html");
 
                 info.Id = id;
                 list.Add(info);
@@ -115,6 +115,20 @@ public class ThemeService : IDisposable
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// A theme file's URL, stamped with its own mtime.
+    ///
+    /// The stamp is what makes hot reload work: without it the WebView keeps serving the copy
+    /// it already has, and saving an edit appears to do nothing until a restart.
+    /// </summary>
+    private static string? FileUrl(string dir, string id, string file)
+    {
+        var path = Path.Combine(dir, file);
+        if (!File.Exists(path)) return null;
+        return $"https://consolify.data/themes/{Uri.EscapeDataString(id)}/{file}"
+             + $"?v={new FileInfo(path).LastWriteTimeUtc.Ticks}";
     }
 
     /// <summary>

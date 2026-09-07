@@ -107,6 +107,15 @@ function setPointerOnItem(on) {
   repaintFocus();
 }
 
+/** Rebuild every screen. Used when the theme changes what the markup should be. */
+function rerenderAll() {
+  renderTabbars();
+  renderLibrary();
+  if (view === "collections") renderCollections();
+  if (view === "settings") renderSettings();
+  if (view === "detail") renderDetail();
+}
+
 /** Re-apply focus styling for whatever screen/overlay is currently up. */
 function repaintFocus() {
   if (filterOpen) renderFilter();
@@ -356,8 +365,43 @@ function luminance(hex) {
    this one call recolours the whole UI -- no re-render, and nothing else has to know a theme
    exists. Setting a token to "" removes the override and falls back to the stylesheet's own
    value, which is what makes a bad or missing colour a no-op rather than a blank screen. */
+/* The theme's markup is fetched, not linked, because it has to be parsed rather than
+   rendered. Tracked by URL (which carries the file's mtime) so a save reloads it and an
+   unchanged theme does not refetch on every state push. */
+let themeHtmlUrl = null;
+
+async function applyThemeMarkup() {
+  const theme = currentTheme();
+  const url = theme && theme.html ? theme.html : null;
+  if (url === themeHtmlUrl) return false;
+  themeHtmlUrl = url;
+
+  if (!url) { Theme.clear(); applyThemeLayout(); return true; }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    Theme.load(await res.text(), url);
+  } catch (e) {
+    // A theme with broken markup keeps its styling and falls back to the built-in
+    // layout, rather than taking the whole launcher down with it.
+    Theme.clear();
+    toast(`Theme markup failed to load: ${e.message}`);
+  }
+  applyThemeLayout();
+  return true;
+}
+
+/** Hand each screen to the theme's layout, or put it back if the theme has none. */
+function applyThemeLayout() {
+  ["library", "collections", "detail", "settings"].forEach(id =>
+    Theme.applyScreen(document.getElementById("screen-" + id), "screen-" + id));
+}
+
 function applyTheme() {
   applyThemeSheet();
+  // Fire and forget: the markup arrives a tick later and re-renders then, so the
+  // colours are not held up waiting on a file read.
+  applyThemeMarkup().then(changed => { if (changed) rerenderAll(); });
 
   const root = document.documentElement.style;
   // The theme's own tokens go on first so the accent setting still wins: a user who picks a
@@ -896,10 +940,53 @@ function makeAddTile(onHover, onClick) {
   return item;
 }
 
+/**
+ * The binding data a theme's templates see for one game.
+ *
+ * Formatted values sit alongside the raw ones on purpose: a template should be able to write
+ * {{playtime}} without knowing that the app stores minutes, but {{playtimeMinutes}} is there
+ * for a theme that wants to do its own thing with it.
+ */
+function gameView(g) {
+  return {
+    id: g.id, title: g.title, platform: g.platform,
+    installed: g.installed, favorite: g.favorite, hidden: g.hidden,
+    cover: coverUrl(g) || "", banner: bannerUrl(g) || "",
+    playtimeMinutes: g.playtimeMinutes || 0, sizeBytes: g.sizeBytes || 0,
+    playtime: fmtPlaytime(g.playtimeMinutes),
+    lastPlayed: fmtLastPlayed(g.lastPlayed),
+    size: fmtSize(g.sizeBytes),
+    sessions: g.sessions || 0,
+    meta: g.installed ? shortMeta(g) : `${g.platform} · ${fmtSize(g.sizeBytes)} · not installed`,
+    initials: initials(g.title),
+  };
+}
+
+/* A themed tile still gets the focus and identity attributes from here rather than trusting
+   the template to carry them: a theme that forgets data-focusable would produce a grid you
+   cannot navigate, which is a miserable thing to debug from a sofa. */
+function themedTile(name, g, cls) {
+  const el = Theme.render(name, gameView(g));
+  if (!el) return null;
+  el.classList.add(cls);
+  if (!g.installed) el.classList.add("uninstalled");
+  el.dataset.focusable = "";
+  el.dataset.gameId = g.id;
+  return el;
+}
+
 function makeGridTile(g, onHover, onClick, onDetails) {
   if (g.__add) return makeAddTile(onHover, onClick);
 
-  const item = document.createElement("div");
+  let item = themedTile("game-tile", g, "grid-item");
+  if (item) {
+    if (onHover) item.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(); });
+    if (onClick) item.addEventListener("click", onClick);
+    if (onDetails) item.addEventListener("contextmenu", (e) => { e.preventDefault(); onDetails(); });
+    return item;
+  }
+
+  item = document.createElement("div");
   item.className = "grid-item" + (g.installed ? "" : " uninstalled");
   // What makes the tile navigable and activatable; see the contract in nav.js.
   item.dataset.focusable = "";
@@ -1093,18 +1180,21 @@ function renderLibrary() {
   rowEl.appendChild(track);
   $("continueSection").style.display = cont.length ? "" : "none";
   cont.forEach((g, i) => {
-    const item = document.createElement("div");
-    item.className = "cont-item";
+    let item = themedTile("continue-tile", g, "cont-item");
+    if (!item) {
+      item = document.createElement("div");
+      item.className = "cont-item";
 
-    const art = document.createElement("div");
-    art.className = "cont-art";
-    applyArt(g, art, bannerUrl(g));
+      const art = document.createElement("div");
+      art.className = "cont-art";
+      applyArt(g, art, bannerUrl(g));
 
-    const meta = document.createElement("div");
-    meta.className = "cont-meta";
-    meta.innerHTML = `<div class="cont-title">${esc(g.title)}</div><div class="cont-sub">${esc(shortMeta(g))}</div>`;
+      const meta = document.createElement("div");
+      meta.className = "cont-meta";
+      meta.innerHTML = `<div class="cont-title">${esc(g.title)}</div><div class="cont-sub">${esc(shortMeta(g))}</div>`;
 
-    item.appendChild(art); item.appendChild(meta);
+      item.appendChild(art); item.appendChild(meta);
+    }
     // A game can sit in both the carousel and the grid, so the key has to say which one
     // this is -- on the bare game id the highlight would jump between them.
     item.dataset.focusable = "";
@@ -1287,12 +1377,6 @@ function renderCollections() {
 
     listEl.innerHTML = "";
     cols.forEach((c, i) => {
-      const card = document.createElement("div");
-      card.className = "coll-card";
-      card.dataset.focusable = "";
-      card.dataset.focusKey = "coll:" + c.id;
-      card.dataset.collId = c.id;
-
       const thumbs = c.games.slice(0, 6).map(g => {
         const url = coverUrl(g);
         return url
@@ -1300,12 +1384,25 @@ function renderCollections() {
           : `<div class="coll-thumb"><span>${esc(initials(g.title))}</span></div>`;
       }).join("");
 
-      card.innerHTML = `
+      let card = Theme.render("collection-card", {
+        id: c.id, name: c.name, count: c.games.length, custom: !!c.custom, star: !!c.star,
+        cover: c.games.length ? (coverUrl(c.games[0]) || "") : "",
+      });
+      if (card) {
+        card.classList.add("coll-card");
+      } else {
+        card = document.createElement("div");
+        card.className = "coll-card";
+        card.innerHTML = `
         <div class="coll-info">
           <div class="coll-name">${c.star ? '<span class="fav-star">★</span>' : ""}${esc(c.name)}</div>
           <div class="coll-meta">${c.games.length} GAME${c.games.length === 1 ? "" : "S"}${c.custom ? " · CUSTOM" : ""}</div>
         </div>
         <div class="coll-thumbs">${thumbs}</div>`;
+      }
+      card.dataset.focusable = "";
+      card.dataset.focusKey = "coll:" + c.id;
+      card.dataset.collId = c.id;
 
       card.addEventListener("mouseenter", () => { if (hoverEnabled()) { setFocusEl(card); updateCollListFocus(true); } });
       card.addEventListener("click", () => { setFocusEl(card); openCollectionGrid(c.id); });

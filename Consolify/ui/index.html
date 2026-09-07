@@ -24,7 +24,7 @@
 
   <!-- ============ LIBRARY ============ -->
   <div class="screen" id="screen-library" data-focus-scope>
-    <header class="topbar">
+    <header class="topbar" data-region="topbar">
       <div class="topbar-left" data-tabbar="library"></div>
       <div class="topbar-right mono">
         <span id="scanStatus"></span>
@@ -37,7 +37,7 @@
     </header>
 
     <div class="lib-body">
-      <section class="lib-section playing-section" id="playingSection" style="display:none">
+      <section class="lib-section playing-section" id="playingSection" data-region="playing" style="display:none">
         <div class="section-head">
           <div class="section-title">Playing</div>
           <div class="section-label mono">RUNNING NOW</div>
@@ -52,7 +52,7 @@
         </div>
       </section>
 
-      <section class="lib-section" id="continueSection">
+      <section class="lib-section" id="continueSection" data-region="continue">
         <div class="section-head">
           <div class="section-title">Continue</div>
           <div class="section-label mono">RECENTLY PLAYED</div>
@@ -60,7 +60,7 @@
         <div class="continue-row" id="continueRow" data-dim-group></div>
       </section>
 
-      <section class="lib-section lib-grid-section">
+      <section class="lib-section lib-grid-section" data-region="grid">
         <div class="section-head">
           <div class="section-title">All games</div>
           <div class="section-label mono" id="gridLabel">0 TITLES</div>
@@ -69,7 +69,7 @@
       </section>
     </div>
 
-    <footer class="legend">
+    <footer class="legend" data-region="legend">
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
       <div class="legend-item"><div class="btn-badge">X</div><span>Filter</span></div>
       <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
@@ -265,6 +265,7 @@
 </div>
 
 <script src="nav.js"></script>
+<script src="theme.js"></script>
 <script src="app.js"></script>
 <script src="radial.js"></script>
 </body>
