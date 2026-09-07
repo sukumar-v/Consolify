@@ -27,6 +27,13 @@
    A theme that emits those attributes navigates correctly without knowing anything
    about this file.
 
+   Read back off the scope, written by paintNav:
+
+     data-focus-region   the [data-region] the highlight is currently inside, so CSS can
+                         style a whole state off where focus is -- e.g. collapsing a hero
+                         once focus reaches the grid. Themes cannot run script, so this is
+                         the hook a multi-state layout hangs on.
+
    ---------------------------------------------------------------------------
    A trap worth knowing about, because it has bitten this codebase before:
    #stage is a fixed 1920x1080 box scaled to the window with a CSS transform, so

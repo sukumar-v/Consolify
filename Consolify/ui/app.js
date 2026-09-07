@@ -332,6 +332,18 @@ function paintNav() {
   scope.querySelectorAll("[data-dim-group]").forEach(g =>
     g.classList.toggle("zone-dim", !!cur && !g.contains(cur)));
 
+  /* Which region the highlight is in, published on the scope element so a theme can style a
+     whole state off it -- collapsing a hero when focus reaches the grid, say. A theme cannot
+     run script, so without this the only "where am I" signal available to CSS is the focus
+     ring itself, which is far too local to drive a layout.
+
+     Deliberately the remembered focus rather than the visible one: moving the mouse off an
+     item clears the ring, and a layout that flipped back every time the pointer wandered
+     would be unusable. */
+  const region = cur ? cur.closest("[data-region]") : null;
+  if (region) scope.dataset.focusRegion = region.dataset.region;
+  else delete scope.dataset.focusRegion;
+
   updateContinueScroll(true);
   const g = focusedGame();
   setBackdrop(g);
@@ -1067,14 +1079,43 @@ function sortGames(list) {
 /** Games eligible for the library: everything the user hasn't hidden. */
 function visibleGames() { return S.games.filter(g => !g.hidden); }
 
-/* Continue carousel geometry: 300px tile + 28px gap, inside the 1920 stage less 80px gutters. */
+/* Continue carousel geometry.
+   Measured off the rendered tiles rather than assumed: the built-in layout is a 300px tile on a
+   328px pitch, but a theme is free to change both, and a hardcoded pitch slides the track by the
+   wrong amount the moment it does. The constants below are only the fallback for the first paint,
+   before there are two tiles to measure. */
 const CONTINUE_MAX = 12;
 const CONT_STEP = 328;
 const CONT_VIEWPORT = 1760;
 let contScroll = 0;   // index of the leftmost visible tile
 
-/** Slide the carousel the minimum distance needed to keep the focused tile on screen. */
-function contPerView() { return Math.max(1, Math.floor((CONT_VIEWPORT + 28) / CONT_STEP)); }
+/** Distance between two adjacent tiles, gap included. */
+function contStep() {
+  const track = $("continueTrack");
+  const a = track && track.children[0], b = track && track.children[1];
+  if (a && b) {
+    const d = b.offsetLeft - a.offsetLeft;
+    if (d > 0) return d;
+  }
+  return CONT_STEP;
+}
+
+/* How many tiles fit, by walking them rather than dividing: the row's padding is cancelled by a
+   negative margin so its width is not the usable width, and tiles need not all be one size. */
+function contPerView() {
+  const track = $("continueTrack");
+  const first = track && track.children[0];
+  if (!first) return 1;
+  const row = $("continueRow");
+  const width = row && row.clientWidth ? row.clientWidth : CONT_VIEWPORT;
+  let n = 0;
+  for (const el of track.children) {
+    if (el.offsetLeft - first.offsetLeft + el.offsetWidth > width + 1) break;
+    n++;
+  }
+  return Math.max(1, n);
+}
+
 function contMaxScroll() { return Math.max(0, contItems.length - contPerView()); }
 
 /**
@@ -1100,7 +1141,7 @@ function updateContinueScroll(follow) {
     else if (i > contScroll + perView - 1) contScroll = i - perView + 1;
   }
   contScroll = Math.max(0, Math.min(contScroll, contMaxScroll()));
-  track.style.transform = `translateX(${-contScroll * CONT_STEP}px)`;
+  track.style.transform = `translateX(${-contScroll * contStep()}px)`;
 }
 
 /* Right stick horizontal -> carousel. The host turns stick X into real HWHEEL events, so this
