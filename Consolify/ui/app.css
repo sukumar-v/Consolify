@@ -224,6 +224,10 @@ html, body {
   display: flex; align-items: center; gap: 44px;
   padding: 30px 80px 34px; flex: 0 0 auto;
 }
+/* "Hide the button hints" in Appearance. Only the per-screen bars: an overlay's footer is the
+   one hint inside a menu you may never have opened before, and a card with no way out is not a
+   cleaner look. A theme that gives the legend its own slot has to collapse that slot too. */
+body.no-legend .legend { display: none; }
 .legend-item { display: flex; align-items: center; gap: 14px; }
 .legend-item > span { font-size: 22px; color: color-mix(in srgb, var(--ink) 80%, transparent); }
 .btn-badge {

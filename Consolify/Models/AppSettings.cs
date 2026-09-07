@@ -11,6 +11,9 @@ public class AppSettings
     /// <summary>Folder name under %APPDATA%\Consolify\themes, or "" for the built-in look.
     /// A theme that has been deleted falls back to the default rather than failing.</summary>
     public string Theme { get; set; } = "";
+    /// <summary>Hide the button-hint bar along the bottom of every screen. Off by default: it is
+    /// the only thing telling a new player what A and Y do, so it is opt-out, not opt-in.</summary>
+    public bool HideLegend { get; set; }
 
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"

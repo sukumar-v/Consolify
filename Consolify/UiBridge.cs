@@ -354,6 +354,7 @@ public class UiBridge
         // get through; anything else keeps whatever was already there.
         if (SettingsStore.IsHexColor(s.AccentColor)) t.AccentColor = s.AccentColor.ToUpperInvariant();
         t.Theme = s.Theme ?? "";
+        t.HideLegend = s.HideLegend;
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;

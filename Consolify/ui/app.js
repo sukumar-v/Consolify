@@ -445,6 +445,9 @@ function applyThemeLayout() {
 
 function applyTheme() {
   applyThemeSheet();
+  // A class rather than a per-screen render, because every screen has its own legend and a
+  // theme may have moved it somewhere of its own.
+  document.body.classList.toggle("no-legend", !!(S.settings && S.settings.hideLegend));
   // Fire and forget: the markup arrives a tick later and re-renders then, so the
   // colours are not held up waiting on a file read.
   applyThemeMarkup().then(changed => { if (changed) rerenderAll(); });
@@ -1738,6 +1741,8 @@ function allSettingsRows() {
     action: () => send({ cmd: "openThemesFolder" }),
   });
   rows.push(accentRow(s, set));
+  rows.push(toggleRow("Hide the button hints", "Drops the bar along the bottom of every screen. The buttons still do the same things",
+    () => !!s.hideLegend, v => set(() => s.hideLegend = v)));
 
   rows.push({ section: "DISPLAY", cat: "general" });
   rows.push({
@@ -2781,7 +2786,7 @@ function mockHandle(msg) {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
-        boostButton: "RT", boostMultiplier: 2.5,
+        boostButton: "RT", boostMultiplier: 2.5, hideLegend: false,
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
