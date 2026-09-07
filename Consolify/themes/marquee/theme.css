@@ -24,8 +24,12 @@
    pixels and they are allowed to add up:
 
      chrome  96 + view 912 + legend 72                        = 1080
-     hero 588 + dock 228                                      =  816   (96 peek)
+     hero 640 + dock 228 + peek 44                            =  912
      dock 228 + shelf 684                                     =  912
+
+   Only --view-h, --dock-h and --peek are set; the hero is what is left over. That
+   is what lets "Hide the button hints" work as one line: the view grows by the
+   legend's 72px and the hero absorbs all of it.
 
    Six columns across the 1760px between the gutters: (1760 - 5x28) / 6 = 270.
    ============================================================================ */
@@ -35,9 +39,10 @@
   --art-h: 152px;     /* 16:9 of the tile width, which is the shape most banners are */
   --name-h: 26px;
   --gap: 28px;
-  --hero-h: 588px;
   --dock-h: 228px;
-  --view-h: 912px;
+  --peek: 44px;       /* how much of the grid shows under the dock at rest */
+  --view-h: 912px;    /* 1080 less the chrome and the legend */
+  --hero-h: calc(var(--view-h) - var(--dock-h) - var(--peek));
   --gutter: 80px;
   --radius: 16px;
   --ease: cubic-bezier(0.22, 0.86, 0.24, 1);
@@ -46,6 +51,10 @@
   display: flex;
   flex-direction: column;
 }
+
+/* With the hints off the whole column gets the legend's height, and it all goes to the art. */
+body.no-legend .tv { --view-h: 984px; }
+body.no-legend .tv-foot { display: none; }
 
 /* applyScreen drops the theme's layout in as a plain child of .screen, which is a
    flex column -- so it has to be told to take the space. */
