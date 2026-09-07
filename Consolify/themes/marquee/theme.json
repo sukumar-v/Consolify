@@ -1,15 +1,15 @@
 {
   "name": "Marquee",
   "author": "Consolify",
-  "version": "1.0",
-  "description": "Console-style: full-bleed art, focused game up front, sideways grid",
+  "version": "2.0",
+  "description": "tvOS-shaped: full-bleed art, recents on a dock, grid on the way down",
   "tokens": {
     "--bg": "#05070B",
-    "--bg-deep": "#020306",
-    "--surface": "#10141D",
-    "--surface-hi": "#1A2130",
+    "--bg-deep": "#010204",
+    "--surface": "#11151E",
+    "--surface-hi": "#1B2231",
     "--card": "#0B0F16",
-    "--ink": "#EEF2F8",
+    "--ink": "#F2F5FA",
     "--edge": "#FFFFFF"
   }
 }

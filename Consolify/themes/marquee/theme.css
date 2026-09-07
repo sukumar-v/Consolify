@@ -1,105 +1,329 @@
-/* Marquee — console-style layout.
+/* ============================================================================
+   Marquee — a tvOS-shaped library
+   ============================================================================
 
-   Three ideas, none of which need any app change:
-     1. The focused game's art fills the screen, not a 22% wash behind it.
-     2. Its details sit large on the left, from the opt-in focus-detail region.
-     3. The library scrolls sideways instead of down, which the navigation engine
-        follows on its own because it reads geometry rather than a row index. */
+   THE IDEA. The library has two states and slides between them:
 
-/* ---- 1. the backdrop becomes the wallpaper ---- */
-.bd.visible { opacity: 0.62; }
-.bd { filter: blur(18px) saturate(1.15); transform: scale(1.06); }
-/* A scrim so text stays readable over whatever the art happens to be. */
-#backdrop::after {
-  content: ""; position: absolute; inset: 0;
+     resting   the focused game's art fills the screen unblurred, its title sits
+               low on the left, the recents ride a dock near the bottom, and the
+               first row of the grid peeks under it.
+     browsing  the dock is at the top and the grid owns the screen.
+
+   HOW, WITH NO SCRIPT. A theme is markup and CSS; it cannot run anything. The
+   state comes from data-focus-region, which the app writes on the screen element
+   to name the region the highlight is in (see nav.js). Focus reaches the grid,
+   the attribute changes, and everything below keys off it.
+
+   WHY A TRANSFORM AND NOT A SCROLL. The column is a fixed-height stack moved with
+   translateY. Animating heights instead would resize .grid-scroll mid-transition,
+   and the app measures that scroller to keep the highlight in view -- it would be
+   doing its arithmetic against a box that is still moving. A transform changes no
+   layout at all, so the grid's own scrolling is identical in both states.
+
+   GEOMETRY. The stage is a fixed 1920x1080 scaled to the window, so these are real
+   pixels and they are allowed to add up:
+
+     chrome  96 + view 912 + legend 72                        = 1080
+     hero 588 + dock 228                                      =  816   (96 peek)
+     dock 228 + shelf 684                                     =  912
+
+   Six columns across the 1760px between the gutters: (1760 - 5x28) / 6 = 270.
+   ============================================================================ */
+
+.tv {
+  --tile-w: 270px;
+  --art-h: 152px;     /* 16:9 of the tile width, which is the shape most banners are */
+  --name-h: 26px;
+  --gap: 28px;
+  --hero-h: 588px;
+  --dock-h: 228px;
+  --view-h: 912px;
+  --gutter: 80px;
+  --radius: 16px;
+  --ease: cubic-bezier(0.22, 0.86, 0.24, 1);
+
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* applyScreen drops the theme's layout in as a plain child of .screen, which is a
+   flex column -- so it has to be told to take the space. */
+.theme-layout { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---------------------------------------------------------------- backdrop --
+   The whole point of the resting state: the art is the screen, not a wash behind
+   it. Scoped to the library being the active screen so the detail view and the
+   collections screen keep their own treatment. */
+
+body:has(#screen-library.active) .bd {
+  filter: none;
+  transition: opacity 300ms linear, filter 380ms var(--ease), transform 380ms var(--ease);
+}
+body:has(#screen-library.active) .bd.visible { opacity: 1; }
+
+/* Browsing: the art recedes to a wash so 20-odd tiles are not competing with it. */
+body:has(#screen-library.active[data-focus-region="grid"]) .bd {
+  filter: blur(28px) saturate(1.1) brightness(0.5);
+  transform: scale(1.04);
+}
+body:has(#screen-library.active[data-focus-region="grid"]) .bd.visible { opacity: 0.8; }
+
+/* Scrims: one under the chrome, one under the dock, one behind the title. Without
+   these the readability of every label depends on what the art happens to be. */
+body:has(#screen-library.active) #backdrop::after {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  transition: background 380ms var(--ease);
   background:
-    linear-gradient(100deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 88%, transparent) 34%,
-                    color-mix(in srgb, var(--bg) 30%, transparent) 62%, transparent 100%),
-    linear-gradient(0deg, var(--bg) 0%, transparent 42%);
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 68%, transparent) 0, transparent 20%),
+    linear-gradient(0deg, var(--bg) 0, color-mix(in srgb, var(--bg) 78%, transparent) 26%, transparent 58%),
+    linear-gradient(90deg, color-mix(in srgb, var(--bg) 70%, transparent) 0, transparent 44%);
+}
+body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--bg) 90%, transparent),
+    color-mix(in srgb, var(--bg) 82%, transparent));
 }
 
-/* ---- layout skeleton ---- */
-.mq { display: flex; flex-direction: column; height: 100%; }
-.mq-top { flex: 0 0 auto; }
-.mq-body { flex: 1; min-height: 0; display: flex; gap: 56px; padding: 8px 80px 0; }
-.mq-foot { flex: 0 0 auto; }
+/* ------------------------------------------------------------------ chrome --
+   Tabs and the clock, floating over the art. Everything countable is dropped:
+   the screen is meant to be art and one title, not a readout. */
 
-/* ---- 2. the focused game, large ---- */
-.mq-detail { flex: 0 0 500px; display: flex; flex-direction: column; justify-content: center; }
-.focus-detail { display: flex; flex-direction: column; gap: 18px; }
+.tv-chrome { flex: 0 0 96px; }
+.tv .topbar { padding: 0 var(--gutter); height: 96px; }
+.tv .tab { font-size: 23px; }
+.tv .tab.tab-active { font-size: 27px; }
+.tv .topbar-right { gap: 22px; font-size: 17px; }
+.tv #titleCount, .tv .vsep { display: none; }
+
+/* -------------------------------------------------------------- the column --
+   .tv-view is the window; .tv-stack is the thing that slides. */
+
+.tv-view { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+
+.tv-stack {
+  position: absolute; left: 0; right: 0; top: 0;
+  transform: translateY(0);
+  transition: transform 460ms var(--ease);
+  will-change: transform;
+}
+#screen-library[data-focus-region="grid"] .tv-stack {
+  transform: translateY(calc(var(--hero-h) * -1));
+}
+
+/* ------------------------------------------------------------------- hero --
+   Title, one line of meta, and the resume card if something is running. It fades
+   out on the way up rather than sliding away under the dock. */
+
+.tv-hero {
+  height: var(--hero-h);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  gap: 26px; padding: 0 var(--gutter) 34px;
+  transition: opacity 300ms linear;
+}
+#screen-library[data-focus-region="grid"] .tv-hero { opacity: 0; }
+
+.tv-hero-text { max-width: 1100px; }
+.focus-detail { display: flex; flex-direction: column; gap: 14px; }
 .fd-logo {
-  font-size: 62px; font-weight: 700; line-height: 1.02; letter-spacing: -0.025em;
-  text-shadow: 0 4px 30px color-mix(in srgb, var(--bg) 80%, transparent);
-}
-.fd-meta { font-size: 17px; letter-spacing: 0.14em; color: var(--accent); }
-.fd-desc {
-  font-size: 15px; color: color-mix(in srgb, var(--ink) 40%, transparent);
+  font-size: 68px; font-weight: 700; line-height: 1.04; letter-spacing: -0.03em;
+  text-shadow: 0 6px 34px color-mix(in srgb, var(--bg) 85%, transparent);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.fd-stats { display: flex; gap: 26px; font-size: 16px;
-            color: color-mix(in srgb, var(--ink) 62%, transparent); }
-.fd-stats span:empty { display: none; }
+.fd-meta {
+  font-size: 18px; letter-spacing: 0.16em;
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
+}
+/* The install path and the stat strip are the "lot of text" this layout is trying
+   not to have. The region still fills them in; they are simply not shown. */
+.fd-desc, .fd-stats { display: none; }
 
-/* ---- shelves ---- */
-.mq-shelves { flex: 1; min-width: 0; display: flex; flex-direction: column;
-              gap: 30px; justify-content: center; }
-
-/* Recent row: wide banners, no section header. */
-.mq-recent .section-head { display: none; }
-.mq-recent-tile { display: flex; flex-direction: column; gap: 9px; width: 296px; }
-.mq-recent-art  { width: 296px; height: 166px; border-radius: 12px; background-color: var(--surface);
-                  background-size: cover; background-position: center; }
-.mq-recent-name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cont-item.focused .mq-recent-art {
-  box-shadow: 0 0 0 3px var(--accent), 0 18px 44px -14px color-mix(in srgb, var(--accent) 70%, transparent);
+/* Resume card, shrunk to a chip -- the built-in one is a full-width banner. */
+.tv-hero-playing .lib-section { gap: 0; }
+.tv-hero-playing .section-head { display: none; }
+.tv-hero-playing .playing-card {
+  gap: 22px; padding: 14px 26px 14px 14px; border-radius: 20px; width: max-content;
+  background: color-mix(in srgb, var(--bg-deep) 62%, transparent);
+  backdrop-filter: blur(20px) saturate(1.3);
+}
+.tv-hero-playing .playing-art { width: 152px; height: 86px; border-radius: 12px; }
+.tv-hero-playing .playing-name { font-size: 24px; }
+.tv-hero-playing .playing-meta { font-size: 14px; }
+.tv-hero-playing .playing-hint { display: none; }
+.tv-hero-playing .playing-card.focused {
+  box-shadow: 0 0 0 3px var(--accent), 0 20px 50px -16px color-mix(in srgb, var(--bg-deep) 90%, transparent);
 }
 
-/* ---- 3. the grid on its side ----
-   display:contents dissolves the row wrappers so every tile becomes a direct child of
-   the scroller, which can then be laid out as two rows flowing left to right. The app
-   still chunks the games into rows of eight; that chunking simply stops mattering. */
-.mq-all .section-head { margin-bottom: 10px; }
-.mq-all .grid-row { display: contents; }
-.mq-all .grid-scroll {
-  display: grid; grid-auto-flow: column; grid-auto-columns: max-content;
-  grid-template-rows: repeat(2, max-content); gap: 18px;
-  overflow-x: auto; overflow-y: hidden;
-  padding: 14px 12px 20px; margin: 0 -12px;
-}
-/* Row dimming is a vertical-grid idea and display:contents drops it anyway. */
-.mq-all .zone-dim { opacity: 1; }
+/* ------------------------------------------------------------------- dock --
+   The recents, on a frosted tray. Its inner padding is set so the tiles line up
+   with the grid's left gutter, which is what makes the two states feel like one
+   layout rather than two screens. */
 
-.mq-tile { position: relative; width: 152px; height: 152px; }
-.mq-art {
-  width: 100%; height: 100%; border-radius: 12px; overflow: hidden;
-  background-color: var(--surface); background-size: cover; background-position: center;
+.tv-dock {
+  height: var(--dock-h);
+  margin: 0 calc(var(--gutter) - 24px);
+  padding: 22px 24px;
+  border-radius: 34px;
+  background: color-mix(in srgb, var(--edge) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--edge) 9%, transparent);
+  backdrop-filter: blur(26px) saturate(1.5);
+  transition: background 380ms var(--ease), border-color 380ms var(--ease);
+}
+/* Once the art is gone the tray has nothing to sit against, so it has to carry its own edge --
+   otherwise the recents read as just another grid row. */
+#screen-library[data-focus-region="grid"] .tv-dock {
+  background: color-mix(in srgb, var(--edge) 13%, transparent);
+  border-color: color-mix(in srgb, var(--edge) 16%, transparent);
+}
+
+.tv-dock .lib-section { gap: 0; }
+.tv-dock .section-head { display: none; }
+/* The carousel is deliberately overflow:visible so a focused tile's lift and glow are not
+   clipped -- but that also lets the tiles beyond the sixth spill out past the tray and off
+   the stage. Clip the sides only, with enough slack for the lift, and the overflow becomes
+   the sliver of a seventh tile that says there is more to the right. */
+.tv-dock .continue-row { padding: 0; margin: 0; clip-path: inset(-44px -20px); }
+.tv-dock .continue-track { gap: var(--gap); }
+
+/* ------------------------------------------------------------------ shelf --
+   Six across, however the app happened to chunk the rows: display:contents
+   dissolves the row wrappers so every tile is a direct child of the grid. */
+
+/* Held back while it is only a peek, so the sliver under the dock reads as the next thing
+   down rather than as a second row competing with the art. */
+.tv-shelf {
+  height: calc(var(--view-h) - var(--dock-h)); padding: 0 var(--gutter);
+  opacity: 0.5; transition: opacity 340ms var(--ease);
+}
+#screen-library[data-focus-region="grid"] .tv-shelf { opacity: 1; }
+.tv-shelf .lib-section { gap: 0; height: 100%; }
+.tv-shelf .section-head { display: none; }
+
+.tv-shelf .grid-scroll {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 30px var(--gap);
+  align-content: start;
+  /* Room for the focus lift, pulled back out so the columns still measure 1760. */
+  padding: 20px 20px 26px;
+  margin: 0 -20px;
+}
+/* Three rows fit and the fourth peeks, which is how you know to keep going. Fade its cut edge
+   rather than leave a hard line above the legend -- and redeclare the app's top fade, because
+   this rule would otherwise replace it. 24px is short enough to clear the focused tile, which
+   revealFocus keeps 30px clear of the edge. */
+.tv-shelf .grid-scroll {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 24px), transparent);
+}
+.tv-shelf .grid-scroll.scrolled {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 24px), transparent);
+}
+.tv-shelf .grid-row { display: contents; }
+.tv-shelf .empty-note { grid-column: 1 / -1; }
+/* Row dimming belongs to a vertical grid; here it would strobe as focus crosses a
+   row boundary that no longer exists. */
+.tv-shelf .zone-dim .grid-item,
+.tv-dock .zone-dim .cont-art,
+.tv-dock .zone-dim .cont-meta { opacity: 1; }
+
+/* ------------------------------------------------------------------- tiles --
+   One shape for both the dock and the grid, which is the tvOS trick: nothing
+   about a tile says which row it is in, so the dock reads as part of the grid
+   when it lands on top of it.
+
+   The app adds .grid-item / .cont-item to whatever the template returns, and both
+   carry sizes and a focus ring from app.css. Reset them here rather than fight
+   them tile by tile. */
+
+.tv-shelf .grid-item, .tv-dock .cont-item {
+  width: auto; height: auto; flex: 0 0 auto;
+  background: none; border: none; border-radius: 0; overflow: visible;
+  box-shadow: none;
+}
+
+.tv-tile {
+  display: flex; flex-direction: column; gap: 6px;
+  transform-origin: center center;
+  transition: transform 220ms var(--ease);
+}
+.tv-tile.focused { transform: scale(1.12); z-index: 6; }
+
+.tv-art {
+  position: relative;
+  width: var(--tile-w); height: var(--art-h);
+  border-radius: var(--radius); overflow: hidden;
+  background: var(--surface);
   display: flex; align-items: center; justify-content: center;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--bg-deep) 90%, transparent);
+  transition: box-shadow 220ms var(--ease);
 }
-.mq-initials { font-size: 32px; font-weight: 700;
-               color: color-mix(in srgb, var(--ink) 20%, transparent); }
-.mq-pip {
-  position: absolute; left: 8px; bottom: 8px;
-  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.1em;
-  padding: 2px 7px; border-radius: 6px;
-  background: color-mix(in srgb, var(--bg-deep) 78%, transparent);
+.tv-img {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+}
+.tv-initials {
+  font-size: 40px; font-weight: 700; letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.tv-star {
+  position: absolute; top: 8px; right: 10px; font-size: 17px; color: var(--accent);
+  text-shadow: 0 2px 8px color-mix(in srgb, var(--bg-deep) 90%, transparent);
+}
+/* Only on the tile you are on. Stamped on every uninstalled tile at once it turned a wall of
+   art into a wall of captions, which is the thing this layout is trying not to be. */
+.tv-off {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 20px 12px 8px; font-family: "IBM Plex Mono", monospace;
+  font-size: 12px; letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--ink) 70%, transparent);
-  opacity: 0; transition: opacity 160ms linear;
+  background: linear-gradient(0deg, color-mix(in srgb, var(--bg-deep) 88%, transparent), transparent);
+  opacity: 0; transition: opacity 180ms linear;
 }
-.mq-star { position: absolute; top: 7px; right: 9px; font-size: 15px; color: var(--accent); }
-.mq-dim  { position: absolute; inset: 0; border-radius: 12px;
-           background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.tv-tile.focused .tv-off { opacity: 1; }
+.tv-tile.uninstalled .tv-img { filter: grayscale(0.65) brightness(0.6); }
 
-.grid-item.focused .mq-art {
-  transform: scale(1.06);
-  box-shadow: 0 0 0 3px var(--accent), 0 18px 44px -14px color-mix(in srgb, var(--accent) 70%, transparent);
+/* The label is the only text in the grid, and only for the one tile you are on. */
+.tv-name {
+  height: var(--name-h); width: var(--tile-w);
+  font-size: 19px; font-weight: 500; letter-spacing: -0.01em; line-height: var(--name-h);
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity 180ms linear;
 }
-.grid-item.focused .mq-pip { opacity: 1; }
+.tv-tile.focused .tv-name { opacity: 1; }
 
-/* The add-game tile keeps the built-in markup, so give it the same footprint. */
-.mq-all .add-tile { width: 152px; height: 152px; border-radius: 12px; }
+/* Focus: a lift, an accent edge and a shadow deep enough to separate the tile from
+   whatever art is behind it. */
+.tv-tile.focused .tv-art {
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 0 0 5px color-mix(in srgb, var(--bg-deep) 55%, transparent),
+    0 30px 60px -20px color-mix(in srgb, var(--bg-deep) 96%, transparent),
+    0 0 70px -10px color-mix(in srgb, var(--accent) 42%, transparent);
+}
 
-/* ---- chrome ---- */
-.topbar { padding: 38px 80px 0; }
-.legend { padding-bottom: 30px; }
-.set-row, .coll-card { border-radius: 16px; }
+/* The add-game tile keeps the built-in markup, so give it the tile's footprint. */
+.tv-shelf .grid-item.add-tile {
+  width: var(--tile-w); height: var(--art-h);
+  border-radius: var(--radius);
+  border: 2px dashed color-mix(in srgb, var(--ink) 20%, transparent);
+  background: color-mix(in srgb, var(--edge) 4%, transparent);
+}
+.tv-shelf .grid-item.add-tile.focused { transform: scale(1.12); border-style: solid; }
+
+/* ------------------------------------------------------------------ legend --
+   Kept, but quiet: it is the only thing telling a new player what A and Y do. */
+
+.tv-foot { flex: 0 0 72px; }
+.tv .legend { padding: 0 var(--gutter); height: 72px; gap: 36px; opacity: 0.72; }
+.tv .legend-item > span { font-size: 19px; }
+.tv .legend .btn-badge { width: 34px; height: 34px; font-size: 17px; }
+.tv .legend .btn-pill { height: 34px; font-size: 15px; }
+
+/* ---------------------------------------------------------- other screens --
+   Not relaid out -- only softened to match, so moving between them is not a jolt. */
+
+.coll-card, .set-row, .quick-card, .guide-card { border-radius: 20px; }
+.grid-item { border-radius: var(--radius); }

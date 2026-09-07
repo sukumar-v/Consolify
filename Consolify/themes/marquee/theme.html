@@ -1,45 +1,60 @@
-<!-- Marquee — a console-style layout in the spirit of the ReMiX family of Playnite
-     themes: the selected game fills the screen behind everything, its details sit
-     large on the left, and the library scrolls sideways underneath.
+<!-- Marquee — a tvOS-shaped library.
 
-     Written from scratch against Consolify's own template contract; no code or assets
-     from those themes are used here. -->
+     Two states, one layout. At rest the focused game's art fills the screen and the
+     recents sit on a dock near the bottom, with the top of the grid just peeking under
+     it. Move down into the grid and the whole column slides up: the dock parks at the
+     top and the grid takes the screen.
+
+     There is no script here — a theme cannot run any. The state is entirely CSS,
+     hanging off data-focus-region, which the app writes on the screen to say which
+     region the highlight is in. See theme.css. -->
 
 <template data-template="screen-library">
-  <div class="mq">
-    <div class="mq-top" data-slot="topbar"></div>
+  <div class="tv">
+    <div class="tv-chrome" data-slot="topbar"></div>
 
-    <div class="mq-body">
-      <!-- The opt-in region: the app keeps this filled with whatever the highlight is on.
-           The built-in layout never shows it; asking for it here is what turns it on. -->
-      <div class="mq-detail" data-slot="focus-detail"></div>
+    <!-- The window the sliding column is seen through. Everything below the dock in the
+         resting state is clipped by this, which is what makes the peek a peek. -->
+    <div class="tv-view">
+      <div class="tv-stack">
+        <div class="tv-hero">
+          <div class="tv-hero-text" data-slot="focus-detail"></div>
+          <div class="tv-hero-playing" data-slot="playing"></div>
+        </div>
 
-      <div class="mq-shelves">
-        <div class="mq-recent" data-slot="continue"></div>
-        <div class="mq-all" data-slot="grid"></div>
+        <div class="tv-dock" data-slot="continue"></div>
+        <div class="tv-shelf" data-slot="grid"></div>
       </div>
     </div>
 
-    <div class="mq-foot" data-slot="legend"></div>
+    <div class="tv-foot" data-slot="legend"></div>
   </div>
 </template>
 
-<!-- Square box art with no chrome: the details live in the panel, so a tile is just the
-     cover, a platform pip and a favourite star. -->
+<!-- A tile is a landscape sheet of art and nothing else. The title appears underneath
+     only while the tile is focused, so a screenful of them stays quiet.
+
+     {{banner}} already falls back to the cover when a game has no banner, and the
+     initials sit behind the art so a game with neither still reads as something. -->
 <template data-template="game-tile">
-  <div class="mq-tile">
-    <div class="mq-art" style="background-image:url({{cover}})">
-      <span class="mq-initials">{{initials}}</span>
+  <div class="tv-tile">
+    <div class="tv-art">
+      <span class="tv-initials">{{initials}}</span>
+      <div class="tv-img" style="background-image:url({{banner}})"></div>
+      <span class="tv-star" data-if="favorite">★</span>
+      <span class="tv-off" data-unless="installed">NOT INSTALLED</span>
     </div>
-    <div class="mq-pip">{{platform}}</div>
-    <div class="mq-star" data-if="favorite">★</div>
-    <div class="mq-dim" data-unless="installed"></div>
+    <div class="tv-name">{{title}}</div>
   </div>
 </template>
 
 <template data-template="continue-tile">
-  <div class="mq-recent-tile">
-    <div class="mq-recent-art" style="background-image:url({{banner}})"></div>
-    <div class="mq-recent-name">{{title}}</div>
+  <div class="tv-tile">
+    <div class="tv-art">
+      <span class="tv-initials">{{initials}}</span>
+      <div class="tv-img" style="background-image:url({{banner}})"></div>
+      <span class="tv-star" data-if="favorite">★</span>
+    </div>
+    <div class="tv-name">{{title}}</div>
   </div>
 </template>
