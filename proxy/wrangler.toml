@@ -3,8 +3,19 @@ main = "src/worker.js"
 compatibility_date = "2024-11-01"
 
 # The cache, and the reason this service can stay inside IGDB's 4 requests/second across every
-# Consolify user at once. Create it with:
-#   npx wrangler kv namespace create METADATA
+# Consolify user at once.
+#
+# Two different names here, and only one of them is global:
+#
+#   binding   how the worker code refers to the store, as env.METADATA. Scoped to this worker,
+#             so a plain name is fine -- it is already inside Consolify's service.
+#   the title the namespace carries in your Cloudflare account, shared with every other Worker
+#             you ever deploy. That one wants to be specific, and it is the positional argument
+#             to `kv namespace create`, not this binding.
+#
+#   npx wrangler kv namespace create consolify-metadata-cache --binding METADATA \
+#       --config proxy/wrangler.toml
+#
 # then paste the id it prints in below.
 [[kv_namespaces]]
 binding = "METADATA"

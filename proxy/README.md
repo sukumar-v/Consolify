@@ -56,13 +56,18 @@ Sign in to Cloudflare (opens a browser):
 npx wrangler login
 ```
 
-Create the cache. This prints an `id` — paste it into `proxy/wrangler.toml`, replacing
-`PUT_YOUR_KV_NAMESPACE_ID_HERE`. Do this **before** deploying; the placeholder is not a real
-namespace and a deploy carrying it will fail:
+Create the cache. Note the two names: `consolify-metadata-cache` is the namespace's title in your
+Cloudflare account, shared with every Worker you ever deploy, so it should be specific.
+`METADATA` is only how this worker's own code refers to it (`env.METADATA`), and is scoped to
+this service.
 
 ```bash
-npx wrangler kv namespace create METADATA --config proxy/wrangler.toml
+npx wrangler kv namespace create consolify-metadata-cache --binding METADATA --config proxy/wrangler.toml
 ```
+
+This prints an `id` — paste it into `proxy/wrangler.toml`, replacing
+`PUT_YOUR_KV_NAMESPACE_ID_HERE`. Do this **before** deploying; the placeholder is not a real
+namespace and a deploy carrying it will fail.
 
 Set the three credentials. Each prompts for its value, which is encrypted at rest and never
 written to the repo:
@@ -106,8 +111,12 @@ Settings, but the shipped default is what makes it zero-setup.
 a command is run from anywhere but `proxy/`. Add `--config proxy/wrangler.toml`, as every command
 above does.
 
-**`KV namespace 'PUT_YOUR_KV_NAMESPACE_ID_HERE' is not valid`** — the `kv namespace create` step
-has not been done, or its id was not pasted into `proxy/wrangler.toml`.
+**`KV namespace ... is not valid`** — the `kv namespace create` step has not been done, or its id
+was not pasted into `proxy/wrangler.toml`.
+
+**You named the namespace something you regret** — `npx wrangler kv namespace list` shows what you
+have, and `npx wrangler kv namespace rename <old-name> <new-name>` fixes it without touching the
+id, so `wrangler.toml` needs no change. The contents are a cache and can be thrown away regardless.
 
 **The worker deploys but `/v1/facts` returns 502** — the credentials are wrong or missing. Check
 them on their own first with `proxy/verify-credentials.ps1`, then confirm all three secrets are
