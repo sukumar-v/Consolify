@@ -368,6 +368,7 @@ public class UiBridge
         t.IgdbClientId = s.IgdbClientId.Trim();
         t.IgdbClientSecret = s.IgdbClientSecret.Trim();
         t.SteamGridDbKey = s.SteamGridDbKey.Trim();
+        t.MetadataEndpoint = s.MetadataEndpoint.Trim();
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;

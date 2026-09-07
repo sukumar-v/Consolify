@@ -1918,19 +1918,28 @@ function allSettingsRows() {
   rows.push({ section: "ARTWORK & METADATA", cat: "library" });
   rows.push({
     name: "Refresh artwork & metadata",
-    hint: "Steam games need nothing set up. The two keys below are only for Epic, GOG, Xbox and manually added games",
+    hint: "Covers, descriptions and scores are fetched automatically in the background. Nothing below needs setting up",
     type: "action", label: "Refresh",
     action: () => { send({ cmd: "refreshMetadata" }); toast("Fetching in the background"); },
   });
+  // Everything from here down is an escape hatch, not a setup step. Worth keeping visible -- some
+  // people would rather not route anything through a shared service -- but the hints have to say
+  // plainly that leaving them alone is the normal thing to do.
   rows.push(secretRow("SteamGridDB key", s,
-    "Community artwork for games that were never on Steam. Free key from steamgriddb.com",
+    "Optional. Use your own key instead of the shared service. Free from steamgriddb.com",
     () => s.steamGridDbKey, v => set(() => s.steamGridDbKey = v)));
   rows.push(secretRow("IGDB client ID", s,
-    "Descriptions, genres and critic scores. Register an application at dev.twitch.tv to get one",
+    "Optional. Register an application at dev.twitch.tv to use your own instead of the shared service",
     () => s.igdbClientId, v => set(() => s.igdbClientId = v)));
   rows.push(secretRow("IGDB client secret", s,
     "The secret from the same Twitch application. Stored in plain text in settings.json",
     () => s.igdbClientSecret, v => set(() => s.igdbClientSecret = v)));
+  rows.push({
+    name: "Metadata service", hint: "Where the shared lookups go. Leave blank for the built-in one",
+    type: "action", label: s.metadataEndpoint ? "Custom" : "Default",
+    action: () => openInput("METADATA SERVICE URL", s.metadataEndpoint || "",
+      v => set(() => s.metadataEndpoint = v.trim())),
+  });
 
   rows.push({ section: "STARTUP, WAKE & LOCK SCREEN", cat: "general" });
   rows.push(toggleRow("Launch Consolify at login", "Registers a startup entry so the launcher is ready after wake or reboot",
@@ -2909,7 +2918,7 @@ function mockHandle(msg) {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
-        boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "",
+        boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "", metadataEndpoint: "",
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,

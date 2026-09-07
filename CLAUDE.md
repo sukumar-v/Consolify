@@ -91,3 +91,15 @@ Stop the scrolled grid from clipping through the All games header
 - Credentials for IGDB and SteamGridDB live in settings.json in plain text. A rejection
   is latched per pass, so bad keys produce one log line rather than one per game, and
   games skipped because of it are left unstamped so corrected keys retry at once.
+- Metadata is tiered so that almost nothing reaches a keyed source. Steam entries go by
+  app id; non-Steam entries are first resolved against Steam's keyless
+  `storesearch` endpoint (most games sold on Epic/GOG/Xbox are also on Steam); only
+  what is genuinely not on Steam reaches the proxy in `proxy/`, which holds the IGDB
+  and SteamGridDB credentials. A user's own keys, if set, take priority over the proxy.
+- Newer Steam apps have stopped publishing to `cdn/steam/apps/<id>/<name>`. Forza
+  Horizon 6 serves only `library_hero.jpg` there and 404s for the capsule and header.
+  `appdetails` always names a working `header_image` under `store_item_assets`, so
+  facts are fetched *before* art and that URL is the tile's last resort.
+- The proxy's title matching is a courtesy; the launcher re-checks every response
+  against `TitleMatch` itself. A proxy that is wrong, stale or replaced still cannot put
+  another game's art on a tile.

@@ -1,0 +1,19 @@
+name = "consolify-metadata"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+# The cache, and the reason this service can stay inside IGDB's 4 requests/second across every
+# Consolify user at once. Create it with:
+#   npx wrangler kv namespace create METADATA
+# then paste the id it prints in below.
+[[kv_namespaces]]
+binding = "METADATA"
+id = "PUT_YOUR_KV_NAMESPACE_ID_HERE"
+
+# Credentials are NOT set here -- this file is committed. They are set once, encrypted, with:
+#   npx wrangler secret put IGDB_CLIENT_ID
+#   npx wrangler secret put IGDB_CLIENT_SECRET
+#   npx wrangler secret put SGDB_KEY
+
+[observability]
+enabled = true

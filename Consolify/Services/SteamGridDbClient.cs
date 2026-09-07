@@ -20,7 +20,7 @@ public class SteamGridArt
 /// Needs a free API key from a SteamGridDB account. With no key configured this class is never
 /// constructed.
 /// </summary>
-public class SteamGridDbClient
+public class SteamGridDbClient : IArtProvider
 {
     private const string Root = "https://www.steamgriddb.com/api/v2";
     private const int GapMs = 250;
@@ -41,6 +41,8 @@ public class SteamGridDbClient
     /// game per shape. A new pass builds a new client, so a corrected key is tried again.
     /// </summary>
     public bool KeyRejected { get; private set; }
+
+    public bool Unavailable => KeyRejected;
 
     public static bool IsConfigured(string? key) => !string.IsNullOrWhiteSpace(key);
 

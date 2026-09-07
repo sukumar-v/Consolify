@@ -16,16 +16,22 @@ public class AppSettings
     public bool HideLegend { get; set; }
 
     // Metadata providers
-    // Steam needs nothing. These two are for everything else -- Epic, GOG, Xbox, manually added --
-    // which can only be looked up by title. Both are free but personal, so they are the user's to
-    // create; empty means that provider is simply off. Stored in plain text in settings.json,
-    // which is the same thing Playnite does, but worth knowing before pasting a secret in.
+    // Nothing here needs setting. Steam games are keyed by app id, non-Steam games are looked up
+    // against Steam by title, and anything left over goes through the shared metadata service --
+    // none of which asks the user for anything.
+    //
+    // The three below are an override for people who would rather use their own credentials than
+    // someone else's server. When set they take priority over the service. Stored in plain text in
+    // settings.json, which is what Playnite does too, but worth knowing before pasting a secret in.
     /// <summary>Twitch application client id, for IGDB. Free, non-commercial use only.</summary>
     public string IgdbClientId { get; set; } = "";
     /// <summary>Twitch application client secret, for IGDB.</summary>
     public string IgdbClientSecret { get; set; } = "";
     /// <summary>SteamGridDB API key. Art only, and the best source of it for non-Steam games.</summary>
     public string SteamGridDbKey { get; set; } = "";
+    /// <summary>Overrides the shipped metadata service endpoint. Empty means use the built-in one;
+    /// this exists for self-hosting and for testing, not as something anyone need ever set.</summary>
+    public string MetadataEndpoint { get; set; } = "";
 
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"

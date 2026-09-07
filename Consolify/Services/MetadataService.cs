@@ -37,6 +37,8 @@ public class MetadataService
 
     private static readonly HttpClient Http = CreateClient();
 
+    private DateTime _lastStoreCall = DateTime.MinValue;
+
     private static HttpClient CreateClient()
     {
         var c = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All })
@@ -75,43 +77,59 @@ public class MetadataService
     public async Task<int> EnrichAsync(IReadOnlyList<Game> games, AppSettings settings,
         CancellationToken ct = default)
     {
-        var igdb = IgdbClient.IsConfigured(settings.IgdbClientId, settings.IgdbClientSecret)
+        // The user's own credentials win over the shared service. Somebody who has gone to the
+        // trouble of registering a Twitch application should not be silently routed through
+        // somebody else's server, and it gives them a way out if the service is ever down.
+        IFactsProvider? facts = IgdbClient.IsConfigured(settings.IgdbClientId, settings.IgdbClientSecret)
             ? new IgdbClient(Http, settings.IgdbClientId, settings.IgdbClientSecret)
             : null;
-        var grid = SteamGridDbClient.IsConfigured(settings.SteamGridDbKey)
+        IArtProvider? art = SteamGridDbClient.IsConfigured(settings.SteamGridDbKey)
             ? new SteamGridDbClient(Http, settings.SteamGridDbKey)
             : null;
 
-        var due = games.Where(g => NeedsFetch(g, igdb is not null || grid is not null)).ToList();
+        var endpoint = string.IsNullOrWhiteSpace(settings.MetadataEndpoint)
+            ? MetadataProxyClient.DefaultEndpoint
+            : settings.MetadataEndpoint;
+        if ((facts is null || art is null) && MetadataProxyClient.IsConfigured(endpoint))
+        {
+            var proxy = new MetadataProxyClient(Http, endpoint);
+            facts ??= proxy;
+            art ??= proxy;
+        }
+
+        var search = new SteamSearchClient(Http);
+        var due = games.Where(g => NeedsFetch(g)).ToList();
         if (due.Count == 0) return 0;
 
         Log.Info($"Metadata: {due.Count} game(s) to fetch" +
-                 (igdb is not null ? ", IGDB on" : "") + (grid is not null ? ", SteamGridDB on" : ""));
+                 $", facts={Describe(facts)}, art={Describe(art)}");
         var changed = 0;
-        var pacedCall = false;
 
         foreach (var g in due)
         {
             if (ct.IsCancellationRequested) break;
             try
             {
-                var steam = SteamAppId(g) is not null;
+                var appId = SteamAppId(g);
 
-                // Space out the store calls, and only between them -- the first game should not
-                // sit waiting, and the keyed providers pace themselves.
-                if (steam && pacedCall) await Task.Delay(StoreGapMs, ct);
-                if (steam) pacedCall = true;
+                // Tier two: a non-Steam game that Steam nonetheless sells. Costs nothing, needs no
+                // key, and gives the same full-resolution art as a Steam copy -- so most Epic and
+                // GOG entries never reach the shared service at all.
+                if (appId is null)
+                {
+                    await PaceStoreAsync(ct);
+                    appId = await search.FindAppIdAsync(g.Title, ct);
+                }
 
-                var touched = steam
-                    ? await EnrichSteamAsync(g, ct)
-                    : await EnrichElsewhereAsync(g, igdb, grid, ct);
+                var touched = appId is not null
+                    ? await EnrichSteamAsync(g, appId, ct)
+                    : await EnrichElsewhereAsync(g, facts, art, ct);
 
                 // Stamped even when nothing was found, so a game that genuinely has no metadata is
-                // not looked up again on every launch -- but NOT when every provider that could
-                // have answered was refusing our credentials. Otherwise a typo'd key would mark
-                // the whole library "tried" and fixing the key would appear to do nothing for a
-                // fortnight.
-                if (steam || !AllProvidersRejected(igdb, grid)) g.MetadataFetched = DateTime.UtcNow;
+                // not looked up again on every launch -- but NOT when every source that could have
+                // answered was unavailable. Otherwise a typo'd key or an outage would mark the
+                // library "tried" and fixing it would appear to do nothing for a fortnight.
+                if (appId is not null || !AllUnavailable(facts, art)) g.MetadataFetched = DateTime.UtcNow;
                 if (touched) changed++;
             }
             catch (OperationCanceledException) { break; }
@@ -127,24 +145,43 @@ public class MetadataService
         return changed;
     }
 
-    /// <summary>
-    /// True when every configured provider has had its credentials refused, so there is nothing
-    /// left that could answer for a non-Steam game this pass.
-    /// </summary>
-    private static bool AllProvidersRejected(IgdbClient? igdb, SteamGridDbClient? grid)
+    private static string Describe(object? provider) => provider switch
     {
-        if (igdb is null && grid is null) return false;
-        return (igdb is null || igdb.CredentialsRejected) && (grid is null || grid.KeyRejected);
+        null => "none",
+        MetadataProxyClient => "proxy",
+        IgdbClient => "your IGDB key",
+        SteamGridDbClient => "your SteamGridDB key",
+        _ => "on",
+    };
+
+    /// <summary>
+    /// True when every source that could answer for a non-Steam game has given up for this pass --
+    /// bad credentials, an outage, a rate limit -- or when there was never one configured.
+    /// </summary>
+    private static bool AllUnavailable(IFactsProvider? facts, IArtProvider? art)
+    {
+        if (facts is null && art is null) return true;
+        return (facts is null || facts.Unavailable) && (art is null || art.Unavailable);
     }
 
-    private static bool NeedsFetch(Game g, bool haveKeyedProviders)
+    /// <summary>
+    /// Steam's store endpoints are rate limited at roughly 200 requests per 5 minutes per IP, and
+    /// both the search and appdetails count. Spacing every store call rather than every game keeps
+    /// a library that leans on the search tier inside the same budget.
+    /// </summary>
+    private async Task PaceStoreAsync(CancellationToken ct)
     {
-        // Without credentials nothing can answer for a non-Steam game, so it is not "due" -- and
-        // the moment keys are added its null timestamp makes it due immediately.
-        if (SteamAppId(g) is null && !haveKeyedProviders) return false;
+        var wait = StoreGapMs - (int)(DateTime.UtcNow - _lastStoreCall).TotalMilliseconds;
+        if (wait > 0) await Task.Delay(wait, ct);
+        _lastStoreCall = DateTime.UtcNow;
+    }
 
+    private static bool NeedsFetch(Game g)
+    {
         // Art can go missing on its own -- a cleared covers folder, a half-finished first run --
-        // so a game inside the freshness window is still due if its files are not there.
+        // so a game inside the freshness window is still due if its files are not there. Nothing
+        // is excluded up front any more: with the keyless Steam tiers there is always something
+        // that might answer, and the sources themselves decide whether they can.
         if (g.MetadataFetched is { } at && DateTime.UtcNow - at < Freshness && HasFetchedArt(g)) return false;
         return true;
     }
@@ -160,16 +197,27 @@ public class MetadataService
 
     // ---------- Steam ----------
 
-    private async Task<bool> EnrichSteamAsync(Game g, CancellationToken ct)
+    /// <summary>
+    /// The Steam path, used both for a "steam:" entry and for a non-Steam game the search resolved
+    /// to an app id. Identical either way: once there is an app id there is no guessing left.
+    ///
+    /// Facts come first because they carry a fallback the art step needs. Newer apps have stopped
+    /// publishing art at the legacy cdn/steam/apps/&lt;id&gt;/&lt;name&gt; paths -- Forza Horizon 6 has only
+    /// library_hero.jpg there, and 404s for the capsule and the header -- but appdetails always
+    /// names a working header_image under store_item_assets, hashed per release.
+    /// </summary>
+    private async Task<bool> EnrichSteamAsync(Game g, string appId, CancellationToken ct)
     {
-        var appId = SteamAppId(g)!;
-        var gotArt = await FetchSteamArtAsync(g, appId, ct);
-        var gotFacts = await FetchSteamFactsAsync(g, appId, ct);
+        await PaceStoreAsync(ct);
+        var (gotFacts, headerImage) = await FetchSteamFactsAsync(g, appId, ct);
         if (gotFacts) g.MetadataSource = "steam";
+
+        var gotArt = await FetchSteamArtAsync(g, appId, headerImage, ct);
         return gotArt || gotFacts;
     }
 
-    private async Task<bool> FetchSteamArtAsync(Game g, string appId, CancellationToken ct)
+    private async Task<bool> FetchSteamArtAsync(Game g, string appId, string? headerImage,
+        CancellationToken ct)
     {
         var any = false;
         foreach (var (remote, slot) in SteamArt)
@@ -186,21 +234,40 @@ public class MetadataService
             if (!await DownloadAsync(url, dest, ct)) continue;
             any |= Assign(g, slot, name);
         }
+
+        // Last resort for the tile, and the only art newer apps publish at all. Checked against
+        // the game rather than a filename because the loop above may have written a tile from a
+        // legacy path already, and that one is the better shape.
+        if (!HasSlot(g, Slot.Tile) && !string.IsNullOrWhiteSpace(headerImage))
+            any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, ct);
+
         return any;
     }
 
-    private async Task<bool> FetchSteamFactsAsync(Game g, string appId, CancellationToken ct)
+    private static bool HasSlot(Game g, Slot slot) => slot switch
+    {
+        Slot.Cover => g.CoverFile is not null,
+        Slot.Tile => g.BannerFile is not null,
+        Slot.Hero => g.HeroFile is not null,
+        Slot.Logo => g.LogoFile is not null,
+        _ => false,
+    };
+
+    /// <summary>Facts, plus the header image URL appdetails names -- the art step needs it as a
+    /// fallback for apps that no longer publish to the legacy CDN paths.</summary>
+    private async Task<(bool Ok, string? HeaderImage)> FetchSteamFactsAsync(Game g, string appId,
+        CancellationToken ct)
     {
         var url = $"https://store.steampowered.com/api/appdetails?appids={appId}&l=english" +
                   "&filters=basic,genres,metacritic,release_date,developers,publishers,controller_support";
 
         using var res = await Http.GetAsync(url, ct);
-        if (!res.IsSuccessStatusCode) return false;
+        if (!res.IsSuccessStatusCode) return (false, null);
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
-        if (!doc.RootElement.TryGetProperty(appId, out var entry)) return false;
-        if (!entry.TryGetProperty("success", out var ok) || !ok.GetBoolean()) return false;
-        if (!entry.TryGetProperty("data", out var d)) return false;
+        if (!doc.RootElement.TryGetProperty(appId, out var entry)) return (false, null);
+        if (!entry.TryGetProperty("success", out var ok) || !ok.GetBoolean()) return (false, null);
+        if (!entry.TryGetProperty("data", out var d)) return (false, null);
 
         string? Str(string key) =>
             d.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
@@ -242,23 +309,24 @@ public class MetadataService
             g.CriticSource = null;
         }
 
-        return true;
+        return (true, Str("header_image"));
     }
 
     // ---------- Everything else ----------
 
     /// <summary>
-    /// Epic, GOG, Xbox and manually added games. IGDB answers for the facts, SteamGridDB for the
-    /// art, and either may be absent -- a user who configured only one gets only that half.
+    /// The last tier: a game that is not on Steam at all. Facts and art come from whichever source
+    /// is configured -- the shared proxy by default, the user's own credentials if they set any --
+    /// and either may be absent, in which case that half is simply missing.
     /// </summary>
-    private async Task<bool> EnrichElsewhereAsync(Game g, IgdbClient? igdb, SteamGridDbClient? grid,
+    private async Task<bool> EnrichElsewhereAsync(Game g, IFactsProvider? facts, IArtProvider? art,
         CancellationToken ct)
     {
         var any = false;
 
-        if (igdb is not null)
+        if (facts is not null && !facts.Unavailable)
         {
-            var hit = await igdb.FindAsync(g.Title, ct);
+            var hit = await facts.FindAsync(g.Title, ct);
             if (hit is not null)
             {
                 g.Description = Clean(hit.Summary);
@@ -273,28 +341,27 @@ public class MetadataService
                 g.MetadataSource = "igdb";
                 any = true;
 
-                // IGDB's art is the fallback: its covers are portrait box art and its "artworks"
-                // are wide key art, neither shaped like a tile. SteamGridDB below beats both when
-                // it has anything, which is why these are fetched first.
-                if (hit.CoverImageId is { } cover)
-                    any |= await StoreRemoteAsync(g, Slot.Cover, IgdbClient.ImageUrl(cover, "cover_big_2x"), ct);
-                if (hit.ArtworkImageId is { } art)
+                // IGDB's art is the fallback of the fallback: its covers are portrait box art and
+                // its artworks are wide key art, neither shaped like a tile. Fetched first so the
+                // art provider below can overwrite any slot it has something better for.
+                if (hit.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, ct);
+                if (hit.ArtworkUrl is { } wide)
                 {
-                    any |= await StoreRemoteAsync(g, Slot.Tile, IgdbClient.ImageUrl(art, "720p"), ct);
-                    any |= await StoreRemoteAsync(g, Slot.Hero, IgdbClient.ImageUrl(art, "1080p"), ct);
+                    any |= await StoreRemoteAsync(g, Slot.Tile, wide, ct);
+                    any |= await StoreRemoteAsync(g, Slot.Hero, wide, ct);
                 }
             }
         }
 
-        if (grid is not null)
+        if (art is not null && !art.Unavailable)
         {
-            var art = await grid.FindArtAsync(g.Title, ct);
-            if (art is not null)
+            var found = await art.FindArtAsync(g.Title, ct);
+            if (found is not null)
             {
-                if (art.Portrait is { } p) any |= await StoreRemoteAsync(g, Slot.Cover, p, ct);
-                if (art.Tile is { } t) any |= await StoreRemoteAsync(g, Slot.Tile, t, ct);
-                if (art.Hero is { } h) any |= await StoreRemoteAsync(g, Slot.Hero, h, ct);
-                if (art.Logo is { } l) any |= await StoreRemoteAsync(g, Slot.Logo, l, ct);
+                if (found.Portrait is { } p) any |= await StoreRemoteAsync(g, Slot.Cover, p, ct);
+                if (found.Tile is { } t) any |= await StoreRemoteAsync(g, Slot.Tile, t, ct);
+                if (found.Hero is { } h) any |= await StoreRemoteAsync(g, Slot.Hero, h, ct);
+                if (found.Logo is { } l) any |= await StoreRemoteAsync(g, Slot.Logo, l, ct);
             }
         }
 
