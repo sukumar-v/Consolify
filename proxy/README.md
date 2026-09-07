@@ -46,36 +46,72 @@ pass/fail and the titles that came back.
 
 You need a Cloudflare account (free), an IGDB client id/secret, and a SteamGridDB key.
 
+Every command below passes `--config proxy/wrangler.toml` and so can be run **from the repository
+root**, in any order, in a fresh terminal. Wrangler otherwise looks for its config in the current
+directory only, and fails with `Required Worker name missing` when it does not find one.
+
+Sign in to Cloudflare (opens a browser):
+
 ```bash
-cd proxy
-npm install -g wrangler
-wrangler login
+npx wrangler login
 ```
 
-Create the cache and paste the id it prints into `wrangler.toml`:
+Create the cache. This prints an `id` — paste it into `proxy/wrangler.toml`, replacing
+`PUT_YOUR_KV_NAMESPACE_ID_HERE`. Do this **before** deploying; the placeholder is not a real
+namespace and a deploy carrying it will fail:
 
 ```bash
-npx wrangler kv namespace create METADATA
+npx wrangler kv namespace create METADATA --config proxy/wrangler.toml
 ```
 
-Set the three credentials. These are encrypted at rest and never appear in the repo:
+Set the three credentials. Each prompts for its value, which is encrypted at rest and never
+written to the repo:
 
 ```bash
-npx wrangler secret put IGDB_CLIENT_ID
-npx wrangler secret put IGDB_CLIENT_SECRET
-npx wrangler secret put SGDB_KEY
+npx wrangler secret put IGDB_CLIENT_ID --config proxy/wrangler.toml
 ```
 
-Deploy, and check it:
+```bash
+npx wrangler secret put IGDB_CLIENT_SECRET --config proxy/wrangler.toml
+```
 
 ```bash
-npx wrangler deploy
+npx wrangler secret put SGDB_KEY --config proxy/wrangler.toml
+```
+
+Check it builds without uploading anything:
+
+```bash
+npx wrangler deploy --dry-run --config proxy/wrangler.toml
+```
+
+Then deploy, and confirm it is up:
+
+```bash
+npx wrangler deploy --config proxy/wrangler.toml
+```
+
+```bash
 curl "https://consolify-metadata.<your-subdomain>.workers.dev/v1/health"
 ```
 
-Then point the launcher at it by setting `DefaultEndpoint` in
+Finally, point the launcher at it by setting `DefaultEndpoint` in
 `Consolify/Services/MetadataProxyClient.cs` to that URL and rebuilding. Users can override it in
 Settings, but the shipped default is what makes it zero-setup.
+
+## When something goes wrong
+
+**`Required Worker name missing`** — wrangler is running somewhere without a config file. It reads
+`wrangler.toml` from the current directory, not from the repository root, so this appears whenever
+a command is run from anywhere but `proxy/`. Add `--config proxy/wrangler.toml`, as every command
+above does.
+
+**`KV namespace 'PUT_YOUR_KV_NAMESPACE_ID_HERE' is not valid`** — the `kv namespace create` step
+has not been done, or its id was not pasted into `proxy/wrangler.toml`.
+
+**The worker deploys but `/v1/facts` returns 502** — the credentials are wrong or missing. Check
+them on their own first with `proxy/verify-credentials.ps1`, then confirm all three secrets are
+set with `npx wrangler secret list --config proxy/wrangler.toml`.
 
 ## Endpoints
 
