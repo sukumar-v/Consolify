@@ -54,3 +54,28 @@ Stop the scrolled grid from clipping through the All games header
 - The launcher window must stay **opaque**. `AllowsTransparency` makes WPF host it
   as a layered window and the WebView2 then receives no mouse or wheel messages at
   all. Overlay menus paint their own dim over a screen capture instead.
+
+## Art and metadata
+
+- Four shapes, and they are not interchangeable. Putting the wrong one in a slot is what
+  made tiles look like they had the wrong game's art:
+  - `CoverFile` portrait (600x900) — portrait grid tiles
+  - `BannerFile` ~16:9 (616x353) — landscape tiles, the continue row, the now-playing card
+  - `HeroFile` ~3:1 (1920x620) — full-screen backdrops and the detail page
+  - `LogoFile` transparent wordmark — unused so far; there for a theme that wants the
+    title as art
+- `bannerUrl` falls back to the cover, never to the hero. `heroUrl` falls back to
+  anything. A 3:1 hero centre-cropped into a 16:9 tile throws away 43% of the width and
+  what is left is background.
+- `MetadataService` fills the rest in after the scan, from Steam only: the CDN
+  (`cdn.cloudflare.steamstatic.com/steam/apps/<appid>/…`) for art and the undocumented
+  `store.steampowered.com/api/appdetails` for the description, developer, genres, release
+  date, controller support and the Metacritic score. No key, no account, and keyed by app
+  id so there is no title matching and so no chance of attaching the wrong game's art.
+  Roughly 200 requests per 5 minutes per IP, hence the 1.5s gap between store calls.
+- Every metadata field is cosmetic and every failure is swallowed. Offline, the launcher
+  keeps whatever the scanner copied out of Steam's local cache (which is half-size: the
+  cached "library_600x900" is really 300x450).
+- Art the user picks by hand is written as `custom_<id>.<ext>`. That prefix is the only
+  thing keeping it — nothing else ever writes that name, so neither a rescan nor an
+  enrich can overwrite the file or point the game away from it.

@@ -267,12 +267,48 @@ body.no-legend .legend { display: none; }
 }
 .detail-titleblock p {
   margin: 0; font-size: 26px; line-height: 1.6;
-  color: color-mix(in srgb, var(--ink) 62%, transparent); text-wrap: pretty; max-width: 760px;
+  color: color-mix(in srgb, var(--ink) 62%, transparent); text-wrap: pretty; max-width: 900px;
+  /* Store blurbs run to a paragraph; three lines is about as much as anyone reads from a sofa,
+     and an unclamped one pushes the stats and the Play button down the screen. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
 .detail-stats { display: flex; gap: 64px; }
+
 .stat { display: flex; flex-direction: column; gap: 8px; }
 .stat-label { font-size: 16px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 40%, transparent); }
 .stat-value { font-size: 34px; font-weight: 500; }
+
+/* The line under the title on the detail page. Sized to sit between the 88px title and the 26px
+   description without competing with either. */
+.detail-facts {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+  font-size: 24px; color: color-mix(in srgb, var(--ink) 72%, transparent);
+}
+.detail-facts:empty, .detail-titleblock p:empty { display: none; }
+.fact-dot { color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.fact-score {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 54px; height: 54px; padding: 0 12px; border-radius: 12px;
+  font-size: 30px; font-weight: 650; letter-spacing: -0.02em;
+  color: var(--bg-deep); background: var(--score);
+  /* Sits first in the row, so it needs a little air before the text facts start. */
+  margin-right: 6px;
+}
+/* Metacritic's bands, in Metacritic's colours -- the number is only shorthand if the colour
+   matches the one people already know. */
+.fact-score[data-band="good"]  { --score: #66cc33; }
+.fact-score[data-band="mixed"] { --score: #ffcc33; }
+.fact-score[data-band="poor"]  { --score: #ff6666; }
+.fact-chip {
+  display: inline-flex; align-items: center; height: 44px; padding: 0 18px;
+  border-radius: 22px; font-size: 20px; font-weight: 500;
+  color: color-mix(in srgb, var(--ink) 78%, transparent);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.fact-warn {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 .detail-actions { display: flex; align-items: center; gap: 24px; }
 .pill-btn {

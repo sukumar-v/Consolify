@@ -735,14 +735,21 @@ let gridRows = [];
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-function coverUrl(g) {
-  if (g.coverFile) return HOST ? `https://consolify.data/covers/${encodeURIComponent(g.coverFile)}` : g.coverFile;
-  return null;
+function artUrl(name) {
+  if (!name) return null;
+  return HOST ? `https://consolify.data/covers/${encodeURIComponent(name)}` : name;
 }
-function bannerUrl(g) {
-  if (g.bannerFile) return HOST ? `https://consolify.data/covers/${encodeURIComponent(g.bannerFile)}` : g.bannerFile;
-  return coverUrl(g);
-}
+
+function coverUrl(g) { return artUrl(g.coverFile); }
+
+/* The ~16:9 tile art. Falls back to the portrait cover so a landscape tile is never empty, but
+   never to the hero: a 3:1 backdrop centre-cropped into a tile shows background, not the game. */
+function bannerUrl(g) { return artUrl(g.bannerFile) || coverUrl(g); }
+
+/* The wide backdrop. Falls the other way -- any art beats a flat colour behind the whole screen. */
+function heroUrl(g) { return artUrl(g.heroFile) || artUrl(g.bannerFile) || coverUrl(g); }
+
+function logoUrl(g) { return artUrl(g.logoFile); }
 
 function hashHue(str) {
   let h = 0;
@@ -933,7 +940,7 @@ function setBackdrop(game) {
   const backId = bdFront === "bdA" ? "bdB" : "bdA";
   const back = $(backId);
 
-  const url = game && (bannerUrl(game) || coverUrl(game));
+  const url = game && heroUrl(game);
   if (url) back.style.backgroundImage = `url('${url}')`;
   else if (game) {
     const h = hashHue(game.title);
@@ -1001,6 +1008,7 @@ function gameView(g) {
     id: g.id, title: g.title, platform: g.platform,
     installed: g.installed, favorite: g.favorite, hidden: g.hidden,
     cover: coverUrl(g) || "", banner: bannerUrl(g) || "",
+    hero: heroUrl(g) || "", logo: logoUrl(g) || "",
     playtimeMinutes: g.playtimeMinutes || 0, sizeBytes: g.sizeBytes || 0,
     playtime: fmtPlaytime(g.playtimeMinutes),
     lastPlayed: fmtLastPlayed(g.lastPlayed),
@@ -1008,6 +1016,15 @@ function gameView(g) {
     sessions: g.sessions || 0,
     meta: g.installed ? shortMeta(g) : `${g.platform} · ${fmtSize(g.sizeBytes)} · not installed`,
     initials: initials(g.title),
+    // Fetched metadata. Empty string rather than undefined, so a template that prints one of
+    // these for a game we know nothing about leaves a gap instead of the word "undefined".
+    description: g.description || "",
+    developer: g.developer || "",
+    publisher: g.publisher || "",
+    genres: (g.genres || []).join(", "),
+    releaseDate: g.releaseDate || "",
+    year: releaseYear(g.releaseDate) || "",
+    score: typeof g.criticScore === "number" ? String(g.criticScore) : "",
   };
 }
 
@@ -1640,6 +1657,65 @@ function openDetail(id, from) {
   switchView("detail");
 }
 
+/* Metacritic's own bands, because the colour is only a shorthand if it matches the one people
+   already know from the site: green 75+, yellow 50-74, red below. */
+function scoreBand(n) { return n >= 75 ? "good" : n >= 50 ? "mixed" : "poor"; }
+
+function releaseYear(date) {
+  const m = /\b(\d{4})\b/.exec(date || "");
+  return m ? m[1] : null;
+}
+
+/*
+ * The line under the title. It used to say how the game launches and where its files are, which
+ * is troubleshooting detail on the one screen meant to sell you on playing something -- that has
+ * moved to Manage, where you go when you actually want to change it.
+ *
+ * Everything here is optional. A game with no fetched metadata falls back to its platform, so the
+ * row is never empty and never a row of placeholder dashes.
+ */
+function renderDetailFacts(g) {
+  const row = $("detailFacts");
+  row.innerHTML = "";
+
+  const add = (cls, text) => {
+    const el = document.createElement("span");
+    el.className = cls;
+    el.textContent = text;
+    row.appendChild(el);
+  };
+
+  if (typeof g.criticScore === "number") {
+    const el = document.createElement("span");
+    el.className = "fact-score";
+    el.dataset.band = scoreBand(g.criticScore);
+    el.textContent = g.criticScore;
+    el.title = `${g.criticSource || "Critic"} score`;
+    row.appendChild(el);
+  }
+
+  const bits = [];
+  const year = releaseYear(g.releaseDate);
+  if (year) bits.push(year);
+  if (g.developer) bits.push(g.developer);
+  // Three is what fits before the row starts wrapping, and the first three are the useful ones --
+  // Steam lists "Indie" and "Casual" after whatever the game actually is.
+  if (g.genres && g.genres.length) bits.push(g.genres.slice(0, 3).join(", "));
+  if (!bits.length) bits.push(g.platform);
+
+  bits.forEach((b, i) => {
+    if (i) add("fact-dot", "·");
+    add("fact", b);
+  });
+
+  // Worth its own chip rather than a word in the list: on a couch it is the difference between
+  // starting the game and going to find a keyboard.
+  if (g.controllerSupport === "full") add("fact-chip", "Full controller support");
+  else if (g.controllerSupport === "partial") add("fact-chip", "Partial controller support");
+
+  if (!g.installed) add("fact-chip fact-warn", "Not installed");
+}
+
 function renderDetail() {
   const g = gameById(detailGameId);
   if (!g) { switchView(detailReturn); return; }
@@ -1649,15 +1725,8 @@ function renderDetail() {
   $("detailFav").style.display = g.favorite ? "" : "none";
   $("favLegend").textContent = g.favorite ? "Unfavorite" : "Favorite";
 
-  const bits = [];
-  if (g.preferDirectLaunch && g.exePath) bits.push("Launches its executable directly (store launcher bypassed).");
-  else if (g.platform === "Steam") bits.push("Launches through the Steam client.");
-  else if (g.platform === "Epic") bits.push("Launches through the Epic Games launcher.");
-  else bits.push("Launches directly from its executable.");
-  if (g.args) bits.push(`Arguments: ${g.args}`);
-  if (g.installDir) bits.push(g.installDir);
-  if (!g.installed) bits.push("Currently not installed on this PC.");
-  $("detailDesc").textContent = bits.join("  ·  ");
+  renderDetailFacts(g);
+  $("detailDesc").textContent = g.description || "";
 
   $("statPlaytime").textContent = fmtPlaytime(g.playtimeMinutes);
   $("statLastPlayed").textContent = fmtLastPlayed(g.lastPlayed);
@@ -1670,7 +1739,7 @@ function renderDetail() {
   art.className = "detail-art";
   art.innerHTML = "";
   art.style.background = "";
-  applyArt(g, art, bannerUrl(g));
+  applyArt(g, art, heroUrl(g));
 
   document.querySelectorAll("#detailActions .pill-btn").forEach(el => {
     el.onmouseenter = () => { if (hoverEnabled()) { setFocusEl(el); paintNav(); } };
@@ -2385,6 +2454,15 @@ function collectInput(btn) {
 
 /* ============================== manage overlay ============================== */
 
+/* How this game actually starts, in one line. */
+function launchRoute(g) {
+  if (g.preferDirectLaunch && g.exePath) return g.exePath;
+  if (g.platform === "Steam") return "Through the Steam client";
+  if (g.platform === "Epic") return "Through the Epic Games launcher";
+  if (g.platform === "Xbox") return "Through the Xbox app";
+  return g.exePath || "Directly from its executable";
+}
+
 function manageItems() {
   const g = gameById(detailGameId);
   if (!g) return [];
@@ -2398,8 +2476,9 @@ function manageItems() {
   });
   items.push({
     label: "Change executable", icon: "file",
-    // Only subtitled once an exe has been picked -- the row already says what it does.
-    sub: g.preferDirectLaunch && g.exePath ? g.exePath.split("\\").pop() : "",
+    // The subtitle carries the launch route, which used to sit under the title on the detail
+    // page. It is troubleshooting detail: it belongs on the screen you open to change it.
+    sub: launchRoute(g),
     action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
   });
   if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
@@ -2740,19 +2819,30 @@ function mockHandle(msg) {
   const pushState = () => {
     const seedW = (t) => `https://picsum.photos/seed/${t.toLowerCase().replace(/[^a-z]/g, "")}w/600/340`;
     const seedP = (t) => `https://picsum.photos/seed/${t.toLowerCase().replace(/[^a-z]/g, "")}/400/480`;
+    const seedH = (t) => `https://picsum.photos/seed/${t.toLowerCase().replace(/[^a-z]/g, "")}h/1200/390`;
     const g = (title, platform, opts = {}) => ({
       id: platform.toLowerCase() + ":" + title.toLowerCase().replace(/[^a-z]/g, ""),
       title, platform, installed: true, manual: platform === "Manual",
       playtimeMinutes: 0, sessions: 0, lastPlayed: null, sizeBytes: 0,
       favorite: false, hidden: false, preferDirectLaunch: false, args: null,
-      coverFile: seedP(title), bannerFile: seedW(title), ...opts,
+      coverFile: seedP(title), bannerFile: seedW(title), heroFile: seedH(title),
+      // Stand-in metadata, so the preview exercises the detail page's facts row. Individual
+      // entries below override it -- including back to nothing, which is what a game we could
+      // not fetch looks like and the case most likely to be got wrong.
+      description: "A placeholder blurb standing in for the store's own two-sentence pitch, long "
+        + "enough to show where a real one wraps and where the clamp takes over.",
+      developer: "Northmoor Studio", publisher: "Northmoor",
+      genres: ["Action", "Adventure", "Indie"], releaseDate: "Mar 12, 2021",
+      criticScore: 82, criticSource: "Metacritic", controllerSupport: "full", ...opts,
     });
     const now = Date.now();
     const games = [
       g("Hollowmark: Second Ascent", "Steam", { playtimeMinutes: 4934, sessions: 41, favorite: true, lastPlayed: new Date(now - 86400000).toISOString(), sizeBytes: 64.2 * 1024 ** 3, installDir: "C:\\Games\\Steam\\steamapps\\common\\Hollowmark" }),
-      g("Ridgeline 84", "Epic", { playtimeMinutes: 660, sessions: 9, lastPlayed: new Date(now - 2 * 86400000).toISOString(), sizeBytes: 31 * 1024 ** 3 }),
-      g("Salt & Tide", "GOG", { playtimeMinutes: 2820, sessions: 30, favorite: true, lastPlayed: new Date(now - 3 * 86400000).toISOString(), sizeBytes: 12 * 1024 ** 3 }),
-      g("Foundry Nine", "Manual", { playtimeMinutes: 360, sessions: 5, lastPlayed: new Date(now - 4 * 86400000).toISOString(), sizeBytes: 8 * 1024 ** 3 }),
+      // No fetched metadata at all -- the facts row has to fall back to the platform and the
+      // description has to collapse rather than leave a gap under the title.
+      g("Ridgeline 84", "Epic", { playtimeMinutes: 660, sessions: 9, lastPlayed: new Date(now - 2 * 86400000).toISOString(), sizeBytes: 31 * 1024 ** 3, description: null, developer: null, publisher: null, genres: [], releaseDate: null, criticScore: null, criticSource: null, controllerSupport: null }),
+      g("Salt & Tide", "GOG", { playtimeMinutes: 2820, sessions: 30, favorite: true, lastPlayed: new Date(now - 3 * 86400000).toISOString(), sizeBytes: 12 * 1024 ** 3, criticScore: 61, controllerSupport: "partial" }),
+      g("Foundry Nine", "Manual", { playtimeMinutes: 360, sessions: 5, lastPlayed: new Date(now - 4 * 86400000).toISOString(), sizeBytes: 8 * 1024 ** 3, criticScore: 38, controllerSupport: null }),
       g("Cassette Run", "Steam", { playtimeMinutes: 180, sessions: 3, lastPlayed: new Date(now - 5 * 86400000).toISOString(), sizeBytes: 4 * 1024 ** 3 }),
       // enough recently-played entries to exercise the Continue carousel
       g("Nightpost", "Steam", { playtimeMinutes: 95, sessions: 2, lastPlayed: new Date(now - 6 * 86400000).toISOString() }),

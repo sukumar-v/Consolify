@@ -194,7 +194,7 @@ public class LibraryScanner
                 if (long.TryParse(Get("LastPlayed"), out var lp) && lp > 0)
                     lastPlayed = DateTimeOffset.FromUnixTimeSeconds(lp).LocalDateTime;
 
-                var (cover, banner) = ImportSteamArt(steamPath, appId);
+                var art = ImportSteamArt(steamPath, appId);
                 games.Add(new Game
                 {
                     Id = $"steam:{appId}",
@@ -205,8 +205,10 @@ public class LibraryScanner
                     SizeBytes = size,
                     LastPlayed = lastPlayed,
                     Installed = Directory.Exists(installDir),
-                    CoverFile = cover,
-                    BannerFile = banner
+                    CoverFile = art.Cover,
+                    BannerFile = art.Banner,
+                    HeroFile = art.Hero,
+                    LogoFile = art.Logo
                 });
             }
         }
@@ -214,12 +216,26 @@ public class LibraryScanner
     }
 
     /// <summary>
-    /// Copy Steam's cached art into our covers dir: portrait for grid tiles, landscape for the
-    /// continue row / detail hero. Two cache layouts exist: legacy flat files
-    /// ("<appid>_library_600x900.jpg") and the newer per-app folder whose hashed subfolders hold
-    /// named art (library_capsule.jpg, library_header.jpg, ...).
+    /// Copy Steam's cached art into our covers dir. Four different shapes, because they are not
+    /// interchangeable:
+    ///
+    ///   library_600x900 / library_capsule  portrait, for a portrait grid tile
+    ///   header / library_header (460x215)  ~2:1 with the logo burnt in -- the closest thing
+    ///                                      Steam caches to a landscape tile
+    ///   library_hero (1920x620)            a ~3:1 backdrop; the subject sits off-centre with
+    ///                                      empty space either side
+    ///   logo (transparent wordmark)        for a theme that draws the title as art
+    ///
+    /// The hero used to be taken as the banner, which is why landscape tiles looked like they had
+    /// the wrong game's art: cropping 3.1:1 down to 16:9 throws away 43% of the width, and what
+    /// survives is whichever piece of background happened to be in the middle.
+    ///
+    /// Two cache layouts exist: legacy flat files ("&lt;appid&gt;_library_600x900.jpg") and the
+    /// newer per-app folder holding named art. Both hold half-size copies -- the cached capsule is
+    /// 300x450, not 600x900 -- so MetadataService replaces these with full-resolution art from
+    /// Steam's CDN when it can. These are the offline fallback and the first paint.
     /// </summary>
-    private static (string? cover, string? banner) ImportSteamArt(string steamPath, string appId)
+    private static SteamArt ImportSteamArt(string steamPath, string appId)
     {
         var cache = Path.Combine(steamPath, "appcache", "librarycache");
         var perApp = Path.Combine(cache, appId);
@@ -242,7 +258,7 @@ public class LibraryScanner
             if (src is null) return null;
             try
             {
-                var dest = Path.Combine(Paths.CoversDir, $"steam_{appId}{suffix}.jpg");
+                var dest = Path.Combine(Paths.CoversDir, $"steam_{appId}{suffix}{Path.GetExtension(src)}");
                 if (!File.Exists(dest) || new FileInfo(src).LastWriteTimeUtc > new FileInfo(dest).LastWriteTimeUtc)
                     File.Copy(src, dest, overwrite: true);
                 return Path.GetFileName(dest);
@@ -255,9 +271,20 @@ public class LibraryScanner
             new[] { "library_600x900.jpg", "library_capsule.jpg" }), "");
         var banner = Import(FindArt(
             new[] { $"{appId}_header.jpg" },
-            new[] { "library_hero.jpg", "library_header.jpg", "header.jpg" }), "_wide");
-        return (cover ?? banner, banner);
+            new[] { "library_header.jpg", "header.jpg" }), "_wide");
+        var hero = Import(FindArt(
+            Array.Empty<string>(),
+            new[] { "library_hero.jpg" }), "_hero");
+        var logo = Import(FindArt(
+            new[] { $"{appId}_logo.png" },
+            new[] { "logo.png" }), "_logo");
+
+        // A portrait tile can live with the header letterboxed; a landscape tile cannot live with
+        // the portrait cover, so the banner never falls back the other way.
+        return new SteamArt(cover ?? banner, banner, hero, logo);
     }
+
+    private readonly record struct SteamArt(string? Cover, string? Banner, string? Hero, string? Logo);
 
     // ---------- Epic ----------
 

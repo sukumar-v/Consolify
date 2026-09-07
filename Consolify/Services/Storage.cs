@@ -229,8 +229,25 @@ public class LibraryStore
                     s.Hidden = old.Hidden;
                     if (old.LastPlayed is not null && (s.LastPlayed is null || old.LastPlayed > s.LastPlayed))
                         s.LastPlayed = old.LastPlayed;
-                    if (s.CoverFile is null) s.CoverFile = old.CoverFile;
-                    if (s.BannerFile is null) s.BannerFile = old.BannerFile;
+                    // Art: the scan only ever finds Steam's local half-size cache, so anything
+                    // MetadataService already upgraded has to survive a rescan or every scan
+                    // would undo it and the next enrich would download it all again.
+                    s.CoverFile = KeepBest(s.CoverFile, old.CoverFile);
+                    s.BannerFile = KeepBest(s.BannerFile, old.BannerFile);
+                    s.HeroFile = KeepBest(s.HeroFile, old.HeroFile);
+                    s.LogoFile = KeepBest(s.LogoFile, old.LogoFile);
+
+                    // Fetched metadata is not discoverable from disk at all.
+                    s.Description = old.Description;
+                    s.Developer = old.Developer;
+                    s.Publisher = old.Publisher;
+                    s.Genres = old.Genres;
+                    s.ReleaseDate = old.ReleaseDate;
+                    s.CriticScore = old.CriticScore;
+                    s.CriticSource = old.CriticSource;
+                    s.ControllerSupport = old.ControllerSupport;
+                    s.MetadataSource = old.MetadataSource;
+                    s.MetadataFetched = old.MetadataFetched;
                     // user overrides survive rescans
                     if (!string.IsNullOrWhiteSpace(old.Args)) s.Args = old.Args;
                     if (old.PreferDirectLaunch) { s.PreferDirectLaunch = true; s.ExePath = old.ExePath; }
@@ -242,6 +259,20 @@ public class LibraryStore
             Games = merged;
         }
         Save();
+    }
+
+    /// <summary>
+    /// Picks between the art a fresh scan found and the art already on record. Downloaded art wins
+    /// over anything the scan found locally -- it is the full-resolution version of the same
+    /// picture, or a shape the local cache does not hold at all -- and a user's hand-picked cover
+    /// wins over both, which is what the "custom_" prefix marks.
+    /// </summary>
+    private static string? KeepBest(string? scanned, string? existing)
+    {
+        if (existing is null) return scanned;
+        if (scanned is null) return existing;
+        var kept = existing.Contains("_hd") || existing.StartsWith("custom_", StringComparison.Ordinal);
+        return kept ? existing : scanned;
     }
 
     public Game? Find(string id)

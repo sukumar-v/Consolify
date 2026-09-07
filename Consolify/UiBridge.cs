@@ -28,7 +28,9 @@ public class UiBridge
     private readonly VirtualKeyboardService _keyboard;
     private readonly WindowService _windows;
     private readonly ThemeService _themes;
+    private readonly MetadataService _metadata = new();
     private bool _scanning;
+    private bool _enriching;
 
     public UiBridge(MainWindow window, CoreWebView2 core, SettingsStore settings, LibraryStore library,
         DisplayService displays, LibraryScanner scanner, GameLaunchService launcher, VirtualKeyboardService keyboard, WindowService windows, ThemeService themes)
@@ -384,7 +386,7 @@ public class UiBridge
         if (_scanning) return;
         _scanning = true;
         Push(new { type = "scanning", busy = true });
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             try
             {
@@ -394,13 +396,38 @@ public class UiBridge
             finally
             {
                 _scanning = false;
-                _window.Dispatcher.BeginInvoke(() =>
+                _ = _window.Dispatcher.BeginInvoke(() =>
                 {
                     Push(new { type = "scanning", busy = false });
                     PushState();
                 });
             }
+
+            await EnrichMetadata();
         });
+    }
+
+    /// <summary>
+    /// Runs after the library is already on screen, and never blocks it. Fetching art and facts is
+    /// network-bound and takes a while on a big library, but nothing here is needed to browse or
+    /// to start a game -- so the scan spinner is already down by the time this begins, and the
+    /// only visible effect is that art sharpens and the detail page fills in a moment later.
+    /// </summary>
+    private async Task EnrichMetadata()
+    {
+        if (_enriching) return;
+        _enriching = true;
+        try
+        {
+            // A snapshot: a rescan may replace the library while this is in flight, and its merge
+            // carries across whatever has been written by then.
+            var changed = await _metadata.EnrichAsync(_library.Games.ToList());
+            if (changed == 0) return;
+            _library.Save();
+            _ = _window.Dispatcher.BeginInvoke(PushState);
+        }
+        catch (Exception ex) { Log.Info($"Metadata pass failed: {ex.Message}"); }
+        finally { _enriching = false; }
     }
 
     private void AddManualGame()
@@ -482,12 +509,17 @@ public class UiBridge
         PushState();
     }
 
+    /// <summary>
+    /// Art the user chose by hand. The "custom_" prefix is what keeps it: it is the one name
+    /// neither the scanner nor MetadataService ever writes, so a rescan cannot overwrite the file
+    /// and an enrich cannot point the game away from it.
+    /// </summary>
     private static string? CopyCover(string source, string gameId)
     {
         try
         {
             var safe = gameId.Replace(':', '_');
-            var dest = Path.Combine(Paths.CoversDir, safe + Path.GetExtension(source).ToLowerInvariant());
+            var dest = Path.Combine(Paths.CoversDir, $"custom_{safe}{Path.GetExtension(source).ToLowerInvariant()}");
             File.Copy(source, dest, overwrite: true);
             return Path.GetFileName(dest);
         }
