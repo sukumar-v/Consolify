@@ -168,7 +168,8 @@ function radialSubItems() {
   if (radialSub === "windows") {
     if (!hostWindows.length) return [{ label: "No open windows", icon: "info", action: () => {} }];
     return hostWindows.map(w => ({
-      label: w.title, icon: "folder", sub: w.processName, thumb: w.thumb,
+      label: w.title, icon: "folder", sub: w.processName,
+      thumb: w.thumb, thumbIsIcon: w.thumbIsIcon,
       // The host restores the window, drags it onto the TV and focuses it -- switching to a
       // window you cannot see would be pointless from the couch.
       action: () => { send({ cmd: "windowAction", action: "focus", handle: w.handle }); closeRadial(false); },

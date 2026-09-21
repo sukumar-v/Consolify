@@ -637,6 +637,21 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hwnd);
 
+    // ---- window icons ----
+    // The fallback when a window cannot be photographed. A minimized window has no surface to
+    // paint, so PrintWindow gives back an empty bitmap; its icon is always available.
+
+    public const uint WM_GETICON = 0x007F;
+    public const int ICON_SMALL = 0, ICON_BIG = 1, ICON_SMALL2 = 2;
+    public const int GCLP_HICON = -14, GCLP_HICONSM = -34;
+
+    [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")]
+    public static extern IntPtr GetClassLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadLibrary(string lpFileName);
 

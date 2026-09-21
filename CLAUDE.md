@@ -167,3 +167,17 @@ Stop the scrolled grid from clipping through the All games header
   blank. They are captured off the UI thread and pushed one at a time *after* the list, because
   PrintWindow waits on the target's message loop and the switcher is often opened precisely
   because something is stuck.
+- An overlay must be made `.active` **before** it is rendered, everywhere — not just the power
+  wheel. `openFilter`, `openGameMenu`, `openCollect`, `openManage` and the confirm all rendered
+  first, so the first row was never highlighted until something moved.
+- Hover handlers must not rebuild the list they are on. `renderSettingsNav` replaces every tab
+  node, and a node destroyed between mousedown and mouseup never raises a click — which is why
+  the settings categories could not be clicked at all while the option rows could. Set focus and
+  `paintNav()`; the rows already did exactly that via a guard.
+- `TAB_DEFS` is empty. The top bars still render for the clock and title count, they just have
+  no tabs in them.
+- A minimized window cannot be photographed: PrintWindow answers true and hands back an empty
+  bitmap. `WindowService` keeps the last picture of each window (`_thumbs`, pruned of dead
+  handles on every list) and falls back to the window's icon, flagged as `IsIcon` so the UI
+  draws it inside the box rather than cover-cropping a 32px square into a smear. Alt+Tab shows
+  a real picture because DWM keeps the last composed frame; there is no public way to read that.

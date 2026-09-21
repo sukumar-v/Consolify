@@ -163,6 +163,29 @@ public class UiBridge
                 break;
             }
 
+            // Every setting back to the value a fresh install would have. Deliberately goes
+            // through the same path as a save rather than writing the file directly, so the
+            // startup entry, the display choice and the on-screen keyboard all follow it --
+            // resetting "Launch at login" to false has to actually unregister it.
+            case "resetSettings":
+            {
+                var defaults = new AppSettings();
+                var displayChanged = defaults.TvDeviceName != _settings.Settings.TvDeviceName;
+                var startupChanged = defaults.LaunchOnStartup != StartupService.IsRegistered();
+                CopySettings(defaults);
+                _settings.Save();
+                if (startupChanged)
+                {
+                    try { StartupService.SetRegistered(defaults.LaunchOnStartup); }
+                    catch (Exception ex) { Push(new { type = "toast", message = $"Startup registration failed: {ex.Message}" }); }
+                }
+                if (displayChanged) _window.PositionOnTargetDisplay();
+                _window.RefreshBuiltinKeyboard();
+                PushState();
+                Push(new { type = "toast", message = "Settings restored to defaults" });
+                break;
+            }
+
             // ---- Power Wheel / in-game menu ----
 
             case "listWindows":
@@ -413,13 +436,14 @@ public class UiBridge
         {
             foreach (var w in open.Take(MaxThumbnails))
             {
-                string? image;
-                try { image = _windows.CaptureWindow(new IntPtr(w.Handle)); }
+                WindowShot shot;
+                try { shot = _windows.CaptureWindow(new IntPtr(w.Handle)); }
                 catch (Exception ex) { Log.Info($"Thumbnail for '{w.Title}' failed: {ex.Message}"); continue; }
-                if (image is null) continue;
+                if (shot.Image is null) continue;
 
+                var (image, icon) = (shot.Image, shot.IsIcon);
                 _ = _window.Dispatcher.BeginInvoke(() =>
-                    Push(new { type = "windowThumb", handle = w.Handle, image }));
+                    Push(new { type = "windowThumb", handle = w.Handle, image, icon }));
             }
         });
     }

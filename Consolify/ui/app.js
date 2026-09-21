@@ -65,6 +65,22 @@ function activeFilterCount() {
 /* Collections a game belongs to are stored on the collection, not the game, so membership is a
    lookup rather than a property. Rebuilt per call: the sets are small and collections change
    from the same screen that reads them. */
+/* Deleting one is worth a confirmation: it is the only destructive thing in Settings that cannot
+   be undone by pressing the same button again. */
+function askDeleteCollection(c) {
+  const n = (c.gameIds || []).length;
+  confirmState = {
+    title: `DELETE ${c.name.toUpperCase()}?`,
+    body: n ? `The collection goes; the ${n} game${n === 1 ? "" : "s"} in it stay in your library.`
+            : "The collection is empty, so nothing else changes.",
+    yesLabel: "Yes, delete",
+    onYes: () => { send({ cmd: "deleteCollection", id: c.id }); toast(`${c.name} deleted`); },
+  };
+  confirmIdx = 0;
+  $("overlay-confirm").classList.add("active");
+  renderConfirm();
+}
+
 function gameInSelectedCollection(g) {
   return S.collections.some(c => F.collections.has(c.id) && (c.gameIds || []).includes(g.id));
 }
@@ -610,6 +626,7 @@ const ICONS = {
   folder: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/>',
   folderPlus: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/><path d="M12 10.5v5M9.5 13h5"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15.5-4.5-4.5L6.5 21"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
   trash: '<path d="M3.5 6.5h17M9 6.5V4h6v2.5M18.5 6.5 17.5 20h-11L5.5 6.5M10 11v5M14 11v5"/>',
   terminal: '<path d="m5 8 4 4-4 4M12 16h7"/><rect x="2" y="4" width="20" height="16" rx="1.5"/>',
   file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
@@ -686,7 +703,7 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
     // A picture of the window replaces the icon rather than joining it: the icon was standing in
     // for exactly this, and showing both says the same thing twice.
     const lead = r.thumb
-      ? `<div class="ov-thumb" style="background-image:url('${r.thumb}')"></div>`
+      ? `<div class="ov-thumb${r.thumbIsIcon ? " is-icon" : ""}" style="background-image:url('${r.thumb}')"></div>`
       : iconSvg(r.icon);
     el.innerHTML = `<div class="ov-label">${lead}<span>${esc(r.label ?? r.name)}</span></div>${right}`;
     el.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(i); });
@@ -987,11 +1004,10 @@ function setBackdrop(game) {
 
 /* ============================== tab bars ============================== */
 
-/* Just the one, which makes this a title rather than a bar. Kept as a list because the renderer
-   is shared and a second entry may yet earn its place. */
-const TAB_DEFS = [
-  { id: "library", label: "Library" },
-];
+/* Empty on purpose. With one screen left there is nothing to switch between, and a lone "Library"
+   tab was only a label taking up the top of the screen. The bars still render -- they carry the
+   clock and the title count -- they simply have no tabs in them now. */
+const TAB_DEFS = [];
 
 function renderTabbars() {
   document.querySelectorAll("[data-tabbar]").forEach(bar => {
@@ -1465,8 +1481,8 @@ function launchGame(g) {
       onYes: () => { toast(`Closing ${running ? running.title : "the game"}…`); send({ cmd: "launch", id: g.id, replace: true }); },
     };
     confirmIdx = 0;
-    renderConfirm();
     $("overlay-confirm").classList.add("active");
+    renderConfirm();
     return;
   }
   toast(`Launching ${g.title}…`);
@@ -1740,6 +1756,21 @@ function allSettingsRows() {
     action: () => send({ cmd: "addManual" }),
   });
 
+  // Collections are made from a game's own menu, so this is only the other half of that: the
+  // place to get rid of one. Nothing lists them otherwise now that the tab is gone.
+  if (S.collections.length) {
+    rows.push({ section: "COLLECTIONS", cat: "library" });
+    S.collections.forEach(c => {
+      const n = (c.gameIds || []).length;
+      rows.push({
+        name: c.name,
+        hint: n === 1 ? "1 game · filter by it with X on the library" : `${n} games · filter by it with X on the library`,
+        type: "action", label: "Delete", danger: true,
+        action: () => askDeleteCollection(c),
+      });
+    });
+  }
+
   rows.push({ section: "ARTWORK & METADATA", cat: "library" });
   rows.push({
     name: "Refresh artwork & metadata",
@@ -1773,6 +1804,23 @@ function allSettingsRows() {
     name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, controller wake, auto-start",
     type: "action", label: "Open guide",
     action: () => { guideOpen = true; $("overlay-guide").classList.add("active"); },
+  });
+  rows.push({
+    name: "Restore default settings",
+    hint: "Puts every setting back the way a fresh install has it. Your games and collections are untouched",
+    type: "action", label: "Restore", danger: true,
+    action: () => {
+      confirmState = {
+        title: "RESTORE DEFAULT SETTINGS?",
+        body: "Theme, accent, display, gamepad and keyboard settings all go back to their defaults. Your library, collections and playtime are not affected.",
+        yesLabel: "Restore defaults",
+        icon: "refresh", danger: true,
+        onYes: () => send({ cmd: "resetSettings" }),
+      };
+      confirmIdx = 0;
+      $("overlay-confirm").classList.add("active");
+      renderConfirm();
+    },
   });
   rows.push({
     name: "Exit Consolify", type: "action", label: "Exit", danger: true,
@@ -1934,7 +1982,14 @@ function renderSettingsNav() {
     el.dataset.settingsTab = t.id;
     el.innerHTML = `<span>${esc(t.label)}</span><span class="set-tab-count">${counts[t.id] || 0}</span>`;
     el.addEventListener("click", () => { setFocusEl(el); setSettingsTab(t.id); });
-    el.addEventListener("mouseenter", () => { if (hoverEnabled()) { setFocusEl(el); renderSettings(); } });
+    el.addEventListener("mouseenter", () => {
+      if (!hoverEnabled()) return;
+      // Repaint the highlight; do NOT rebuild the list. renderSettings() replaces every tab node,
+      // and a node destroyed between mousedown and mouseup never raises a click -- which is why
+      // the categories could not be clicked at all. The option rows already guard against this.
+      setFocusEl(el);
+      paintNav();
+    });
     nav.appendChild(el);
   });
 }
@@ -2097,8 +2152,8 @@ function applyFilter() {
 
 function openFilter() {
   filterOpen = true; filterIdx = 0; filterLevel = null;
-  renderFilter();
   $("overlay-filter").classList.add("active");
+  renderFilter();
 }
 
 function closeFilter() {
@@ -2216,8 +2271,8 @@ let gameMenu = null;   // { gameId, from, idx }
 
 function openGameMenu(gameId, from) {
   gameMenu = { gameId, from, idx: 0 };
-  renderGameMenu();
   $("overlay-gamemenu").classList.add("active");
+  renderGameMenu();
 }
 
 function closeGameMenu() {
@@ -2306,8 +2361,8 @@ function collectItems() {
 function openCollect(gameId) {
   collectTarget = gameId || detailGameId;
   collectOpen = true; collectIdx = 0;
-  renderCollect();
   $("overlay-collect").classList.add("active");
+  renderCollect();
 }
 function closeCollect() { collectOpen = false; $("overlay-collect").classList.remove("active"); }
 
@@ -2368,7 +2423,11 @@ function manageItems() {
   return items;
 }
 
-function openManage() { manageOpen = true; manageIdx = 0; renderManage(); $("overlay-manage").classList.add("active"); }
+function openManage() {
+  manageOpen = true; manageIdx = 0;
+  $("overlay-manage").classList.add("active");
+  renderManage();
+}
 function closeManage() { manageOpen = false; $("overlay-manage").classList.remove("active"); }
 
 function renderManage() {
@@ -2629,7 +2688,11 @@ function handleHostMessage(m) {
     // StartThumbnails on the host for why they are not part of it.
     case "windowThumb": {
       const w = hostWindows.find(x => x.handle === m.handle);
-      if (w && m.image) { w.thumb = m.image; if (radialSub === "windows") renderRadialSub(); }
+      if (w && m.image) {
+        w.thumb = m.image;
+        w.thumbIsIcon = !!m.icon;
+        if (radialSub === "windows") renderRadialSub();
+      }
       break;
     }
     case "dismiss":

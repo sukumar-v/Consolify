@@ -9,6 +9,12 @@ using Consolify.Interop;
 
 namespace Consolify.Services;
 
+/// <summary>
+/// A picture for a window row. <paramref name="IsIcon"/> matters to the UI: a screenshot fills its
+/// box, an icon has to sit inside it or it is stretched into a smear.
+/// </summary>
+public readonly record struct WindowShot(string? Image, bool IsIcon);
+
 public record WindowInfo(long Handle, string Title, string ProcessName, bool Minimized, string Display);
 
 /// <summary>
@@ -65,6 +71,11 @@ public class WindowService
                 NativeMethods.IsIconic(hwnd), DisplayOf(hwnd)));
             return true;
         }, IntPtr.Zero);
+
+        // Windows that have closed since the last look. Handles get reused, so a stale entry is
+        // not just wasted memory -- it could hand a new window the old one's picture.
+        foreach (var dead in _thumbs.Keys.Where(h => !NativeMethods.IsWindow(h)).ToList())
+            _thumbs.Remove(dead);
 
         return list;
     }
@@ -285,26 +296,41 @@ public class WindowService
     /// Minimized windows have no surface to paint and are skipped rather than returning a black
     /// rectangle, which would read as a broken thumbnail rather than an absent one.
     /// </summary>
-    public string? CaptureWindow(IntPtr hwnd)
+    public WindowShot CaptureWindow(IntPtr hwnd)
     {
-        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return null;
-        if (!NativeMethods.GetWindowRect(hwnd, out var r)) return null;
+        if (!NativeMethods.IsWindow(hwnd)) return default;
+
+        // A minimized window has no surface to paint. PrintWindow still answers true for one and
+        // hands back an empty bitmap, so there is nothing to be gained by asking -- and these are
+        // the windows a switcher is most for. Two fallbacks, best first:
+        //
+        //   1. whatever this window last looked like, if we have photographed it before
+        //   2. its icon, which is always there
+        //
+        // Alt+Tab manages a real picture because DWM keeps the last composed frame, but there is
+        // no public way to read that back, so this is as close as it gets.
+        if (NativeMethods.IsIconic(hwnd))
+            return _thumbs.TryGetValue(hwnd, out var seen)
+                ? new WindowShot(seen, false)
+                : new WindowShot(CaptureIcon(hwnd), true);
+
+        if (!NativeMethods.GetWindowRect(hwnd, out var r)) return default;
 
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
-        if (w < 32 || h < 32 || w > 16384 || h > 16384) return null;
+        if (w < 32 || h < 32 || w > 16384 || h > 16384) return default;
 
         IntPtr src = IntPtr.Zero, mem = IntPtr.Zero, bmp = IntPtr.Zero, prev = IntPtr.Zero;
         try
         {
             src = NativeMethods.GetWindowDC(hwnd);
-            if (src == IntPtr.Zero) return null;
+            if (src == IntPtr.Zero) return default;
             mem = NativeMethods.CreateCompatibleDC(src);
             bmp = NativeMethods.CreateCompatibleBitmap(src, w, h);
-            if (mem == IntPtr.Zero || bmp == IntPtr.Zero) return null;
+            if (mem == IntPtr.Zero || bmp == IntPtr.Zero) return default;
             prev = NativeMethods.SelectObject(mem, bmp);
 
             if (!NativeMethods.PrintWindow(hwnd, mem, NativeMethods.PW_RENDERFULLCONTENT))
-                return null;
+                return default;
 
             // Scaled down here rather than in CSS: these go to the UI as base64 inside a JSON
             // message, and a full-size 4K window would be several megabytes of string per row.
@@ -317,12 +343,17 @@ public class WindowService
             encoder.Frames.Add(BitmapFrame.Create(source));
             using var ms = new MemoryStream();
             encoder.Save(ms);
-            return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+
+            // Remembered so that minimizing this window later does not blank its row. Cheap to
+            // keep -- a few dozen KB each, bounded by how many windows are open.
+            var data = "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+            _thumbs[hwnd] = data;
+            return new WindowShot(data, false);
         }
         catch (Exception ex)
         {
             Log.Info($"Window capture failed: {ex.Message}");
-            return null;
+            return default;
         }
         finally
         {
@@ -330,6 +361,53 @@ public class WindowService
             if (bmp != IntPtr.Zero) NativeMethods.DeleteObject(bmp);
             if (mem != IntPtr.Zero) NativeMethods.DeleteDC(mem);
             if (src != IntPtr.Zero) NativeMethods.ReleaseDC(hwnd, src);
+        }
+    }
+
+
+    /// <summary>
+    /// The last picture taken of each window, so one that has since been minimized still has
+    /// something to show. Cleared of dead handles on every list so it cannot grow forever.
+    /// </summary>
+    private readonly Dictionary<IntPtr, string> _thumbs = new();
+
+    /// <summary>
+    /// A window's own icon, rendered at a size worth looking at. The fallback for a window we have
+    /// never seen open -- better than an empty rectangle, which reads as a broken thumbnail.
+    ///
+    /// Asked for with SendMessageTimeout rather than SendMessage: this runs while listing windows,
+    /// and a hung program must not take the switcher down with it.
+    /// </summary>
+    private string? CaptureIcon(IntPtr hwnd)
+    {
+        var icon = IntPtr.Zero;
+        foreach (var which in new[] { NativeMethods.ICON_BIG, NativeMethods.ICON_SMALL2, NativeMethods.ICON_SMALL })
+        {
+            NativeMethods.SendMessageTimeout(hwnd, NativeMethods.WM_GETICON, new IntPtr(which),
+                IntPtr.Zero, NativeMethods.SMTO_ABORTIFHUNG, 200, out var res);
+            if (res != IntPtr.Zero) { icon = res; break; }
+        }
+        if (icon == IntPtr.Zero) icon = NativeMethods.GetClassLongPtr64(hwnd, NativeMethods.GCLP_HICON);
+        if (icon == IntPtr.Zero) icon = NativeMethods.GetClassLongPtr64(hwnd, NativeMethods.GCLP_HICONSM);
+        if (icon == IntPtr.Zero) return null;
+
+        try
+        {
+            var source = Imaging.CreateBitmapSourceFromHIcon(
+                icon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+
+            // PNG, not JPEG: an icon has an alpha channel and hard edges, both of which JPEG
+            // ruins. The UI draws it with background-size: contain so it is not stretched.
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(source));
+            using var ms = new MemoryStream();
+            encoder.Save(ms);
+            return "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Window icon failed: {ex.Message}");
+            return null;
         }
     }
 

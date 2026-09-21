@@ -512,6 +512,13 @@ body.no-legend .legend { display: none; }
 /* Taller than an icon row, so the picture has somewhere to sit. */
 .ov-row.has-thumb { min-height: 96px; }
 .ov-row.has-thumb .ov-label { gap: 20px; }
+/* An icon stands in for a window we cannot photograph -- a minimized one we have never seen open.
+   It has to sit inside the box: cover would blow a 32px square up into a smear. */
+.ov-thumb.is-icon {
+  background-size: 40px; background-position: center; background-repeat: no-repeat;
+  background-color: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
 
 /* ---- filter & sort overlay ---- */
 .filter-card { width: 760px; }
