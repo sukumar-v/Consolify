@@ -138,3 +138,32 @@ Stop the scrolled grid from clipping through the All games header
   the service answered, not on whether a field is empty, because a value left over from a
   previous run is also non-empty and testing emptiness would make stale data
   uncorrectable. Controller support is always Steam's: IGDB has no equivalent.
+
+## Screens and the switcher
+
+- Library is the only top-level screen. Collections became a filter category (`F.collections`,
+  a set of collection ids) and Settings is reached with the Menu button from the library —
+  `TAB_DEFS` holds one entry and there is no section cycling, so LB/RB are free.
+  Collections themselves still exist and are still made from the game menu.
+- A collection can be deleted while it is still being filtered on, so stale ids are pruned
+  when state arrives. Left alone the filter matches nothing and the library looks empty for
+  no visible reason.
+- `renderMenu` paints its highlight onto `listEl.closest("[data-focus-scope]")`. An overlay
+  without that attribute gets no highlight at all — which is what was wrong with the power
+  wheel's submenus. It also only paints rows that are focusable, and nothing inside a hidden
+  overlay is, so an overlay must be made `.active` *before* it is rendered.
+- `repaintFocus` must have a branch for every overlay that can own input, ordered as in
+  `handleInput`. A missing branch repaints the screen underneath and leaves the visible menu
+  unhighlighted.
+- The window switcher follows the Alt+Tab rules, and the one that matters is DWM's cloak flag:
+  a suspended Store app stays "visible" in the old sense, which is why ApplicationFrameHost and
+  TextInputHost appeared as if they were programs. Do **not** blocklist ApplicationFrameHost —
+  it owns the frame window of every Store app, so blocking it hides Settings and Windows
+  Security too. Cloaking already separates the ghosts from the real ones.
+- A minimized window reports a 160x28 rect wherever Windows parks it. Any "too small to be
+  real" test has to ask `IsIconic` first, or it eats exactly the windows the switcher is for.
+- Thumbnails come from `PrintWindow` with `PW_RENDERFULLCONTENT`, which is the flag that makes
+  it work for DirectComposition and UWP surfaces; without it browsers and Store apps come back
+  blank. They are captured off the UI thread and pushed one at a time *after* the list, because
+  PrintWindow waits on the target's message loop and the switcher is often opened precisely
+  because something is stuck.

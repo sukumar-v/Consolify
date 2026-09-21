@@ -168,7 +168,7 @@ function radialSubItems() {
   if (radialSub === "windows") {
     if (!hostWindows.length) return [{ label: "No open windows", icon: "info", action: () => {} }];
     return hostWindows.map(w => ({
-      label: w.title, icon: "folder", sub: w.processName,
+      label: w.title, icon: "folder", sub: w.processName, thumb: w.thumb,
       // The host restores the window, drags it onto the TV and focuses it -- switching to a
       // window you cannot see would be pointless from the couch.
       action: () => { send({ cmd: "windowAction", action: "focus", handle: w.handle }); closeRadial(false); },
@@ -185,9 +185,12 @@ function radialSubItems() {
 
 function openRadialSub(kind) {
   radialSub = kind; radialSubIdx = 0;
+  // Shown before it is filled. renderMenu paints the highlight onto whichever row is focusable,
+  // and nothing inside a hidden overlay is: rendering first left the first row unhighlighted
+  // until something moved.
+  $("overlay-radialsub").classList.add("active");
   if (kind === "windows") send({ cmd: "listWindows" });
   renderRadialSub();
-  $("overlay-radialsub").classList.add("active");
 }
 
 function renderRadialSub() {

@@ -598,6 +598,45 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
+
+    // ---- window list filtering (the Alt+Tab rules) ----
+
+    /// <summary>
+    /// A window is "cloaked" when it exists but the shell is deliberately not showing it. UWP keeps
+    /// a cloaked window per suspended app under ApplicationFrameHost, and IsWindowVisible still
+    /// answers true for those -- which is why they turned up in the switcher as ghosts.
+    /// </summary>
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
+    public const int DWMWA_CLOAKED = 14;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    public const uint GA_ROOTOWNER = 3;
+
+    public const int GWL_STYLE = -16;
+    public const long WS_VISIBLE = 0x10000000L;
+    public const long WS_CHILD = 0x40000000L;
+    /// <summary>Set on a window the owner has asked not to appear in the switcher.</summary>
+    public const long WS_EX_NOREDIRECTIONBITMAP = 0x00200000L;
+    public const long WS_EX_APPWINDOW = 0x00040000L;
+
+    // ---- window thumbnails ----
+
+    /// <summary>
+    /// Asks a window to paint itself into a DC. PW_RENDERFULLCONTENT is what makes this work for
+    /// DirectComposition and UWP windows, which render nothing under the older flag.
+    /// </summary>
+    [DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
+    public const uint PW_RENDERFULLCONTENT = 0x00000002;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindowDC(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hwnd);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadLibrary(string lpFileName);
 

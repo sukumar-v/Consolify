@@ -25,8 +25,7 @@ let S = {
   padConnected: false,
 };
 
-const SECTIONS = ["library", "collections", "settings"];
-let view = "library";                    // library | collections | detail | settings
+let view = "library";                    // library | detail | settings
 // Library focus lives on the scope element (see the spatial focus section), not in a zone+row+col
 // triple -- that is what lets a theme lay the screen out any way it likes.
 
@@ -34,7 +33,7 @@ let detailGameId = null;
 let detailReturn = "library";            // where B goes back to from detail
 
 /* filter & sort (session state) — empty sets mean "no restriction" */
-const F = { platforms: new Set(), status: new Set(), fav: false, sort: "az" };
+const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, sort: "az" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
 const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
@@ -54,12 +53,20 @@ const SORTS = [
 function resetFilters() {
   F.platforms.clear();
   F.status.clear();
+  F.collections.clear();
   F.fav = false;
   F.sort = "az";
 }
 
 function activeFilterCount() {
-  return F.platforms.size + F.status.size + (F.fav ? 1 : 0);
+  return F.platforms.size + F.status.size + F.collections.size + (F.fav ? 1 : 0);
+}
+
+/* Collections a game belongs to are stored on the collection, not the game, so membership is a
+   lookup rather than a property. Rebuilt per call: the sets are small and collections change
+   from the same screen that reads them. */
+function gameInSelectedCollection(g) {
+  return S.collections.some(c => F.collections.has(c.id) && (c.gameIds || []).includes(g.id));
 }
 
 /* input mode: "pad" hides the pointer and ignores hover; "pointer" is stick or real mouse.
@@ -111,23 +118,22 @@ function setPointerOnItem(on) {
 function rerenderAll() {
   renderTabbars();
   renderLibrary();
-  if (view === "collections") renderCollections();
   if (view === "settings") renderSettings();
   if (view === "detail") renderDetail();
 }
 
 /** Re-apply focus styling for whatever screen/overlay is currently up. */
 function repaintFocus() {
-  if (filterOpen) renderFilter();
+  // Ordered like handleInput: whatever owns the input owns the highlight. The radial submenu
+  // comes first for the same reason it does there -- it sits on top of everything else, and
+  // repainting the library underneath it would leave the visible menu unhighlighted.
+  if (radialSub) renderRadialSub();
+  else if (filterOpen) renderFilter();
   else if (gameMenu) renderGameMenu();
   else if (collectOpen) renderCollect();
   else if (manageOpen) renderManage();
   else if (confirmState) renderConfirm();
   else if (view === "library") updateLibraryFocus(true);
-  else if (view === "collections") {
-    if (collMode === "grid") updateCollFocus(true);
-    else updateCollListFocus(true);
-  }
   else if (view === "detail") updateDetailFocus();
   else if (view === "settings") renderSettings();
 }
@@ -439,7 +445,7 @@ async function applyThemeMarkup() {
 
 /** Hand each screen to the theme's layout, or put it back if the theme has none. */
 function applyThemeLayout() {
-  ["library", "collections", "detail", "settings"].forEach(id =>
+  ["library", "detail", "settings"].forEach(id =>
     Theme.applyScreen(document.getElementById("screen-" + id), "screen-" + id));
 }
 
@@ -669,7 +675,7 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
       return;
     }
     const el = document.createElement("div");
-    el.className = "ov-row" + (r.danger ? " danger" : "");
+    el.className = "ov-row" + (r.danger ? " danger" : "") + (r.thumb ? " has-thumb" : "");
     el.dataset.focusable = "";
     el.dataset.focusKey = "row:" + i;
     el.dataset.rowIndex = i;
@@ -677,7 +683,12 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
     if (r.summary !== undefined) right = `<div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
     else if (r.checked !== undefined) right = `<span class="ov-check${r.checked ? "" : " off"}">${r.checked ? (r.star ? "★" : r.radio ? "●" : "✓") : "○"}</span>`;
     else if (r.sub) right = `<span class="ov-sub">${esc(r.sub)}</span>`;
-    el.innerHTML = `<div class="ov-label">${iconSvg(r.icon)}<span>${esc(r.label ?? r.name)}</span></div>${right}`;
+    // A picture of the window replaces the icon rather than joining it: the icon was standing in
+    // for exactly this, and showing both says the same thing twice.
+    const lead = r.thumb
+      ? `<div class="ov-thumb" style="background-image:url('${r.thumb}')"></div>`
+      : iconSvg(r.icon);
+    el.innerHTML = `<div class="ov-label">${lead}<span>${esc(r.label ?? r.name)}</span></div>${right}`;
     el.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(i); });
     el.addEventListener("click", () => onClick(i));
     listEl.appendChild(el);
@@ -707,12 +718,6 @@ function foot(...pairs) {
     `<div class="legend-item"><div class="btn-badge${btn === "A" ? " btn-a" : ""}">${btn}</div><span>${esc(label)}</span></div>`
   ).join("");
 }
-
-/* collections screen */
-let collMode = "list";                   // list | grid
-let collSel = null;                      // selected collection id
-/* Only the row chunking for rendering; focus does not index into it. */
-let collGridRows = [];
 
 /* overlays */
 let filterOpen = false, filterIdx = 0;
@@ -982,10 +987,10 @@ function setBackdrop(game) {
 
 /* ============================== tab bars ============================== */
 
+/* Just the one, which makes this a title rather than a bar. Kept as a list because the renderer
+   is shared and a second entry may yet earn its place. */
 const TAB_DEFS = [
   { id: "library", label: "Library" },
-  { id: "collections", label: "Collections" },
-  { id: "settings", label: "Settings" },
 ];
 
 function renderTabbars() {
@@ -1227,6 +1232,7 @@ function libraryData() {
   let filtered = visibleGames();
   if (F.platforms.size) filtered = filtered.filter(g => F.platforms.has(g.platform));
   if (F.fav) filtered = filtered.filter(g => g.favorite);
+  if (F.collections.size) filtered = filtered.filter(gameInSelectedCollection);
   if (F.status.size === 1) {
     const wantInstalled = F.status.has("Installed");
     filtered = filtered.filter(g => g.installed === wantInstalled);
@@ -1248,6 +1254,7 @@ function filterSummary(total) {
   const bits = [`${total} TITLE${total === 1 ? "" : "S"}`];
   if (F.platforms.size) bits.push([...F.platforms].join(" + ").toUpperCase());
   if (F.fav) bits.push("FAVORITES");
+  if (F.collections.size) bits.push(S.collections.filter(c => F.collections.has(c.id)).map(c => c.name.toUpperCase()).join(" + "));
   if (F.status.size === 1) bits.push([...F.status][0].toUpperCase());
   const sort = SORTS.find(s => s.id === F.sort);
   if (F.sort !== "az" && sort) bits.push(sort.label.toUpperCase());
@@ -1289,7 +1296,6 @@ function renderLibrary() {
   // Not only from revealIn: scrolling with the wheel never moves the pad focus, and the top
   // fade still has to come on.
   watchScrolled($("gridScroll"));
-  watchScrolled($("collGridScroll"));
 
   $("titleCount").textContent = `${S.games.length} TITLE${S.games.length === 1 ? "" : "S"}`;
   $("gridLabel").textContent = filterSummary(total);
@@ -1394,8 +1400,6 @@ const ACTIONS = {
   addGame: () => send({ cmd: "addManual" }),
   resume: () => send({ cmd: "resumeGame" }),
   "tab:library": () => switchView("library"),
-  "tab:collections": () => switchView("collections"),
-  "tab:settings": () => switchView("settings"),
 };
 
 function libraryAccept(btn) {
@@ -1427,6 +1431,9 @@ function libraryInput(btn) {
     case "Up": case "Down": case "Left": case "Right": libraryNav(btn); break;
     case "A": case "Y": libraryAccept(btn); break;
     case "X": openFilter(); break;
+    // Settings lost its tab, so this is the way in. Menu is the pad's ☰ button; holding it is
+    // still the keyboard toggle, and only a tap gets here.
+    case "Menu": switchView("settings"); break;
     // B walks back out of the grid: to its top, then up to the carousel.
     case "B": {
       const list = Nav.focusables(Nav.activeScope());
@@ -1464,216 +1471,6 @@ function launchGame(g) {
   }
   toast(`Launching ${g.title}…`);
   send({ cmd: "launch", id: g.id });
-}
-
-/* ============================== collections ============================== */
-
-function collectionsData() {
-  const list = [];
-  const vis = visibleGames();
-  list.push({ id: "fav", name: "Favorites", star: true, games: sortGames(vis.filter(g => g.favorite)) });
-  PLATFORMS.forEach(p => {
-    const games = vis.filter(g => g.platform === p);
-    if (games.length) list.push({ id: "plat:" + p, name: p, games: sortGames(games) });
-  });
-  S.collections.forEach(c => {
-    const games = sortGames(c.gameIds.map(gameById).filter(g => g && !g.hidden));
-    list.push({ id: c.id, name: c.name, custom: true, games });
-  });
-  // Hidden lives at the end — it's a holding pen for things that aren't really games.
-  const hidden = S.games.filter(g => g.hidden);
-  if (hidden.length) list.push({ id: "hidden", name: "Hidden", games: sortGames(hidden) });
-  return list;
-}
-
-function renderCollections() {
-  const cols = collectionsData();
-
-  const listEl = $("collList");
-  const gridWrap = $("collGridWrap");
-  const legend = $("legend-collections");
-
-  if (collMode === "list") {
-    listEl.classList.remove("hidden");
-    gridWrap.classList.remove("active");
-    $("collCrumb").textContent = `${cols.length} COLLECTIONS`;
-
-    listEl.innerHTML = "";
-    cols.forEach((c, i) => {
-      const thumbs = c.games.slice(0, 6).map(g => {
-        const url = coverUrl(g);
-        return url
-          ? `<div class="coll-thumb" style="background-image:url('${url}')"></div>`
-          : `<div class="coll-thumb"><span>${esc(initials(g.title))}</span></div>`;
-      }).join("");
-
-      let card = Theme.render("collection-card", {
-        id: c.id, name: c.name, count: c.games.length, custom: !!c.custom, star: !!c.star,
-        cover: c.games.length ? (coverUrl(c.games[0]) || "") : "",
-      });
-      if (card) {
-        card.classList.add("coll-card");
-      } else {
-        card = document.createElement("div");
-        card.className = "coll-card";
-        card.innerHTML = `
-        <div class="coll-info">
-          <div class="coll-name">${c.star ? '<span class="fav-star">★</span>' : ""}${esc(c.name)}</div>
-          <div class="coll-meta">${c.games.length} GAME${c.games.length === 1 ? "" : "S"}${c.custom ? " · CUSTOM" : ""}</div>
-        </div>
-        <div class="coll-thumbs">${thumbs}</div>`;
-      }
-      card.dataset.focusable = "";
-      card.dataset.focusKey = "coll:" + c.id;
-      card.dataset.collId = c.id;
-
-      card.addEventListener("mouseenter", () => { if (hoverEnabled()) { setFocusEl(card); updateCollListFocus(true); } });
-      card.addEventListener("click", () => { setFocusEl(card); openCollectionGrid(c.id); });
-      listEl.appendChild(card);
-    });
-
-    updateCollListFocus();
-    setBackdrop(null);
-  } else {
-    const col = cols.find(c => c.id === collSel);
-    if (!col) { collMode = "list"; renderCollections(); return; }
-
-    listEl.classList.add("hidden");
-    gridWrap.classList.add("active");
-    $("collCrumb").textContent = "COLLECTIONS / " + col.name.toUpperCase();
-    $("collGridTitle").textContent = col.name;
-    $("collGridLabel").textContent = `${col.games.length} GAME${col.games.length === 1 ? "" : "S"}`;
-
-    collGridRows = [];
-    for (let i = 0; i < col.games.length; i += 8) collGridRows.push(col.games.slice(i, i + 8));
-
-    const scroll = $("collGridScroll");
-    scroll.innerHTML = "";
-    if (!collGridRows.length) {
-      const note = document.createElement("div");
-      note.className = "empty-note";
-      note.innerHTML = col.id === "fav"
-        ? "No favorites yet — press <b>Y</b> on a game and choose <b>Add to favorites</b>."
-        : col.id === "hidden"
-          ? "Nothing hidden. Press <b>Y</b> on anything that isn't really a game and choose <b>Hide</b>."
-          : "This collection is empty — press <b>Y</b> on a game and choose <b>Add to collection</b>.";
-      scroll.appendChild(note);
-    }
-    collGridRows.forEach((row, r) => {
-      const rowDiv = document.createElement("div");
-      rowDiv.className = "grid-row";
-      rowDiv.dataset.dimGroup = "";
-      row.forEach(g => {
-        const tile = makeGridTile(g, null, null);
-        // Distinct from the library tile for the same game: they live in different scopes,
-        // but a shared key would still collide if a theme ever put them on one screen.
-        tile.dataset.focusKey = "collTile:" + g.id;
-        tile.addEventListener("mouseenter", () => { if (hoverEnabled()) { setFocusEl(tile); updateCollFocus(true); } });
-        tile.addEventListener("click", () => { setFocusEl(tile); updateCollFocus(true); if (g.installed) launchGame(g); else toast(` is not installed`); });
-        rowDiv.appendChild(tile);
-      });
-      scroll.appendChild(rowDiv);
-    });
-    updateCollFocus();
-
-    legend.innerHTML = `
-      <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
-      <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
-      <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
-      <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
-  }
-}
-
-/**
- * Focus-only update for the collections list. Re-running renderCollections() on every hover
- * rebuilt every card and grid tile, which restarted the async cover loads and made the whole
- * screen flicker as the pointer crossed the gaps between items.
- */
-function updateCollListFocus(noScroll) {
-  const scope = document.getElementById("screen-collections");
-  ensureFocus(scope);
-  paintNav();
-  const el = focusEl(scope);
-  if (el && !noScroll) revealFocus(el);
-
-  const c = focusedCollection();
-  const delHint = c && c.custom
-    ? `<div class="legend-item"><div class="btn-badge">X</div><span>Delete collection</span></div>` : "";
-  $("legend-collections").innerHTML = `
-    <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>
-    <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
-    ${delHint}
-    <div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Section</span></div>`;
-}
-
-/** The collection card the highlight is on, resolved from the element's id. */
-function focusedCollection() {
-  const el = focusEl(document.getElementById("screen-collections"));
-  if (!el || !el.dataset.collId) return null;
-  return collectionsData().find(c => c.id === el.dataset.collId) || null;
-}
-
-function updateCollFocus(noScroll) {
-  const scope = document.getElementById("screen-collections");
-  ensureFocus(scope);
-  paintNav();
-  const el = focusEl(scope);
-  if (el && !noScroll) revealFocus(el);
-}
-
-function openCollectionGrid(id) {
-  collSel = id;
-  collMode = "grid";
-  // The grid is a different set of elements in the same scope, so the list's key would
-  // resolve to nothing; clearing lets it land on the first tile.
-  clearFocus(document.getElementById("screen-collections"));
-  renderCollections();
-}
-
-function collectionsInput(btn) {
-  if (collMode === "list") {
-    switch (btn) {
-      case "Up": case "Down": case "Left": case "Right":
-        navMove(btn); updateCollListFocus(true); break;
-      case "A": {
-        const c = focusedCollection();
-        if (focusVisible() && c) openCollectionGrid(c.id);
-        break;
-      }
-      case "X": {
-        const c = focusedCollection();
-        if (c && c.custom) {
-          confirmState = {
-            title: `DELETE “${c.name.toUpperCase()}”?`,
-            onYes: () => send({ cmd: "deleteCollection", id: c.id }),
-          };
-          confirmIdx = 1;
-          renderConfirm();
-          $("overlay-confirm").classList.add("active");
-        }
-        break;
-      }
-      case "B": switchView("library"); break;
-    }
-  } else {
-    const g = focusedGame();
-    switch (btn) {
-      // Up stays inside the collection: only B returns to the list, and since the grid is
-      // the only thing focusable in grid mode there is nothing above to escape to anyway.
-      case "Left": case "Right": case "Up": case "Down": navMove(btn); break;
-      case "A": if (focusVisible() && g) { if (g.installed) launchGame(g); else toast(`${g.title} is not installed`); } break;
-      case "Y": if (focusVisible() && g) openGameMenu(g.id, "collections"); break;
-      case "B": {
-        // Back onto the collection you opened, not the top of the list.
-        const scope = document.getElementById("screen-collections");
-        collMode = "list";
-        renderCollections();
-        setScopeKey(scope, "coll:" + collSel);
-        updateCollListFocus();
-        break;
-      }
-    }
-  }
 }
 
 /* ============================== detail ============================== */
@@ -2330,6 +2127,16 @@ function filterDropdownRows() {
     label: s, icon: s === "Installed" ? "checkCircle" : "download", checked: F.status.has(s),
     toggle: () => { F.status.has(s) ? F.status.delete(s) : F.status.add(s); },
   }));
+  // Only when there are some. An empty category reads as a broken feature, and collections are
+  // made from the game menu rather than here, so there is nothing to offer until one exists.
+  if (S.collections.length) {
+    rows.push({ cat: "COLLECTIONS" });
+    S.collections.forEach(c => rows.push({
+      label: c.name, icon: "folder", sub: `${(c.gameIds || []).length}`,
+      checked: F.collections.has(c.id),
+      toggle: () => { F.collections.has(c.id) ? F.collections.delete(c.id) : F.collections.add(c.id); },
+    }));
+  }
   rows.push({ cat: "OTHER" });
   rows.push({
     label: "Favorites only", icon: "star", checked: F.fav,
@@ -2709,18 +2516,11 @@ function switchView(v) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   $("screen-" + v).classList.add("active");
   if (v === "library") { clampFocus(); updateLibraryFocus(); }
-  if (v === "collections") renderCollections();
   if (v === "detail") renderDetail();
   // Always land on the categories, never mid-list in whatever was open last time.
   if (v === "settings") { settingsPane = "nav"; settingsIdx = 0; renderSettings(); setBackdrop(null); }
 }
 
-function cycleSection(dir) {
-  const cur = SECTIONS.indexOf(view);
-  if (cur === -1) return;
-  const next = SECTIONS[(cur + dir + SECTIONS.length) % SECTIONS.length];
-  switchView(next);
-}
 
 /* ============================== input routing ============================== */
 
@@ -2741,13 +2541,7 @@ function handleInput(btn, src) {
   if (collectOpen) { collectInput(btn); return; }
   if (manageOpen) { manageInput(btn); return; }
 
-  if ((btn === "LB" || btn === "RB") && SECTIONS.includes(view)) {
-    cycleSection(btn === "RB" ? 1 : -1);
-    return;
-  }
-
   if (view === "library") libraryInput(btn);
-  else if (view === "collections") collectionsInput(btn);
   else if (view === "detail") detailInput(btn);
   else if (view === "settings") settingsInput(btn);
 }
@@ -2778,6 +2572,11 @@ function handleHostMessage(m) {
       const wasEmpty = S.games.length === 0;
       S.games = m.games || [];
       S.collections = m.collections || [];
+      // A collection can be deleted while it is still being filtered on. Left alone, the stale id
+      // matches nothing and the library goes empty with no visible reason why.
+      for (const id of [...F.collections])
+        if (!S.collections.some(c => c.id === id)) F.collections.delete(id);
+
       S.settings = m.settings;
       S.displays = m.displays || [];
       // Keep whatever the last themes push carried if this state has none, so a state
@@ -2793,7 +2592,6 @@ function handleHostMessage(m) {
       // than leaving it wherever the empty screen had put it.
       if ((firstState || wasEmpty) && S.games.length) clearFocus(document.getElementById("screen-library"));
       renderLibrary();
-      if (view === "collections") renderCollections();
       if (view === "settings") renderSettings();
       if (view === "detail") renderDetail();
       if (collectOpen) renderCollect();
@@ -2827,6 +2625,13 @@ function handleHostMessage(m) {
       hostWindows = m.windows || [];
       if (radialSub === "windows") renderRadialSub();
       break;
+    // Thumbnails arrive one at a time, after the list is already on screen -- see
+    // StartThumbnails on the host for why they are not part of it.
+    case "windowThumb": {
+      const w = hostWindows.find(x => x.handle === m.handle);
+      if (w && m.image) { w.thumb = m.image; if (radialSub === "windows") renderRadialSub(); }
+      break;
+    }
     case "dismiss":
       dismissOverlays();
       break;

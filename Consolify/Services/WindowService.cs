@@ -35,9 +35,7 @@ public class WindowService
         {
             if (hwnd == shell || hwnd == _ownWindow) return true;
             if (!NativeMethods.IsWindowVisible(hwnd)) return true;
-
-            var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
-            if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
+            if (!IsAltTabWindow(hwnd)) return true;
 
             int len = NativeMethods.GetWindowTextLength(hwnd);
             if (len == 0) return true;
@@ -45,6 +43,7 @@ public class WindowService
             NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString().Trim();
             if (title.Length == 0) return true;
+
 
             string proc = "";
             try
@@ -54,12 +53,80 @@ public class WindowService
             }
             catch { /* process may be protected or gone */ }
 
+            if (NeverSwitchable.Contains(proc, StringComparer.OrdinalIgnoreCase)) return true;
+
+            // A Store app's window belongs to the frame host, not to the app, so the process name
+            // is "ApplicationFrameHost" for every one of them. Printing that under "Windows
+            // Security" tells the reader nothing and looks like the noise we just removed; the
+            // title is the app's own and says enough on its own.
+            if (FrameHosts.Contains(proc, StringComparer.OrdinalIgnoreCase)) proc = "";
+
             list.Add(new WindowInfo((long)hwnd, title, proc,
                 NativeMethods.IsIconic(hwnd), DisplayOf(hwnd)));
             return true;
         }, IntPtr.Zero);
 
         return list;
+    }
+
+
+    /// <summary>
+    /// Processes whose windows are never a place anyone means to go: the shell's own furniture.
+    ///
+    /// Deliberately short, and deliberately NOT holding ApplicationFrameHost or SystemSettings.
+    /// ApplicationFrameHost owns the frame window of every Store app, so blocking it hides
+    /// Settings, Mail, Photos and Windows Security along with the ghosts -- and the ghosts are
+    /// already handled: a suspended Store app's window is cloaked, and the cloak test drops it
+    /// while leaving a genuinely open one alone. The blocklist is the backstop, not the mechanism.
+    /// </summary>
+    /// <summary>Processes that host somebody else's window, so their name is not the app's name.</summary>
+    private static readonly string[] FrameHosts = { "ApplicationFrameHost" };
+
+    private static readonly string[] NeverSwitchable =
+    {
+        "TextInputHost", "ShellExperienceHost", "StartMenuExperienceHost",
+        "SearchHost", "SearchApp", "LockApp", "PeopleExperienceHost",
+        "Widgets", "WidgetBoard", "NVIDIA Overlay", "GameBar", "GameBarFTServer",
+    };
+
+    /// <summary>
+    /// The rules Alt+Tab itself uses, which is the list a person expects to see.
+    ///
+    /// The one that actually mattered here is the cloak test. UWP keeps a window alive per
+    /// suspended app, and IsWindowVisible answers true for those -- they are hidden by being
+    /// cloaked by the compositor, not by being invisible in the old sense. Without asking DWM,
+    /// every suspended Store app appears to be open.
+    /// </summary>
+    private static bool IsAltTabWindow(IntPtr hwnd)
+    {
+        var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
+        if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return false;
+
+        var style = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_STYLE);
+        if ((style & NativeMethods.WS_CHILD) != 0) return false;
+
+        // Only the root of an owner chain is switchable: a dialog belongs to the window that
+        // opened it, and listing both offers the same destination twice.
+        if (NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOTOWNER) != hwnd) return false;
+
+        try
+        {
+            if (NativeMethods.DwmGetWindowAttribute(
+                    hwnd, NativeMethods.DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
+                && cloaked != 0)
+                return false;
+        }
+        catch { /* pre-DWM or a locked-down window: fall through to the other rules */ }
+
+        // A window with no area is a message sink or a placeholder, never a destination -- but a
+        // minimized one reports 160x28 wherever Windows parks it, and those are the very windows
+        // a switcher exists to get back to. Two minimized File Explorer windows disappeared to
+        // this rule before it asked.
+        if (!NativeMethods.IsIconic(hwnd)
+            && NativeMethods.GetWindowRect(hwnd, out var r)
+            && (r.Right - r.Left < 32 || r.Bottom - r.Top < 32)) return false;
+
+        return true;
     }
 
     /// <summary>Which display a window's centre currently sits on.</summary>
@@ -205,6 +272,71 @@ public class WindowService
     }
 
     private const int CaptureWidth = 1280;
+
+    /// <summary>
+    /// A picture of a window, as a data URI, or null. This is what makes the switcher usable from
+    /// a sofa: a row of titles tells you nothing about which Chrome window is the right one.
+    ///
+    /// PrintWindow rather than a screen grab, because it asks the window to paint itself and so
+    /// works for one that is behind another, or on a display the TV is not showing.
+    /// PW_RENDERFULLCONTENT is the part that matters -- without it anything drawn through
+    /// DirectComposition, which is every UWP app and every modern browser, comes back blank.
+    ///
+    /// Minimized windows have no surface to paint and are skipped rather than returning a black
+    /// rectangle, which would read as a broken thumbnail rather than an absent one.
+    /// </summary>
+    public string? CaptureWindow(IntPtr hwnd)
+    {
+        if (!NativeMethods.IsWindow(hwnd) || NativeMethods.IsIconic(hwnd)) return null;
+        if (!NativeMethods.GetWindowRect(hwnd, out var r)) return null;
+
+        int w = r.Right - r.Left, h = r.Bottom - r.Top;
+        if (w < 32 || h < 32 || w > 16384 || h > 16384) return null;
+
+        IntPtr src = IntPtr.Zero, mem = IntPtr.Zero, bmp = IntPtr.Zero, prev = IntPtr.Zero;
+        try
+        {
+            src = NativeMethods.GetWindowDC(hwnd);
+            if (src == IntPtr.Zero) return null;
+            mem = NativeMethods.CreateCompatibleDC(src);
+            bmp = NativeMethods.CreateCompatibleBitmap(src, w, h);
+            if (mem == IntPtr.Zero || bmp == IntPtr.Zero) return null;
+            prev = NativeMethods.SelectObject(mem, bmp);
+
+            if (!NativeMethods.PrintWindow(hwnd, mem, NativeMethods.PW_RENDERFULLCONTENT))
+                return null;
+
+            // Scaled down here rather than in CSS: these go to the UI as base64 inside a JSON
+            // message, and a full-size 4K window would be several megabytes of string per row.
+            int tw = Math.Min(w, ThumbWidth);
+            int th = Math.Max(1, (int)Math.Round(h * (tw / (double)w)));
+            var source = Imaging.CreateBitmapSourceFromHBitmap(
+                bmp, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(tw, th));
+
+            var encoder = new JpegBitmapEncoder { QualityLevel = 70 };
+            encoder.Frames.Add(BitmapFrame.Create(source));
+            using var ms = new MemoryStream();
+            encoder.Save(ms);
+            return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Window capture failed: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            if (prev != IntPtr.Zero) NativeMethods.SelectObject(mem, prev);
+            if (bmp != IntPtr.Zero) NativeMethods.DeleteObject(bmp);
+            if (mem != IntPtr.Zero) NativeMethods.DeleteDC(mem);
+            if (src != IntPtr.Zero) NativeMethods.ReleaseDC(hwnd, src);
+        }
+    }
+
+    /// <summary>Wide enough to read at the size the switcher draws them, small enough that a
+    /// dozen of them are not a megabyte of JSON.</summary>
+    private const int ThumbWidth = 480;
+
 
     /// <summary>
     /// "Suspend": drop the displays into standby without suspending the machine. Sleep would need

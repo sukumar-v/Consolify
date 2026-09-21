@@ -166,8 +166,12 @@ public class UiBridge
             // ---- Power Wheel / in-game menu ----
 
             case "listWindows":
-                Push(new { type = "windows", windows = _windows.ListWindows(), displays = _displays.GetDisplays() });
+            {
+                var open = _windows.ListWindows();
+                Push(new { type = "windows", windows = open, displays = _displays.GetDisplays() });
+                StartThumbnails(open);
                 break;
+            }
 
             case "windowAction":
             {
@@ -392,6 +396,37 @@ public class UiBridge
         t.KeyboardApp = s.KeyboardApp;
         t.KeyboardScale = Math.Clamp(s.KeyboardScale, 0.6, 1.6);
     }
+
+
+    /// <summary>
+    /// Pictures of the open windows, pushed one at a time as they are taken.
+    ///
+    /// Deliberately not part of the list itself. PrintWindow asks a window to paint, which means
+    /// waiting on that window's message loop -- one busy or hung program would otherwise hold up
+    /// the whole switcher, and the switcher is the thing you open *because* something is stuck.
+    /// The menu draws immediately with titles and fills the pictures in underneath.
+    /// </summary>
+    private void StartThumbnails(IReadOnlyList<WindowInfo> open)
+    {
+        if (open.Count == 0) return;
+        Task.Run(() =>
+        {
+            foreach (var w in open.Take(MaxThumbnails))
+            {
+                string? image;
+                try { image = _windows.CaptureWindow(new IntPtr(w.Handle)); }
+                catch (Exception ex) { Log.Info($"Thumbnail for '{w.Title}' failed: {ex.Message}"); continue; }
+                if (image is null) continue;
+
+                _ = _window.Dispatcher.BeginInvoke(() =>
+                    Push(new { type = "windowThumb", handle = w.Handle, image }));
+            }
+        });
+    }
+
+    /// <summary>Past this many the list is scrolling anyway, and each picture costs a round trip
+    /// through another program's message loop.</summary>
+    private const int MaxThumbnails = 16;
 
     private void StartScan()
     {

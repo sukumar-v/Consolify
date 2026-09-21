@@ -500,6 +500,19 @@ body.no-legend .legend { display: none; }
 }
 .detail-titleblock h1 .fav-star { font-size: 60px; vertical-align: middle; margin-right: 18px; }
 
+
+/* A picture of the window in the switcher, shaped like the window itself. Wide enough to tell two
+   browser windows apart from a sofa, which is the whole reason it is here rather than a title. */
+.ov-thumb {
+  flex: 0 0 auto; width: 132px; height: 74px; border-radius: 8px;
+  background-size: cover; background-position: top center;
+  background-color: color-mix(in srgb, var(--ink) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--edge) 12%, transparent);
+}
+/* Taller than an icon row, so the picture has somewhere to sit. */
+.ov-row.has-thumb { min-height: 96px; }
+.ov-row.has-thumb .ov-label { gap: 20px; }
+
 /* ---- filter & sort overlay ---- */
 .filter-card { width: 760px; }
 .ov-row {
