@@ -300,7 +300,13 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
    of its own name. Those now sit in the box whole, with a little of the tile showing above and
    below, which is the cheaper of the two prices. */
 .tv-img {
-  position: absolute; inset: 0;
+  /* Inset, not flush.
+     A rounded corner clips whatever sits under it, and at this size a 16px radius reaches about
+     36 pixels into the source image -- enough to take the tip off a logo that runs to the edge.
+     Sitting the art 6px in puts its corners inside the arc: the corner of the box is 16px from
+     the centre of the radius, and a point 6px in is 14.1px from it, so nothing is cut. What is
+     left is a thin surface-coloured mat, which reads as a frame rather than as damage. */
+  position: absolute; inset: 6px;
   background-size: contain; background-position: center; background-repeat: no-repeat;
 }
 .tv-initials {

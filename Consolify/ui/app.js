@@ -858,13 +858,19 @@ function artFit(el, w, h) {
   return (off > 1 ? off : 1 / off) > ART_FIT_TOLERANCE ? "contain" : "cover";
 }
 
-function applyArt(g, el, url) {
+/**
+ * `fit` forces the sizing for art that is scenery rather than a tile. A full-bleed backdrop must
+ * always cover: it has no edges of its own to protect, and letterboxing one leaves bars down the
+ * screen -- which is what artFit did to the detail page, whose 3:1 hero is nowhere near its 16:9
+ * box. Only tiles, whose art carries the game's name near the edges, are worth fitting.
+ */
+function applyArt(g, el, url, fit) {
   if (!url) { paintPlaceholder(g, el); return; }
   queueArt(url, (src, w, h) => {
     if (!el.isConnected) return;          // tile was re-rendered while loading
     if (!src) { paintPlaceholder(g, el); return; }
     el.style.backgroundImage = `url('${src}')`;
-    el.style.backgroundSize = artFit(el, w, h);
+    el.style.backgroundSize = fit || artFit(el, w, h);
     el.style.backgroundRepeat = "no-repeat";
   });
 }
@@ -1508,6 +1514,33 @@ function releaseYear(date) {
 }
 
 /*
+ * The numbers along the bottom. Built rather than hard-coded so a stat that has nothing to say
+ * can be left out entirely: "SESSIONS —" next to "AVG SESSION —" on a game you have never opened
+ * is four words saying nothing, and a row of dashes is what made this page feel like a form.
+ *
+ * Playtime and size are always shown, even at zero, because their absence would read as missing
+ * data rather than as a game you have not played.
+ */
+function renderDetailStats(g) {
+  const el = $("detailStats");
+  const stats = [];
+  const add = (label, value) => { if (value) stats.push({ label, value }); };
+
+  stats.push({ label: "PLAYTIME", value: fmtPlaytime(g.playtimeMinutes) });
+  add("SESSIONS", g.sessions > 0 ? String(g.sessions) : null);
+  // Worth more than the raw total: it says whether this is a game you dip into or disappear into.
+  add("AVG SESSION", g.sessions > 0 && g.playtimeMinutes > 0
+    ? fmtPlaytime(g.playtimeMinutes / g.sessions) : null);
+  add("LAST PLAYED", g.lastPlayed ? fmtLastPlayed(g.lastPlayed) : null);
+  add("RELEASED", g.releaseDate || null);
+  stats.push({ label: g.installed ? "ON DISK" : "DOWNLOAD", value: fmtSize(g.sizeBytes) });
+
+  el.innerHTML = stats.map(s =>
+    `<div class="stat"><div class="stat-label mono">${esc(s.label)}</div>` +
+    `<div class="stat-value">${esc(s.value)}</div></div>`).join("");
+}
+
+/*
  * The line under the title. It used to say how the game launches and where its files are, which
  * is troubleshooting detail on the one screen meant to sell you on playing something -- that has
  * moved to Manage, where you go when you actually want to change it.
@@ -1539,6 +1572,9 @@ function renderDetailFacts(g) {
   const year = releaseYear(g.releaseDate);
   if (year) bits.push(year);
   if (g.developer) bits.push(g.developer);
+  // Only when it is somebody else. On the great majority of games the publisher is the
+  // developer, and printing the same name twice reads as a mistake.
+  if (g.publisher && g.publisher !== g.developer) bits.push(g.publisher);
   // Three is what fits before the row starts wrapping, and the first three are the useful ones --
   // Steam lists "Indie" and "Casual" after whatever the game actually is.
   if (g.genres && g.genres.length) bits.push(g.genres.slice(0, 3).join(", "));
@@ -1566,13 +1602,21 @@ function renderDetail() {
   $("detailFav").style.display = g.favorite ? "" : "none";
   $("favLegend").textContent = g.favorite ? "Unfavorite" : "Favorite";
 
+  // The wordmark, where the art we already fetch has one. It is the game's own lettering rather
+  // than ours, which is most of what makes this page look like a storefront instead of a form.
+  // The text title stays in the DOM as the fallback and for anything reading the page.
+  const logo = $("detailLogo"), titleRow = $("detailTitleRow");
+  const logoSrc = logoUrl(g);
+  logo.hidden = !logoSrc;
+  titleRow.hidden = !!logoSrc;
+  if (logoSrc) {
+    logo.style.backgroundImage = `url('${logoSrc}')`;
+    logo.setAttribute("aria-label", g.title);
+  }
+
   renderDetailFacts(g);
   $("detailDesc").textContent = g.description || "";
-
-  $("statPlaytime").textContent = fmtPlaytime(g.playtimeMinutes);
-  $("statLastPlayed").textContent = fmtLastPlayed(g.lastPlayed);
-  $("statSessions").textContent = g.sessions > 0 ? String(g.sessions) : "—";
-  $("statSize").textContent = fmtSize(g.sizeBytes);
+  renderDetailStats(g);
 
   $("playLabel").textContent = g.playtimeMinutes > 0 ? "Continue" : "Play";
 
@@ -1580,7 +1624,7 @@ function renderDetail() {
   art.className = "detail-art";
   art.innerHTML = "";
   art.style.background = "";
-  applyArt(g, art, heroUrl(g));
+  applyArt(g, art, heroUrl(g), "cover");
 
   document.querySelectorAll("#detailActions .pill-btn").forEach(el => {
     el.onmouseenter = () => { if (hoverEnabled()) { setFocusEl(el); paintNav(); } };

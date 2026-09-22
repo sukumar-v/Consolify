@@ -181,3 +181,19 @@ Stop the scrolled grid from clipping through the All games header
   handles on every list) and falls back to the window's icon, flagged as `IsIcon` so the UI
   draws it inside the box rather than cover-cropping a 32px square into a smear. Alt+Tab shows
   a real picture because DWM keeps the last composed frame; there is no public way to read that.
+- Rounded corners clip whatever is under them. At tile size a 16px radius reaches ~36 pixels into
+  the source, enough to take the tip off a logo that runs to the edge, so tile art is inset clear
+  of the arc: Marquee's `.tv-img` by 6px, the default theme's landscape tiles with `padding` plus
+  `background-origin: content-box`. The placeholder still fills the tile because
+  `paintPlaceholder` sets the `background` shorthand, which resets `background-origin`.
+- `applyArt` takes an optional `fit`. Scenery must always `cover` — a full-bleed backdrop has no
+  edges of its own to protect, and `artFit` letterboxed the detail page's 3:1 hero inside its
+  16:9 box, which is where the black bars came from. Only tiles are worth fitting.
+- The detail page bands its hero the same way the library does (62% of the height, masked out at
+  the bottom) rather than stretching a 3:1 picture over a 16:9 screen. Steam has no good 16:9
+  backdrop to use instead: `page_bg_generated_v6b.jpg` is 16:9 but only 28-63 KB of
+  auto-generated blur.
+- `.detail-main` is anchored with `margin-top: auto`. A game with no metadata has a much shorter
+  column than one with everything, and centring put the Play button in a different place on each.
+- The detail page uses `LogoFile` when there is one, falling back to the text title. Both stay in
+  the DOM; `renderDetail` toggles `hidden`.

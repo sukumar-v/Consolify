@@ -102,17 +102,15 @@
 
       <div class="detail-main">
         <div class="detail-titleblock">
-          <h1><span id="detailFav" class="fav-star" style="display:none">★</span><span id="detailTitle">—</span></h1>
+          <!-- The game's own wordmark when we have one, the title as text when we do not. Both
+               are always in the DOM; renderDetail shows whichever applies. -->
+          <div class="detail-logo" id="detailLogo" hidden></div>
+          <h1 id="detailTitleRow"><span id="detailFav" class="fav-star" style="display:none">★</span><span id="detailTitle">—</span></h1>
           <div class="detail-facts" id="detailFacts"></div>
           <p id="detailDesc"></p>
         </div>
 
-        <div class="detail-stats">
-          <div class="stat"><div class="stat-label mono">PLAYTIME</div><div class="stat-value" id="statPlaytime">—</div></div>
-          <div class="stat"><div class="stat-label mono">LAST PLAYED</div><div class="stat-value" id="statLastPlayed">—</div></div>
-          <div class="stat"><div class="stat-label mono">SESSIONS</div><div class="stat-value" id="statSessions">—</div></div>
-          <div class="stat"><div class="stat-label mono">INSTALLED</div><div class="stat-value" id="statSize">—</div></div>
-        </div>
+        <div class="detail-stats" id="detailStats"></div>
 
         <div class="detail-actions" id="detailActions">
           <div class="pill-btn pill-primary" data-act="play" data-focusable data-focus-key="detail:play">

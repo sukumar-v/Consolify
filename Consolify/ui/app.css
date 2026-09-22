@@ -151,6 +151,10 @@ html, body {
   position: relative; width: 300px; height: 168px; border-radius: 14px;
   overflow: hidden; background-color: var(--surface);
   background-size: cover; background-position: center;
+  /* Keeps the art clear of the rounded corners, which would otherwise clip a logo that runs to
+     the edge. The placeholder still fills the tile: it is set through the `background`
+     shorthand, which resets background-origin to padding-box. */
+  padding: 5px; background-origin: content-box;
   transition: opacity 200ms linear;
 }
 .zone-dim .cont-art { opacity: 0.55; }
@@ -246,53 +250,85 @@ body.no-legend .legend { display: none; }
 
 /* ---- detail screen ---- */
 #screen-detail { background: var(--bg); }
+/* The hero hangs in a band at its own aspect rather than being stretched over the whole screen,
+   the same treatment the library uses. Steam's hero is 3.1:1, so a band 58% of the height shows
+   the whole width at close to 1:1 -- covering the full screen with it instead meant cropping
+   nearly half the picture away and blowing up what was left.
+
+   62% rather than the library's 58%: there is no dock down here, so the art can run further
+   before the text needs the room. */
 .detail-art {
-  position: absolute; inset: 0;
-  background-size: cover; background-position: center; background-color: var(--surface);
+  position: absolute; inset: 0 0 auto 0; height: 62%;
+  background-size: cover; background-position: top center; background-repeat: no-repeat;
+  background-color: var(--surface);
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 58%, transparent 99%);
+          mask-image: linear-gradient(180deg, #000 0, #000 58%, transparent 99%);
 }
-.detail-shade-x { position: absolute; inset: 0; background: linear-gradient(90deg, var(--bg) 26%, color-mix(in srgb, var(--bg) 72%, transparent) 58%, color-mix(in srgb, var(--bg) 25%, transparent) 100%); }
-.detail-shade-y { position: absolute; inset: 0; background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 40%); }
+/* Lighter than it was on both axes. The art no longer sits behind the whole column, so the
+   scrims only have to carry the crumb at the top and the title where the two overlap. */
+.detail-shade-x { position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 58%, transparent) 0, color-mix(in srgb, var(--bg) 20%, transparent) 52%, transparent 100%); }
+.detail-shade-y { position: absolute; inset: 0; background: linear-gradient(0deg, var(--bg) 26%, color-mix(in srgb, var(--bg) 70%, transparent) 46%, transparent 72%); }
+/* The type here was set a size larger than it needed to be all the way down, which on a 1920
+   stage made a two-line title out of most names and left the column reading as one dense block.
+   Everything below is a step smaller with more air between the groups: the page has plenty of
+   room, and the art behind it is meant to be visible. */
 .detail-content {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  justify-content: space-between; padding: 72px 80px 34px;
+  justify-content: space-between; padding: 60px 88px 40px;
 }
 .detail-content .legend { padding: 30px 0 0; }
 .crumb { display: flex; align-items: center; gap: 16px; font-size: 18px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 45%, transparent); }
 .crumb-here { color: color-mix(in srgb, var(--ink) 80%, transparent); }
-.detail-main { display: flex; flex-direction: column; gap: 44px; align-items: flex-start; }
-.detail-titleblock { display: flex; flex-direction: column; gap: 22px; max-width: 920px; }
+/* Anchored to the bottom rather than floating in the middle. A game with no metadata has a much
+   shorter column than one with everything, and centring meant the two pages put their Play button
+   in different places -- this way the buttons and stats land where you expect them either way,
+   and whatever is left over goes to the art. */
+.detail-main {
+  display: flex; flex-direction: column; gap: 62px; align-items: flex-start;
+  margin-top: auto; margin-bottom: 52px;
+}
+.detail-titleblock { display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
 .detail-titleblock h1 {
-  margin: 0; font-size: 88px; font-weight: 600;
-  letter-spacing: -0.035em; line-height: 1.02;
+  /* 62px keeps all but the longest names on one line, where 88px wrapped most of them. */
+  margin: 0; font-size: 62px; font-weight: 600;
+  letter-spacing: -0.028em; line-height: 1.08;
 }
 .detail-titleblock p {
-  margin: 0; font-size: 26px; line-height: 1.6;
-  color: color-mix(in srgb, var(--ink) 62%, transparent); text-wrap: pretty; max-width: 900px;
+  /* Narrower than the title block on purpose: ~70 characters is a comfortable measure, and a
+     blurb running the full 900px is a wall. */
+  margin: 0; font-size: 22px; line-height: 1.75;
+  color: color-mix(in srgb, var(--ink) 60%, transparent); text-wrap: pretty; max-width: 740px;
   /* Store blurbs run to a paragraph; three lines is about as much as anyone reads from a sofa,
      and an unclamped one pushes the stats and the Play button down the screen. */
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
-.detail-stats { display: flex; gap: 64px; }
+/* A hairline above the numbers, which is the only structure this column needs: it separates the
+   pitch from the facts without drawing a box round either. */
+.detail-stats {
+  display: flex; gap: 76px;
+  padding-top: 34px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+}
 
-.stat { display: flex; flex-direction: column; gap: 8px; }
-.stat-label { font-size: 16px; letter-spacing: 0.14em; color: color-mix(in srgb, var(--ink) 40%, transparent); }
-.stat-value { font-size: 34px; font-weight: 500; }
+.stat { display: flex; flex-direction: column; gap: 10px; }
+.stat-label { font-size: 15px; letter-spacing: 0.16em; color: color-mix(in srgb, var(--ink) 38%, transparent); }
+.stat-value { font-size: 27px; font-weight: 500; }
 
 /* The line under the title on the detail page. Sized to sit between the 88px title and the 26px
    description without competing with either. */
 .detail-facts {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
-  font-size: 24px; color: color-mix(in srgb, var(--ink) 72%, transparent);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 13px;
+  font-size: 21px; color: color-mix(in srgb, var(--ink) 70%, transparent);
 }
 .detail-facts:empty, .detail-titleblock p:empty { display: none; }
 .fact-dot { color: color-mix(in srgb, var(--ink) 30%, transparent); }
 .fact-score {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 54px; height: 54px; padding: 0 12px; border-radius: 12px;
-  font-size: 30px; font-weight: 650; letter-spacing: -0.02em;
+  min-width: 46px; height: 46px; padding: 0 11px; border-radius: 11px;
+  font-size: 25px; font-weight: 650; letter-spacing: -0.02em;
   color: var(--bg-deep); background: var(--score);
   /* Sits first in the row, so it needs a little air before the text facts start. */
-  margin-right: 6px;
+  margin-right: 5px;
 }
 /* Metacritic's bands, in Metacritic's colours -- the number is only shorthand if the colour
    matches the one people already know. */
@@ -300,8 +336,8 @@ body.no-legend .legend { display: none; }
 .fact-score[data-band="mixed"] { --score: #ffcc33; }
 .fact-score[data-band="poor"]  { --score: #ff6666; }
 .fact-chip {
-  display: inline-flex; align-items: center; height: 44px; padding: 0 18px;
-  border-radius: 22px; font-size: 20px; font-weight: 500;
+  display: inline-flex; align-items: center; height: 38px; padding: 0 16px;
+  border-radius: 19px; font-size: 18px; font-weight: 500;
   color: color-mix(in srgb, var(--ink) 78%, transparent);
   background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
@@ -310,26 +346,26 @@ body.no-legend .legend { display: none; }
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.detail-actions { display: flex; align-items: center; gap: 24px; }
+.detail-actions { display: flex; align-items: center; gap: 20px; }
 .pill-btn {
-  display: flex; align-items: center; height: 92px; border-radius: 46px;
+  display: flex; align-items: center; height: 78px; border-radius: 39px;
   flex: 0 0 auto; white-space: nowrap;
   transition: box-shadow 180ms linear, border-color 180ms linear;
 }
 .pill-primary {
-  gap: 18px; padding: 0 52px; background: var(--accent); color: var(--on-accent);
+  gap: 16px; padding: 0 44px; background: var(--accent); color: var(--on-accent);
 }
-.pill-primary span { font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+.pill-primary span { font-size: 27px; font-weight: 600; letter-spacing: -0.01em; }
 .pill-primary.focused { animation: focusPulse 2.4s ease-in-out infinite; }
 .pill-a-badge {
-  width: 38px; height: 38px; border-radius: 50%;
+  width: 34px; height: 34px; border-radius: 50%;
   background: color-mix(in srgb, var(--bg-deep) 85%, transparent); color: var(--accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 19px; font-weight: 700; flex: 0 0 auto;
 }
 .pill-secondary {
-  padding: 0 40px; border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
-  font-size: 28px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
+  padding: 0 34px; border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  font-size: 24px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
 }
 .pill-secondary.focused {
   border-color: var(--accent);
@@ -498,7 +534,15 @@ body.no-legend .legend { display: none; }
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; color: var(--accent);
 }
-.detail-titleblock h1 .fav-star { font-size: 60px; vertical-align: middle; margin-right: 18px; }
+.detail-titleblock h1 .fav-star { font-size: 42px; vertical-align: middle; margin-right: 16px; }
+
+/* The wordmark. Bounded on both axes because logos come in every shape there is -- a wide
+   lockup and a tall crest both have to land on the same line without pushing the page around.
+   contain, left-aligned, so it is never stretched. */
+.detail-logo {
+  width: 620px; height: 132px;
+  background-size: contain; background-position: left center; background-repeat: no-repeat;
+}
 
 
 /* A picture of the window in the switcher, shaped like the window itself. Wide enough to tell two
@@ -630,6 +674,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .playing-art {
   width: 374px; height: 100%; flex: 0 0 auto;
   background-color: var(--surface); background-size: cover; background-position: center;
+  padding: 5px; background-origin: content-box;
 }
 .playing-info { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .playing-name { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
