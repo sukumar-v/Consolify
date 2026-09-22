@@ -246,8 +246,16 @@ public class LibraryStore
                     s.BannerFile = KeepBest(s.BannerFile, old.BannerFile);
                     s.HeroFile = KeepBest(s.HeroFile, old.HeroFile);
                     s.LogoFile = KeepBest(s.LogoFile, old.LogoFile);
+                    // No KeepBest: a scan never finds a backdrop, so there is nothing to weigh it
+                    // against. It was missing from this list entirely, which meant every scan
+                    // dropped it and the next enrich had to fetch it again.
+                    s.BackdropFile = old.BackdropFile;
 
-                    // Fetched metadata is not discoverable from disk at all.
+                    // Fetched metadata is not discoverable from disk at all. EVERY fetched field
+                    // has to be listed here -- the same trap as CopySettings, and it fails the
+                    // same silent way: PegiRating was missing, so a rating would have been wiped
+                    // by the next scan and the feature would have looked broken with nothing in
+                    // the code to point at.
                     s.Description = old.Description;
                     s.Developer = old.Developer;
                     s.Publisher = old.Publisher;
@@ -255,9 +263,14 @@ public class LibraryStore
                     s.ReleaseDate = old.ReleaseDate;
                     s.CriticScore = old.CriticScore;
                     s.CriticSource = old.CriticSource;
+                    s.PegiRating = old.PegiRating;
                     s.ControllerSupport = old.ControllerSupport;
                     s.MetadataSource = old.MetadataSource;
                     s.MetadataFetched = old.MetadataFetched;
+                    // Without this the stamp resets to 0 on every scan, every game looks like it
+                    // was filled in by an older build, and the whole library is re-fetched on
+                    // every single start.
+                    s.MetadataVersion = old.MetadataVersion;
                     // user overrides survive rescans
                     if (!string.IsNullOrWhiteSpace(old.Args)) s.Args = old.Args;
                     if (old.PreferDirectLaunch) { s.PreferDirectLaunch = true; s.ExePath = old.ExePath; }
@@ -277,11 +290,28 @@ public class LibraryStore
     /// picture, or a shape the local cache does not hold at all -- and a user's hand-picked cover
     /// wins over both, which is what the "custom_" prefix marks.
     /// </summary>
+    /// <summary>
+    /// Art a scan may replace, and art it may not.
+    ///
+    /// The scan only ever finds Steam's local cache, which is half size and whatever shape the
+    /// client happened to store -- so anything MetadataService downloaded or the user chose has
+    /// to outlast a rescan, or every start would throw the good art away and the library would
+    /// visibly change between sessions.
+    ///
+    /// The markers below ARE the naming scheme, so they have to move with it. When the fetched
+    /// names changed from "_hd*" to "_st_*"/"_sv_*" this test went on matching the old one, which
+    /// meant it stopped recognising fetched art at all and every scan quietly reverted the whole
+    /// library to the local cache. "_hd" stays in the list for installs that have not re-fetched
+    /// yet; it costs nothing and its absence would cost them their art for one pass.
+    /// </summary>
+    private static readonly string[] FetchedMarkers = { "_st_", "_sv_", "_hd" };
+
     private static string? KeepBest(string? scanned, string? existing)
     {
         if (existing is null) return scanned;
         if (scanned is null) return existing;
-        var kept = existing.Contains("_hd") || existing.StartsWith("custom_", StringComparison.Ordinal);
+        var kept = existing.StartsWith("custom_", StringComparison.Ordinal)
+                   || FetchedMarkers.Any(m => existing.Contains(m, StringComparison.Ordinal));
         return kept ? existing : scanned;
     }
 

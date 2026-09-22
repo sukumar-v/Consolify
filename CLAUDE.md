@@ -146,11 +146,49 @@ Stop the scrolled grid from clipping through the All games header
 - The hero is fetched at 2x (`library_hero_2x.jpg`, 3840x1240) where it exists. `.bd` is
   inset -80px, so on a 1920x1080 stage it covers 2080x1240 — from the 1x hero that was a
   2x upscale showing 54% of the width, which is what "zoomed in and blurry" was.
-- Each Steam art entry carries its own filename suffix, so a name on disk says which
-  source it came from. That is what lets an install pick up a better source later while
-  still skipping downloads for art it already has; one shared name per slot forced a
-  choice between the two. Renaming a suffix orphans the old files in the covers dir,
-  which is a cache and harmless.
+- **An art file's name has to carry the SOURCE as well as the slot.** It used to be slot plus
+  extension — `_hdtile` + `.jpg` — so Steam's 616x353 capsule and SteamGridDB's 920x430 grid,
+  which is also served as .jpg, resolved to the same path. The service overwrote the capsule in
+  place; every later pass found a file *named* like a capsule, skipped the download because it
+  already existed, and pointed the tile at 2.14:1 art. Twenty tiles with a blurred mat under
+  them and not one line of code that said why. Names are now `<id>_st_<slot>.<ext>` and
+  `<id>_sv_<slot>.<ext>`, so two sources can hold the same slot on disk and which one a game
+  uses is decided by the code that runs, not by whoever wrote last. Renaming a suffix orphans
+  the old files, which is a cache and harmless — but bump `FetchVersion` with it.
+- Every download is shape-checked against the slot it is going into (`Fits` / `Bounds`), and a
+  picture of the wrong shape is deleted rather than assigned. IGDB's `artworks` are whatever
+  somebody uploaded: taking the first one for the backdrop put a 1080x1080 square behind
+  DREDGE's screen and an 810x1080 portrait behind Hollow Knight's, and because the backdrop
+  follows the highlight, walking along a row changed the shape of the picture every few tiles.
+  The bounds are wide on purpose — they reject the wrong KIND of picture, not one a few percent
+  off. Art we cannot decode (SteamGridDB serves .webp) is accepted rather than discarded.
+- `heroUrl` stops at the tile. It must never fall back to the portrait cover: 2:3 art hung
+  across a screen at its own aspect is a tall column of box art, and a flat colour is the
+  better answer for a game with no wide art at all.
+- **One priority order for art, best source first, and the first to fill a slot keeps it.** Steam's
+  fixed-size library assets lead (`SteamPreferred`: capsule 616x353, library_600x900_2x,
+  library_hero_2x), then the service for what Steam has nothing for and for every non-Steam game,
+  then Steam's leftovers (`SteamFallback`: header.jpg, the 1x hero, logo.png). Facts still come
+  from the service first — this is only about pictures.
+- **`StoreRemoteAsync` has to honour `filled`.** It did not, while the Steam CDN loop did, so
+  "the capsule gets first refusal" was true for exactly the two lines until the service ran and
+  overwrote it. A rule that only some callers obey is not a rule; put the gate in the one place
+  every caller goes through.
+- **Three separate places key off the art naming scheme, and a rename has to move all of them:**
+  `MetadataService` (writes the names), `MetadataService.HasFetchedArt`, and
+  `LibraryStore.KeepBest`. KeepBest went on testing for the retired `_hd` after the rename, so it
+  stopped recognising fetched art and every scan reverted the whole library to Steam's local
+  half-size cache — which is what "the artwork keeps changing" was on restart, as opposed to the
+  overwrite bug that caused it within a pass.
+- `MergeScanned` has to list every fetched field, exactly like `CopySettings`, and it fails the
+  same silent way. `BackdropFile`, `PegiRating` and `MetadataVersion` were all missing: the
+  backdrop was dropped and refetched on every scan, a PEGI rating would have been wiped the
+  moment the proxy started sending one, and the version stamp resetting to 0 made every game look
+  stale so the whole library refetched on every single start.
+- `setBackdrop` keys on the game id **and the resolved URL**. On the id alone it skipped the
+  repaint whenever the highlight had not moved — including the push right after a metadata pass
+  swapped the art out from under it, which left the element pointing at a file that no longer
+  existed and the screen black until you moved.
 - The shared service is asked **first**, Steam second as the fallback. What makes that safe
   is that both are asked by Steam app id when there is one: IGDB via
   `external_games.category = 1`, SteamGridDB via `/games/steam/<appid>`. An id lookup

@@ -45,7 +45,23 @@ public class MetadataService
     /// about not re-hitting the network for the same answer; it was never meant to pin a library
     /// to whatever the app happened to know the day it first scanned.
     /// </summary>
-    private const int FetchVersion = 2;
+    private const int FetchVersion = 3;
+
+    /// <summary>
+    /// Which source wrote a file, as part of its name.
+    ///
+    /// This is the whole reason the capsule fix did not work the first time. A slot's file was
+    /// named for the slot and the extension only -- "_hdtile" + ".jpg" -- so Steam's 616x353
+    /// capsule and SteamGridDB's 920x430 grid, which is also served as .jpg, resolved to the
+    /// SAME PATH. The service ran, overwrote the capsule in place, and every later pass found a
+    /// file that was named like a capsule, skipped the download because it already existed, and
+    /// pointed the tile at 2.14:1 art. Every tile in the library had a blurred mat under it and
+    /// nothing in the code said why.
+    ///
+    /// With the source in the name the two can coexist on disk, and which one a game uses is
+    /// decided by the code that runs rather than by whichever provider wrote last.
+    /// </summary>
+    private const string Steam = "_st", Service = "_sv";
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -64,33 +80,47 @@ public class MetadataService
     /// <summary>Which picture a file is, independent of what it ends up called on disk.</summary>
     private enum Slot { Cover, Tile, Hero, Backdrop, Logo }
 
+    // Steam serves all of these straight off its CDN, unauthenticated, for any app id, at their
+    // original sizes rather than the half-size copies the client keeps on disk.
+    //
+    // capsule_616x353 is the one that matters for a landscape tile: it has the logo burnt in, so a
+    // tile reads as the game at a glance from across a room. Not every app has one -- header.jpg
+    // (2.14:1) is the fallback and always exists, and is why tiles must never be cover-cropped.
+    //
+    // The hero is taken at 2x. The backdrop element is inset -80px, so on a 1920x1080 stage it is
+    // 2080x1240 -- and covering that from the 1920x620 hero meant a 2x upscale showing 54% of the
+    // width, which is exactly the "zoomed in and blurry" it looked like. library_hero_2x is
+    // 3840x1240: the same crop, but every pixel is now one pixel or better.
+
     /// <summary>
-    /// Steam serves these straight off its CDN, unauthenticated, for any app id. The sizes are the
-    /// originals rather than the half-size copies the client keeps on disk.
+    /// Steam's official library assets, asked for BEFORE the service and given first refusal on
+    /// their slots. Each is published at a fixed size that is exactly what the app's boxes are cut
+    /// to, and "fixed size" is the whole point: a tile is 1.75:1 because capsule_616x353 is, and a
+    /// hero is 3.1:1 because library_hero is.
     ///
-    /// capsule_616x353 is the one that matters for a landscape tile: it has the logo burnt in, so a
-    /// tile reads as the game at a glance from across a room. Not every app has one -- header.jpg
-    /// (2.14:1) is the fallback and always exists, and is why tiles must never be cover-cropped.
-    ///
-    /// The hero is taken at 2x. The backdrop element is inset -80px, so on a 1920x1080 stage it is
-    /// 2080x1240 -- and covering that from the 1920x620 hero meant a 2x upscale showing 54% of the
-    /// width, which is exactly the "zoomed in and blurry" it looked like. library_hero_2x is
-    /// 3840x1240: the same crop, but every pixel is now one pixel or better.
+    /// The service is still asked first for facts, and it still owns every slot Steam has nothing
+    /// for. But its ART is community-uploaded and comes in whatever shape somebody made it --
+    /// SteamGridDB's landscape grids are all 2.14:1, IGDB's artworks run from 0.75:1 to 3.1:1 --
+    /// so letting it win a slot Steam publishes properly meant the library's tiles changed shape
+    /// depending on which pass ran last. That is what "the artwork keeps changing" was.
     /// </summary>
-    /// Each carries its own file suffix rather than sharing one per slot, so a name on disk says
-    /// which source it came from. That is what lets an existing install pick up a better source --
-    /// the 2x hero did not exist here until recently -- while still skipping a download for art it
-    /// already has. Sharing one name per slot meant either re-downloading the library every pass or
-    /// never being able to improve it.
-    private static readonly (string Remote, Slot Slot, string Suffix)[] SteamArt =
+    private static readonly (string Remote, Slot Slot, string Suffix)[] SteamPreferred =
     {
-        ("library_600x900_2x.jpg", Slot.Cover, "_hd"),       // the full-size portrait, 600x900 up
-        // The capsule is not here: it is asked for before the service, not after. See
-        // PreferSteamCapsuleAsync. header.jpg is the fallback for it and stays where it is.
-        ("header.jpg",             Slot.Tile,  "_hdhead"),   // 460x215 fallback for the above
-        ("library_hero_2x.jpg",    Slot.Hero,  "_hdhero2x"), // 3840x1240 -- see below
-        ("library_hero.jpg",       Slot.Hero,  "_hdhero"),   // 1920x620, the fallback
-        ("logo.png",               Slot.Logo,  "_hdlogo"),   // transparent wordmark
+        ("capsule_616x353.jpg",    Slot.Tile,  Steam + "_cap"),    // 616x353, the landscape tile
+        ("library_600x900_2x.jpg", Slot.Cover, Steam + "_cover"),  // 600x900, portrait box art
+        ("library_hero_2x.jpg",    Slot.Hero,  Steam + "_hero2x"), // 3840x1240 -- see below
+    };
+
+    /// <summary>
+    /// The rest of Steam's art, asked for after the service as the last fallback. These are the
+    /// ones that are either the wrong shape (header.jpg is 2.14:1) or a lower-resolution copy of
+    /// something above, so anything the service has beats them.
+    /// </summary>
+    private static readonly (string Remote, Slot Slot, string Suffix)[] SteamFallback =
+    {
+        ("header.jpg",       Slot.Tile, Steam + "_head"),   // 460x215, for apps with no capsule
+        ("library_hero.jpg", Slot.Hero, Steam + "_hero"),   // 1920x620, the 1x hero
+        ("logo.png",         Slot.Logo, Steam + "_logo"),   // transparent wordmark
     };
 
     /// <summary>
@@ -151,15 +181,15 @@ public class MetadataService
                 var filled = CustomSlots(g);
                 var touched = false;
 
-                // One exception to "the service first", and only one picture: Steam's
-                // capsule_616x353 is 1.75:1, which is the shape every landscape tile in the app is
-                // cut to. See PreferSteamCapsuleAsync.
-                if (appId is not null) touched |= await PreferSteamCapsuleAsync(g, appId, filled, ct);
+                // One priority order for art, best source first, and the first to fill a slot
+                // keeps it. Steam's own library assets lead because they are published at fixed
+                // sizes that are exactly the shapes this app's boxes are cut to.
+                if (appId is not null) touched |= await PreferSteamArtAsync(g, appId, filled, ct);
 
-                // Then the service, then Steam for whatever it did not answer. SteamGridDB's art
-                // is often better shaped than Steam's own -- a proper landscape tile for a game
-                // that only publishes a 2.14:1 header -- while Steam still holds the Metacritic
-                // score and the controller-support flag, which IGDB has no equivalent of.
+                // Then the service, for the slots Steam has nothing for -- a landscape tile for a
+                // game with no capsule, a wordmark, 16:9 key art -- and for every non-Steam game,
+                // where it is the only source there is. Facts come from here first regardless;
+                // Steam still holds the Metacritic score and the controller-support flag.
                 var (elsewhere, serviceFacts) = await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
                 touched |= elsewhere;
 
@@ -244,7 +274,7 @@ public class MetadataService
     /// art" forever and puts its game back in the queue on every single start.
     /// </summary>
     private static bool HasFetchedArt(Game g) =>
-        g.BannerFile is { } b && (b.Contains("_hd") || IsCustom(b))
+        g.BannerFile is { } b && (b.Contains(Steam) || b.Contains(Service) || IsCustom(b))
         && File.Exists(Path.Combine(Paths.CoversDir, b));
 
     private static string? SteamAppId(Game g) =>
@@ -276,35 +306,30 @@ public class MetadataService
     }
 
     /// <summary>
-    /// The one picture worth asking Steam for before anything else: capsule_616x353, which is
-    /// 1.75:1 and is exactly the shape every landscape tile in the app is cut to.
-    ///
-    /// SteamGridDB's landscape grids are 920x430 and 460x215, and both are 2.14:1. Letting the
-    /// service take the tile slot first -- the right order for everything else, since an id lookup
-    /// cannot answer with the wrong game -- therefore replaced a capsule that filled its tile
-    /// corner to corner with art that leaves a strip top and bottom. Every tile in the library
-    /// grew a blurred mat: the bed doing its job on art that never needed it.
-    ///
-    /// First refusal, and nothing more. A game that publishes no capsule -- REANIMAL and Forza
-    /// Horizon 6 both 404 for it -- falls through to the service untouched, and a 2.14:1 grid is
-    /// still a far better tile than Steam's 460x215 header.
+    /// Steam's own art, before the service. A game that publishes none of it -- REANIMAL and
+    /// Forza Horizon 6 both 404 for the capsule -- falls through untouched and the service fills
+    /// the slot instead, which is what it is there for.
     /// </summary>
-    private async Task<bool> PreferSteamCapsuleAsync(Game g, string appId, HashSet<Slot> filled,
-        CancellationToken ct) =>
-        await FetchSteamEntryAsync(g, appId, SteamCapsule, filled, ct);
-
-    private static readonly (string Remote, Slot Slot, string Suffix) SteamCapsule =
-        ("capsule_616x353.jpg", Slot.Tile, "_hdtile");
+    private async Task<bool> PreferSteamArtAsync(Game g, string appId, HashSet<Slot> filled,
+        CancellationToken ct)
+    {
+        var any = false;
+        foreach (var entry in SteamPreferred)
+        {
+            if (ct.IsCancellationRequested) break;
+            any |= await FetchSteamEntryAsync(g, appId, entry, filled, ct);
+        }
+        return any;
+    }
 
     private async Task<bool> FetchSteamArtAsync(Game g, string appId, string? headerImage,
         HashSet<Slot> filled, CancellationToken ct)
     {
         var any = false;
 
-        // Which slots this pass has already filled. Several entries compete for one slot -- the
-        // capsule then header.jpg, the 2x hero then the 1x -- and they are listed best first, so
-        // the first to succeed wins and the rest are skipped for that slot.
-        foreach (var entry in SteamArt)
+        // Whatever is still empty after the preferred assets and the service. Listed best first,
+        // and a slot already filled is skipped.
+        foreach (var entry in SteamFallback)
         {
             if (ct.IsCancellationRequested) break;
             any |= await FetchSteamEntryAsync(g, appId, entry, filled, ct);
@@ -314,7 +339,7 @@ public class MetadataService
         // the game rather than a filename because the loop above may have written a tile from a
         // legacy path already, and that one is the better shape.
         if (!filled.Contains(Slot.Tile) && !string.IsNullOrWhiteSpace(headerImage))
-            any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, filled, ct);
+            any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, filled, ct, Steam);
 
         return any;
     }
@@ -328,12 +353,23 @@ public class MetadataService
         var name = ArtPrefix(g) + entry.Suffix + Path.GetExtension(entry.Remote);
         var dest = Path.Combine(Paths.CoversDir, name);
 
-        // Already have this exact asset, so nothing to fetch -- and because the name identifies
-        // the source, this cannot mask a better one that has not been tried yet.
-        if (File.Exists(dest)) { filled.Add(entry.Slot); return Assign(g, entry.Slot, name); }
+        // Already have this exact asset, so nothing to fetch. The name says which remote file it
+        // is AND which source wrote it, so unlike the old scheme this cannot be some other
+        // provider's picture sitting under a name that claims to be Steam's.
+        if (File.Exists(dest))
+        {
+            if (!Fits(entry.Slot, dest)) return false;
+            filled.Add(entry.Slot);
+            return Assign(g, entry.Slot, name);
+        }
 
         var url = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/{entry.Remote}";
         if (!await DownloadAsync(url, dest, ct)) return false;
+        if (!Fits(entry.Slot, dest))
+        {
+            try { File.Delete(dest); } catch { }
+            return false;
+        }
 
         filled.Add(entry.Slot);
         return Assign(g, entry.Slot, name);
@@ -418,6 +454,7 @@ public class MetadataService
     {
         var any = false;
         var gotFacts = false;
+        IgdbGame? factsHit = null;
 
         if (facts is not null && !facts.Unavailable)
         {
@@ -435,27 +472,16 @@ public class MetadataService
                 // Metacritic would put one publication's name on another's number.
                 g.CriticSource = hit.CriticScore is null ? null : "IGDB critics";
                 g.MetadataSource = "igdb";
+                factsHit = hit;
                 any = true;
                 gotFacts = true;
-
-                // IGDB's covers are portrait box art and are the weakest of the three, so they go
-                // in first and SteamGridDB below -- then Steam after that -- can improve on them.
-                if (hit.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, filled, ct);
-                if (hit.ArtworkUrl is { } wide)
-                {
-                    // 1920x1080, and the only art of that shape anything gives us. That makes it
-                    // the one picture that can fill a screen without being cropped or banded, so
-                    // it gets a slot of its own rather than being squeezed into the 3.1:1 hero --
-                    // which is what made a backdrop's shape unpredictable in the first place.
-                    any |= await StoreRemoteAsync(g, Slot.Backdrop, wide, filled, ct);
-                    // Still offered as the tile of last resort: a wide picture cropped to a tile
-                    // beats a portrait cover letterboxed into one, and both SteamGridDB and Steam
-                    // overwrite this if they have anything better shaped.
-                    any |= await StoreRemoteAsync(g, Slot.Tile, wide, filled, ct);
-                }
             }
         }
 
+        // The art provider before IGDB's own pictures, because every source is now first-wins and
+        // the order therefore has to run best to worst. SteamGridDB publishes art in the shapes a
+        // launcher asks for; IGDB's cover is an afterthought and its artworks are whatever was
+        // uploaded, which is why they are last.
         if (art is not null && !art.Unavailable)
         {
             var found = await art.FindArtAsync(g.Title, appId, ct);
@@ -468,21 +494,51 @@ public class MetadataService
             }
         }
 
+        if (factsHit is { } igdb)
+        {
+            if (igdb.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, filled, ct);
+            if (igdb.ArtworkUrl is { } wide)
+            {
+                // The only 16:9 art anything gives us, when it is 16:9 at all -- IGDB's artworks
+                // are user uploads and Fits throws out the squares and the portraits. That is why
+                // this has a slot of its own rather than being squeezed into the 3.1:1 hero.
+                any |= await StoreRemoteAsync(g, Slot.Backdrop, wide, filled, ct);
+                // And as the tile of last resort, for a game with no capsule and nothing from
+                // SteamGridDB. Fits keeps anything squarer than 1.3:1 out of a landscape box.
+                any |= await StoreRemoteAsync(g, Slot.Tile, wide, filled, ct);
+            }
+        }
+
         return (any, gotFacts);
     }
 
     // ---------- Art plumbing ----------
 
     /// <summary>
-    /// Downloads one picture into a slot, overwriting whatever was there. Callers run worst source
-    /// first, so the last one to fill a slot wins it.
+    /// Downloads one picture into a slot, unless that slot is already settled. Refused, too, if
+    /// the picture turns out to be the wrong shape for it -- see Fits.
+    ///
+    /// The `filled` check is not a detail. Without it this method wrote its slot unconditionally
+    /// while only the Steam CDN loop consulted the set, so "Steam's capsule gets first refusal"
+    /// was true right up until the service ran two lines later and overwrote it. Every caller now
+    /// goes through the same gate, in one priority order, and the first source to fill a slot
+    /// keeps it -- which is also what makes the art stop changing between passes.
     /// </summary>
     private static async Task<bool> StoreRemoteAsync(Game g, Slot slot, string url,
-        HashSet<Slot> filled, CancellationToken ct)
+        HashSet<Slot> filled, CancellationToken ct, string tag = Service)
     {
-        var name = ArtPrefix(g) + SuffixFor(slot, ExtensionOf(url));
+        if (filled.Contains(slot)) return false;
+
+        var name = ArtPrefix(g) + tag + SlotSuffix(slot) + ExtensionOf(url);
         var dest = Path.Combine(Paths.CoversDir, name);
         if (!await DownloadAsync(url, dest, ct)) return false;
+
+        if (!Fits(slot, dest))
+        {
+            try { File.Delete(dest); } catch { /* a cache file; leaving it costs nothing */ }
+            return false;
+        }
+
         // Assign returns false when the name has not changed, but the bytes on disk are new, so
         // the slot still counts as filled.
         Assign(g, slot, name);
@@ -490,14 +546,65 @@ public class MetadataService
         return true;
     }
 
-    private static string SuffixFor(Slot slot, string extension) => slot switch
+    private static string SlotSuffix(Slot slot) => slot switch
     {
-        Slot.Tile => "_hdtile" + extension,
-        Slot.Hero => "_hdhero" + extension,
-        Slot.Backdrop => "_hdbg" + extension,
-        Slot.Logo => "_hdlogo" + extension,
-        _ => "_hd" + extension,
+        Slot.Tile => "_tile",
+        Slot.Hero => "_hero",
+        Slot.Backdrop => "_bg",
+        Slot.Logo => "_logo",
+        _ => "_cover",
     };
+
+    /// <summary>
+    /// The shapes a slot will accept, as (min, max) aspect.
+    ///
+    /// Written because IGDB's artworks are whatever somebody uploaded: taking the first of them
+    /// for the backdrop put a 1080x1080 square behind DREDGE's whole screen and an 810x1080
+    /// portrait behind Hollow Knight's. The slot is defined as 16:9 key art and the launcher was
+    /// treating it as "a wide picture, probably". A square is not key art, and the fix is to say
+    /// so here rather than to add another fallback in the page.
+    ///
+    /// Generous at the edges on purpose. These reject art that is the wrong KIND of picture, not
+    /// art that is a few percent off -- a 2:1 promotional still is still a backdrop.
+    /// </summary>
+    private static (double Min, double Max) Bounds(Slot slot) => slot switch
+    {
+        Slot.Cover => (0.0, 0.95),      // portrait box art; a landscape one is somebody else's slot
+        Slot.Tile => (1.30, 2.60),      // 1.75 capsule through 2.14 header, and nothing squarer
+        Slot.Hero => (2.40, 5.00),      // the 3.1:1 band
+        Slot.Backdrop => (1.60, 2.10),  // 16:9 key art, which is the only thing this slot is for
+        _ => (0.0, double.MaxValue),    // a wordmark is whatever shape the wordmark is
+    };
+
+    /// <summary>
+    /// True when the file is a shape this slot can use. Art we cannot measure is accepted: a
+    /// format we do not decode is not evidence of a bad picture, and refusing it would throw away
+    /// every .webp SteamGridDB serves.
+    /// </summary>
+    private static bool Fits(Slot slot, string path)
+    {
+        if (ImageAspect(path) is not { } aspect) return true;
+        var (min, max) = Bounds(slot);
+        if (aspect >= min && aspect <= max) return true;
+        Log.Info($"Metadata: {Path.GetFileName(path)} is {aspect:0.00}:1, " +
+                 $"which is not a {slot} ({min:0.00}-{max:0.00}); discarded");
+        return false;
+    }
+
+    /// <summary>Width over height, or null when the file cannot be decoded here.</summary>
+    private static double? ImageAspect(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var frame = System.Windows.Media.Imaging.BitmapFrame.Create(
+                stream,
+                System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+                System.Windows.Media.Imaging.BitmapCacheOption.None);
+            return frame.PixelHeight > 0 ? (double)frame.PixelWidth / frame.PixelHeight : null;
+        }
+        catch { return null; }
+    }
 
     /// <summary>
     /// The file extension a URL implies. SteamGridDB serves .png, .jpg and .webp from the same

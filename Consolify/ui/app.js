@@ -790,8 +790,12 @@ function coverUrl(g) { return artUrl(g.coverFile); }
    never to the hero: a 3:1 backdrop centre-cropped into a tile shows background, not the game. */
 function bannerUrl(g) { return artUrl(g.bannerFile) || coverUrl(g); }
 
-/* The wide backdrop. Falls the other way -- any art beats a flat colour behind the whole screen. */
-function heroUrl(g) { return artUrl(g.heroFile) || artUrl(g.bannerFile) || coverUrl(g); }
+/* The wide backdrop. Falls back to the tile, which is at least landscape, and then stops.
+   NOT to the portrait cover: 2:3 art hung across a screen at its own aspect is a tall narrow
+   column of box art, and because the backdrop follows the highlight, walking along a row of
+   tiles made the picture behind them change shape every time it landed on a game with no hero.
+   A flat colour is a better answer than a cover in a slot that is not for covers. */
+function heroUrl(g) { return artUrl(g.heroFile) || artUrl(g.bannerFile); }
 
 /* What goes behind a whole screen. IGDB's artwork is 1920x1080, which is the shape of the screen
    it is going on, so it fills one with nothing cropped and nothing scaled up -- the only source we
@@ -1093,7 +1097,13 @@ let bdFront = "bdA";
 let bdCurrentKey = null;
 
 function setBackdrop(game) {
-  const key = game ? game.id : "none";
+  // Keyed on the picture, not the game. On the game id alone this skipped every repaint while
+  // the highlight stayed put -- including the one after a metadata pass swapped the art out from
+  // under it, which left the element pointing at a file that no longer existed and the screen
+  // black until you moved. The id is still in the key so two games that share a fallback picture
+  // do not confuse it.
+  const url = game && backdropUrl(game);
+  const key = game ? game.id + "|" + (url || "") : "none";
   if (key === bdCurrentKey) return;
   bdCurrentKey = key;
 
@@ -1120,7 +1130,6 @@ function setBackdrop(game) {
     bdFront = backId;
   };
 
-  const url = game && backdropUrl(game);
   if (!url) { flat(); show(null); return; }
 
   // Loaded rather than assigned, because the shape of the picture decides the height of the
