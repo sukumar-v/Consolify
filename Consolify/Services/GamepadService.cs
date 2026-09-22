@@ -330,6 +330,43 @@ public class GamepadService : IDisposable
                 ltLatched = ltNow;
             }
 
+            // ---- keyboard toggle ----
+            // Above the serviceActive gate, like the menu combo and the screenshot key: inside a
+            // focused game the rest of the pad is deliberately silent, and the keyboard is most
+            // useful precisely there. What decides whether it may fire is toggleAllowed below.
+            //
+            // Two shapes, because the button suits different people differently. A tap is quicker
+            // and is the default; a hold is for anyone whose toggle button also has a job inside
+            // the launcher, since a hold leaves the tap free to do that job.
+            //
+            // Inside a focused game the toggle is skipped entirely unless the user has opted in:
+            // every button there belongs to the game. Closing a keyboard that is already up is the
+            // exception and is always allowed, or an opted-out player could strand one on screen.
+            ushort toggleMask = ButtonMask(s.KeyboardToggleButton);
+            bool toggleAllowed = !gameFocused || s.KeyboardInGame || KeyboardOwnsPad;
+            bool holdToToggle = string.Equals(s.KeyboardToggleMode, "Hold", StringComparison.OrdinalIgnoreCase);
+
+            if ((pressed & toggleMask) != 0)
+            {
+                toggleDownAt = now;
+                toggleFired = false;
+                if (!holdToToggle && toggleAllowed)
+                {
+                    // Marking it fired is what stops the same press also reaching the UI below:
+                    // in Press mode the keyboard has taken the button outright.
+                    toggleFired = true;
+                    KeyboardToggleRequested?.Invoke();
+                }
+            }
+            if (holdToToggle && (buttons & toggleMask) != 0 && toggleDownAt >= 0 && !toggleFired
+                && now - toggleDownAt >= s.KeyboardToggleHoldMs && toggleAllowed)
+            {
+                toggleFired = true;
+                KeyboardToggleRequested?.Invoke();
+            }
+            bool toggleReleasedAsTap = (released & toggleMask) != 0 && !toggleFired && toggleDownAt >= 0;
+            if ((released & toggleMask) != 0) toggleDownAt = -1;
+
             if (!serviceActive)
             {
                 prevButtons = buttons;
@@ -337,17 +374,6 @@ public class GamepadService : IDisposable
                 if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
                 continue;
             }
-
-            // ---- keyboard toggle chord (hold) ----
-            ushort toggleMask = ButtonMask(s.KeyboardToggleButton);
-            if ((pressed & toggleMask) != 0) { toggleDownAt = now; toggleFired = false; }
-            if ((buttons & toggleMask) != 0 && toggleDownAt >= 0 && !toggleFired && now - toggleDownAt >= s.KeyboardToggleHoldMs)
-            {
-                toggleFired = true;
-                KeyboardToggleRequested?.Invoke();
-            }
-            bool toggleReleasedAsTap = (released & toggleMask) != 0 && !toggleFired && toggleDownAt >= 0;
-            if ((released & toggleMask) != 0) toggleDownAt = -1;
 
             // Only D-pad navigation means "the pad is driving". A face button must not re-arm a
             // highlight the pointer has cleared, or pressing A over empty space would activate
@@ -377,7 +403,8 @@ public class GamepadService : IDisposable
 
                 foreach (var (mask, name) in FaceButtons)
                 {
-                    // The toggle button doubles as a UI button on tap (e.g. Start taps open the quick menu)
+                    // In Hold mode the toggle button still does its UI job on a tap (Start taps
+                    // open the quick menu). In Press mode the press above consumed it.
                     if (mask == toggleMask)
                     {
                         if (toggleReleasedAsTap) UiEvent?.Invoke(name);

@@ -48,6 +48,7 @@ const SORTS = [
   { id: "played", label: "Most played" },
   { id: "sizeDesc", label: "Largest first" },
   { id: "sizeAsc", label: "Smallest first" },
+  { id: "score", label: "Highest rated" },
 ];
 
 function resetFilters() {
@@ -247,6 +248,16 @@ function revealOffset(sc, el, axis) {
   const size = axis === "x" ? sc.clientWidth : sc.clientHeight;
   const total = axis === "x" ? sc.scrollWidth : sc.scrollHeight;
   const viewFar = viewNear + size;
+
+  /* Nothing focusable above the first row means the space above it is not slack -- it is that
+     row's section heading. Clearing REVEAL_MARGIN for the focus glow scrolled that heading off
+     the top the moment you walked back up the list, which is why the first category in every
+     Settings tab kept vanishing. Snap to the end instead; the glow has its room there. */
+  const ends = sc.querySelectorAll(FOCUSABLE_SEL);
+  if (ends.length) {
+    if (ends[0] === el) return 0;
+    if (ends[ends.length - 1] === el) return total;
+  }
 
   if (near - REVEAL_MARGIN <= 0) return 0;
   if (far + REVEAL_MARGIN >= total) return total;
@@ -632,6 +643,17 @@ const ICONS = {
   file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
   store: '<path d="M21 12a9 9 0 1 1-2.6-6.35M21 3.5v5h-5"/>',
 
+  /* ---- store marks, for the detail page. Each is the silhouette of the real thing reduced to
+     this set's stroke weight: Steam's ringed valve, Epic's arched E, GOG's rounded wordmark
+     frame, Xbox's sphere and cross. The store's name is printed beside them either way. ---- */
+  steam: '<circle cx="12" cy="12" r="9"/><circle cx="15.2" cy="8.8" r="2.6"/>'
+       + '<circle cx="8.2" cy="15.4" r="2.1"/><path d="M3.3 13.4 6.2 14.6M10.1 14.1l3.1-3"/>',
+  epic: '<path d="M5 4.6h14v11.1l-7 3.7-7-3.7z"/><path d="M9.6 8.4h4.8M9.6 12h3.6M9.6 15.4h4.8M9.6 8.4v7"/>',
+  gog: '<rect x="2.4" y="6" width="19.2" height="12" rx="3.2"/>'
+     + '<text x="12" y="15.5" text-anchor="middle" font-size="7.4" font-weight="700"'
+     + ' letter-spacing="0.4" fill="currentColor" stroke="none">GOG</text>',
+  xbox: '<circle cx="12" cy="12" r="9"/><path d="M6.6 5.9C9 9 13.5 15.3 16.4 18.8M17.4 5.9C15 9 10.5 15.3 7.6 18.8"/>',
+
   /* ---- overlay-menu actions. Drawn to match the action rather than borrowed from a
      lookalike: an X closes, a moon sleeps, and "switch window" copies the two overlapping
      panes of the Xbox View button, which is the control that does this on a console. ---- */
@@ -848,11 +870,29 @@ function paintPlaceholder(g, el) {
  * Only landscape boxes get the treatment. Portrait box art is drawn to be cropped and always has
  * been cropped here, so a portrait tile keeps cover and looks exactly as it did.
  */
-const ART_FIT_TOLERANCE = 1.08;
+const ART_FIT_TOLERANCE = 1.02;
+
+/*
+ * The aspect of the box a background is actually painted into.
+ *
+ * Not clientWidth/clientHeight: `background-origin: content-box` -- which is what holds tile art
+ * clear of the rounded corners -- makes `cover` size against the CONTENT box, while clientWidth
+ * includes the padding. Measuring the padding box made the continue row look 1.79:1 when it was
+ * really 1.86:1, so a 1.75:1 capsule read as a near-perfect fit and was cropped 6% narrower --
+ * a strip off each side, taking the edge of the logo with it.
+ */
+function artBoxAspect(el) {
+  const cs = getComputedStyle(el);
+  const px = (v) => parseFloat(v) || 0;
+  const inset = cs.backgroundOrigin === "content-box";
+  const w = el.clientWidth - (inset ? px(cs.paddingLeft) + px(cs.paddingRight) : 0);
+  const h = el.clientHeight - (inset ? px(cs.paddingTop) + px(cs.paddingBottom) : 0);
+  return w > 0 && h > 0 ? w / h : NaN;
+}
 
 function artFit(el, w, h) {
   if (!w || !h) return "cover";                     // never measured; keep the old behaviour
-  const box = el.clientWidth / el.clientHeight;
+  const box = artBoxAspect(el);
   if (!isFinite(box) || box <= 1.2) return "cover"; // portrait or square: crop as before
   const off = (w / h) / box;
   return (off > 1 ? off : 1 / off) > ART_FIT_TOLERANCE ? "contain" : "cover";
@@ -865,14 +905,28 @@ function artFit(el, w, h) {
  * box. Only tiles, whose art carries the game's name near the edges, are worth fitting.
  */
 function applyArt(g, el, url, fit) {
-  if (!url) { paintPlaceholder(g, el); return; }
+  if (!url) { paintPlaceholder(g, el); setArtAspect(el, 0, 0); return; }
   queueArt(url, (src, w, h) => {
     if (!el.isConnected) return;          // tile was re-rendered while loading
-    if (!src) { paintPlaceholder(g, el); return; }
+    if (!src) { paintPlaceholder(g, el); setArtAspect(el, 0, 0); return; }
     el.style.backgroundImage = `url('${src}')`;
     el.style.backgroundSize = fit || artFit(el, w, h);
     el.style.backgroundRepeat = "no-repeat";
+    setArtAspect(el, w, h);
   });
+}
+
+/*
+ * Publish the shape of the picture that landed, so CSS can cut the box to it.
+ *
+ * The alternative is to guess, and both places that show a full-width picture were guessing:
+ * the detail page and the library backdrop were sized for Steam's 3.1:1 hero, so anything else
+ * in that slot -- IGDB hands back 16:9 artwork -- was blown up and cropped to fit a box chosen
+ * for a different picture. A box cut to the art's own aspect has nothing to crop.
+ */
+function setArtAspect(el, w, h) {
+  if (w && h) el.style.setProperty("--art-aspect", (w / h).toFixed(4));
+  else el.style.removeProperty("--art-aspect");
 }
 
 function fmtPlaytime(min) {
@@ -996,16 +1050,31 @@ function setBackdrop(game) {
   const backId = bdFront === "bdA" ? "bdB" : "bdA";
   const back = $(backId);
 
-  const url = game && heroUrl(game);
-  if (url) back.style.backgroundImage = `url('${url}')`;
-  else if (game) {
+  const flat = () => {
+    setArtAspect(back, 0, 0);
+    if (!game) { back.style.backgroundImage = "none"; return; }
     const h = hashHue(game.title);
     back.style.backgroundImage = `linear-gradient(150deg, hsl(${h},18%,16%), hsl(${(h + 40) % 360},22%,7%))`;
-  } else back.style.backgroundImage = "none";
+  };
+  const show = () => {
+    back.classList.add("visible");
+    front.classList.remove("visible");
+    bdFront = backId;
+  };
 
-  back.classList.add("visible");
-  front.classList.remove("visible");
-  bdFront = backId;
+  const url = game && heroUrl(game);
+  if (!url) { flat(); show(); return; }
+
+  // Loaded rather than assigned, because the shape of the picture decides the height of the
+  // element a theme hangs it in -- see setArtAspect. Waiting for the image also means the old
+  // backdrop holds until the new one can be drawn at the right size, instead of appearing at the
+  // wrong one and resizing. The key guard drops art the highlight has already moved past.
+  queueArt(url, (src, w, h) => {
+    if (bdCurrentKey !== key) return;
+    if (src) { back.style.backgroundImage = `url('${src}')`; setArtAspect(back, w, h); }
+    else flat();
+    show();
+  });
 }
 
 /* ============================== tab bars ============================== */
@@ -1140,6 +1209,7 @@ function makeGridTile(g, onHover, onClick, onDetails) {
 /* ============================== library data ============================== */
 
 function sortGames(list) {
+  const score = (g) => (typeof g.criticScore === "number" ? g.criticScore : -1);
   const by = {
     az: (a, b) => a.title.localeCompare(b.title),
     za: (a, b) => b.title.localeCompare(a.title),
@@ -1147,9 +1217,16 @@ function sortGames(list) {
     played: (a, b) => (b.playtimeMinutes || 0) - (a.playtimeMinutes || 0),
     sizeDesc: (a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0),
     sizeAsc: (a, b) => (a.sizeBytes || 0) - (b.sizeBytes || 0),
+    // An unrated game sorts below a badly rated one rather than above it: a missing score is
+    // not a low score, but a wall of blanks at the top is not what "highest rated" is for.
+    // Ties fall back to the title so the order is stable between renders.
+    score: (a, b) => score(b) - score(a) || a.title.localeCompare(b.title),
   }[F.sort] || ((a, b) => a.title.localeCompare(b.title));
   return [...list].sort(by);
 }
+
+/** Tiles across one row of the all-games grid. Mirrors the width in .grid-item. */
+const GRID_COLS = 9;
 
 /** Games eligible for the library: everything the user hasn't hidden. */
 function visibleGames() { return S.games.filter(g => !g.hidden); }
@@ -1268,7 +1345,10 @@ function libraryData() {
   // The "add a game" tile always trails the grid so it's reachable without a menu.
   const items = [...sortGames(filtered), { __add: true }];
   const rows = [];
-  for (let i = 0; i < items.length; i += 8) rows.push(items.slice(i, i + 8));
+  // Nine, not eight. The tile is cut to 2:3 so box art is never cropped (see .grid-item), and at
+  // eight across that shape would have been 199x298 -- tall enough to leave barely one row on
+  // screen. Nine narrower columns keep the same 1760 run and the same row height.
+  for (let i = 0; i < items.length; i += GRID_COLS) rows.push(items.slice(i, i + GRID_COLS));
   return { cont, rows, total: filtered.length };
 }
 
@@ -1508,6 +1588,27 @@ function openDetail(id, from) {
    already know from the site: green 75+, yellow 50-74, red below. */
 function scoreBand(n) { return n >= 75 ? "good" : n >= 50 ? "mixed" : "poor"; }
 
+/*
+ * Release dates arrive in whatever shape the source kept them in. Ours is an ISO timestamp, which
+ * is the one worth rewriting: "2024-02-02T00:00:00Z" is not something to put on a page.
+ *
+ * Its three numbers are read straight out of the string rather than through Date's parser, which
+ * would take the Z at its word, convert to local time on the way back out, and print every release
+ * a day early anywhere west of Greenwich. A release date carries no time of day to convert.
+ *
+ * Everything else is passed through untouched -- Steam writes "2 Feb, 2024", which already reads
+ * fine, and it also writes "Q1 2024" and bare years, which any reformatting would have to guess a
+ * day for and would get wrong.
+ */
+function fmtReleased(date) {
+  if (!date) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(date));
+  if (!iso) return String(date);
+  const d = new Date(+iso[1], +iso[2] - 1, +iso[3]);
+  if (isNaN(d)) return String(date);
+  return `${d.getDate()} ${d.toLocaleString("en", { month: "short" })} ${d.getFullYear()}`;
+}
+
 function releaseYear(date) {
   const m = /\b(\d{4})\b/.exec(date || "");
   return m ? m[1] : null;
@@ -1532,12 +1633,51 @@ function renderDetailStats(g) {
   add("AVG SESSION", g.sessions > 0 && g.playtimeMinutes > 0
     ? fmtPlaytime(g.playtimeMinutes / g.sessions) : null);
   add("LAST PLAYED", g.lastPlayed ? fmtLastPlayed(g.lastPlayed) : null);
-  add("RELEASED", g.releaseDate || null);
+  add("RELEASED", fmtReleased(g.releaseDate));
   stats.push({ label: g.installed ? "ON DISK" : "DOWNLOAD", value: fmtSize(g.sizeBytes) });
 
   el.innerHTML = stats.map(s =>
     `<div class="stat"><div class="stat-label mono">${esc(s.label)}</div>` +
     `<div class="stat-value">${esc(s.value)}</div></div>`).join("");
+}
+
+/*
+ * The critic score, as a badge rather than as a coloured number in the middle of the facts line.
+ *
+ * A bare "82" next to the developer's name is a number with no unit: it could be a rank, a count
+ * or a percentage. Given a panel, a scale and the name of whoever gave it, it reads at a glance
+ * from across a room -- which is the whole job.
+ *
+ * The source is named rather than assumed. Steam's appdetails carries a genuine Metacritic score
+ * and says so; IGDB's aggregated_rating is its own average of critics and is NOT Metacritic, so
+ * labelling every score with Metacritic's name would be wrong about half the time.
+ */
+function renderDetailScore(g) {
+  const el = $("detailScore");
+  if (typeof g.criticScore !== "number") { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.dataset.band = scoreBand(g.criticScore);
+  const source = g.criticSource || "Critic score";
+  el.innerHTML =
+    `<div class="score-panel">${esc(String(g.criticScore))}</div>` +
+    `<div class="score-side"><div class="score-source mono">${esc(source.toUpperCase())}</div>` +
+    `<div class="score-scale mono">OUT OF 100</div></div>`;
+}
+
+/*
+ * Where the game came from, drawn in the same stroked 24x24 style as every other icon here
+ * rather than pasted in as four brand logos: the set stays one family, it inherits currentColor,
+ * and it costs nothing to load. The name sits beside it, because a silhouette alone is a
+ * guessing game for anyone who does not already know the mark.
+ */
+const PLATFORM_ICONS = {
+  Steam: "steam", Epic: "epic", GOG: "gog", Xbox: "xbox", Manual: "file",
+};
+
+function renderDetailPlatform(g) {
+  const el = $("detailPlatform");
+  const icon = PLATFORM_ICONS[g.platform];
+  el.innerHTML = (icon ? iconSvg(icon) : "") + `<span>${esc(g.platform)}</span>`;
 }
 
 /*
@@ -1558,15 +1698,6 @@ function renderDetailFacts(g) {
     el.textContent = text;
     row.appendChild(el);
   };
-
-  if (typeof g.criticScore === "number") {
-    const el = document.createElement("span");
-    el.className = "fact-score";
-    el.dataset.band = scoreBand(g.criticScore);
-    el.textContent = g.criticScore;
-    el.title = `${g.criticSource || "Critic"} score`;
-    row.appendChild(el);
-  }
 
   const bits = [];
   const year = releaseYear(g.releaseDate);
@@ -1615,6 +1746,8 @@ function renderDetail() {
   }
 
   renderDetailFacts(g);
+  renderDetailScore(g);
+  renderDetailPlatform(g);
   $("detailDesc").textContent = g.description || "";
   renderDetailStats(g);
 
@@ -1624,6 +1757,8 @@ function renderDetail() {
   art.className = "detail-art";
   art.innerHTML = "";
   art.style.background = "";
+  // "cover" on purpose: the box is cut to this picture's own aspect (see --art-aspect and
+  // .detail-art), so there is nothing left for cover to crop, and scenery must never letterbox.
   applyArt(g, art, heroUrl(g), "cover");
 
   document.querySelectorAll("#detailActions .pill-btn").forEach(el => {
@@ -1768,9 +1903,23 @@ function allSettingsRows() {
         "needs a real mouse. Both also take the foreground, so the field you were typing into can " +
         "lose its caret.",
     KEYBOARD_APP_LABELS));
-  rows.push(cycleRow("Toggle button (hold)", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
-    "Hold this button to show or hide the keyboard, from anywhere — including inside a game"));
-  rows.push(sliderRow("Hold time", () => s.keyboardToggleHoldMs, 200, 2000, 100, v => set(() => s.keyboardToggleHoldMs = v), v => Math.round(v) + " ms"));
+  rows.push(cycleRow("Keyboard button", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
+    "Shows and hides the keyboard from anywhere in the launcher"));
+  // Press is quicker and is the default. Hold exists because it leaves the tap free, which is the
+  // only way to keep a button that already does something inside the launcher.
+  rows.push(cycleRow("Opens on", ["Press", "Hold"], () => s.keyboardToggleMode, v => set(() => s.keyboardToggleMode = v),
+    (s.keyboardToggleMode || "Press") === "Hold"
+      ? "Hold the button down. A tap still does whatever that button normally does"
+      : "One tap. The button does nothing else while this is set",
+    (s.keyboardToggleMode || "Press") !== "Hold" && (s.keyboardToggleButton === "Start" || s.keyboardToggleButton === "Back")
+      ? `${s.keyboardToggleButton === "Start" ? "Start is the Menu button" : "Back is the View button"}, which the launcher uses. On Press the keyboard takes it outright — pick another button, or switch to Hold.`
+      : null,
+    { Press: "Press", Hold: "Hold" }));
+  if ((s.keyboardToggleMode || "Press") === "Hold")
+    rows.push(sliderRow("Hold time", () => s.keyboardToggleHoldMs, 200, 2000, 100, v => set(() => s.keyboardToggleHoldMs = v), v => Math.round(v) + " ms"));
+  rows.push(toggleRow("Show while a game is running",
+    "Off by default: inside a game every button belongs to the game, and a keyboard arriving over one is a surprise. A keyboard already on screen can always be closed either way",
+    () => !!s.keyboardInGame, v => set(() => s.keyboardInGame = v)));
 
   rows.push({ section: "CONSOLIFY KEYBOARD", cat: "keyboard" });
   rows.push(sliderRow("Keyboard size", () => s.keyboardScale, 0.6, 1.6, 0.05,
@@ -2151,7 +2300,11 @@ function settingsInput(btn) {
 
     case "A":
       if (!focusVisible()) break;
-      if (onTab) { enterSettingsPane("rows"); break; }
+      // The category comes off the element, not off settingsTab. Hovering a category highlights
+      // it without selecting it, so A was opening whichever one had last been activated -- the
+      // highlight said Keyboard and the rows that appeared were Controller's, which reads as A
+      // not working at all.
+      if (onTab) { setSettingsTab(el.dataset.settingsTab); enterSettingsPane("rows"); break; }
       if (row) { if (row.action) row.action(); else if (row.adjust) row.adjust(1); }
       break;
 
@@ -2246,7 +2399,7 @@ function filterDropdownRows() {
 
 const SORT_ICONS = {
   az: "sortAsc", za: "sortDesc", recent: "clock",
-  played: "timer", sizeDesc: "chevronsDown", sizeAsc: "chevronsUp",
+  played: "timer", sizeDesc: "chevronsDown", sizeAsc: "chevronsUp", score: "star",
 };
 
 function sortDropdownRows() {

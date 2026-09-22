@@ -165,12 +165,15 @@ public class UiBridge
 
             // Every setting back to the value a fresh install would have. Deliberately goes
             // through the same path as a save rather than writing the file directly, so the
-            // startup entry, the display choice and the on-screen keyboard all follow it --
-            // resetting "Launch at login" to false has to actually unregister it.
+            // startup entry and the on-screen keyboard both follow it -- resetting "Launch at
+            // login" to false has to actually unregister it.
+            //
+            // The one thing kept is the TV display. Which screen is the television is a fact
+            // about the room rather than a preference, and clearing it moves the launcher off
+            // the screen the user is looking at -- a restore they would have to undo blind.
             case "resetSettings":
             {
-                var defaults = new AppSettings();
-                var displayChanged = defaults.TvDeviceName != _settings.Settings.TvDeviceName;
+                var defaults = new AppSettings { TvDeviceName = _settings.Settings.TvDeviceName };
                 var startupChanged = defaults.LaunchOnStartup != StartupService.IsRegistered();
                 CopySettings(defaults);
                 _settings.Save();
@@ -179,7 +182,6 @@ public class UiBridge
                     try { StartupService.SetRegistered(defaults.LaunchOnStartup); }
                     catch (Exception ex) { Push(new { type = "toast", message = $"Startup registration failed: {ex.Message}" }); }
                 }
-                if (displayChanged) _window.PositionOnTargetDisplay();
                 _window.RefreshBuiltinKeyboard();
                 PushState();
                 Push(new { type = "toast", message = "Settings restored to defaults" });
@@ -408,6 +410,7 @@ public class UiBridge
         t.AccelExponent = Math.Clamp(s.AccelExponent, 1.0, 3.0);
         t.BoostButton = s.BoostButton;
         t.BoostMultiplier = Math.Clamp(s.BoostMultiplier, 1.5, 5.0);
+        t.HideCursorSystemWide = s.HideCursorSystemWide;
         t.LeftClickButton = s.LeftClickButton;
         t.RightClickButton = s.RightClickButton;
         t.MinimizeCombo = s.MinimizeCombo;
@@ -415,7 +418,9 @@ public class UiBridge
         t.KeyRepeatDelayMs = Math.Clamp(s.KeyRepeatDelayMs, 120, 900);
         t.KeyRepeatIntervalMs = Math.Clamp(s.KeyRepeatIntervalMs, 20, 300);
         t.KeyboardToggleButton = s.KeyboardToggleButton;
+        t.KeyboardToggleMode = s.KeyboardToggleMode == "Hold" ? "Hold" : "Press";
         t.KeyboardToggleHoldMs = Math.Clamp(s.KeyboardToggleHoldMs, 200, 2000);
+        t.KeyboardInGame = s.KeyboardInGame;
         t.KeyboardApp = s.KeyboardApp;
         t.KeyboardScale = Math.Clamp(s.KeyboardScale, 0.6, 1.6);
     }

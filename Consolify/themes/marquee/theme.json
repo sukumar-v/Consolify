@@ -1,7 +1,7 @@
 {
   "name": "Marquee",
   "author": "Consolify",
-  "version": "2.0",
+  "version": "2.1",
   "description": "tvOS-shaped: full-bleed art, recents on a dock, grid on the way down",
   "tokens": {
     "--bg": "#05070B",

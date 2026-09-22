@@ -98,7 +98,11 @@
     <div class="detail-shade-y"></div>
 
     <div class="detail-content">
-      <div class="crumb mono"><span>LIBRARY</span><span>/</span><span class="crumb-here" id="detailCrumb">STEAM</span></div>
+      <div class="detail-top">
+        <div class="crumb mono"><span>LIBRARY</span><span>/</span><span class="crumb-here" id="detailCrumb">STEAM</span></div>
+        <!-- Where the game came from, opposite the breadcrumb that says the same thing in words. -->
+        <div class="detail-platform" id="detailPlatform"></div>
+      </div>
 
       <div class="detail-main">
         <div class="detail-titleblock">
@@ -111,6 +115,11 @@
         </div>
 
         <div class="detail-stats" id="detailStats"></div>
+
+        <!-- The critic score, parked in the corner the eye reaches last. It is the one number
+             on this page that is somebody else's opinion rather than a fact about the file, so
+             it is given its own panel and told to say who said it. -->
+        <div class="detail-score" id="detailScore" hidden></div>
 
         <div class="detail-actions" id="detailActions">
           <div class="pill-btn pill-primary" data-act="play" data-focusable data-focus-key="detail:play">

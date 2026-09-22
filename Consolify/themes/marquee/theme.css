@@ -24,8 +24,8 @@
    pixels and they are allowed to add up:
 
      chrome  96 + view 912 + legend 72                        = 1080
-     hero 640 + dock 228 + peek 44                            =  912
-     dock 228 + shelf 684                                     =  912
+     hero 640 + dock 236 + peek 36                            =  912
+     dock 236 + shelf 676                                     =  912
 
    Only --view-h, --dock-h and --peek are set; the hero is what is left over. That
    is what lets "Hide the button hints" work as one line: the view grows by the
@@ -36,13 +36,15 @@
 
 .tv {
   --tile-w: 270px;
-  /* 1.75:1, which is Steam capsule_616x353 exactly rather than a rounded 16:9. Matching the
-     dominant asset means most tiles fill their box edge to edge with nothing trimmed. */
-  --art-h: 154px;
+  /* Sized so the INSET box is 1.75:1 -- Steam capsule_616x353 exactly, rather than a rounded
+     16:9. The art sits 6px in to clear the rounded corners, so the shape that has to match is
+     270-12 by 160-12, which is 258x148. Cut to the dominant asset like this, most tiles fill
+     their box edge to edge with nothing trimmed and no mat showing. */
+  --art-h: 160px;
   --name-h: 26px;
   --gap: 28px;
-  --dock-h: 228px;
-  --peek: 44px;       /* how much of the grid shows under the dock at rest */
+  --dock-h: 236px;    /* 22 + 160 art + 6 + 26 name + 22 */
+  --peek: 36px;       /* how much of the grid shows under the dock at rest */
   --view-h: 912px;    /* 1080 less the chrome and the legend */
   --hero-h: calc(var(--view-h) - var(--dock-h) - var(--peek));
   --gutter: 80px;
@@ -71,16 +73,19 @@ body.no-legend .tv-foot { display: none; }
    fitted to the full width, and dissolves into the background before the dock
    rather than being stretched behind it.
 
-   The element is 58% of the height on purpose. Steam's hero is 3.1:1, so at 1920
-   wide it is 620px tall -- 57.4% of 1080 -- and an element cut to match means
-   `cover` has nothing to crop: the whole width is visible at 1:1. Filling the
-   entire screen with it instead meant a 2x upscale showing 54% of the width,
-   which is what "zoomed in and low quality" was. Art of another shape crops a
-   little here rather than leaving a gap, which is the safer way round. */
+   The element takes the aspect of the picture in it, which the app measures and
+   writes as --art-aspect. Cutting the box to the art is what means `cover` has
+   nothing left to crop: the whole width is visible at 1:1. Filling the screen
+   with it instead meant a 2x upscale showing 54% of the width, which is what
+   "zoomed in and low quality" was -- and a fixed 58% only ever suited Steam's
+   3.1:1 hero, so IGDB's 16:9 artwork lost 42% of its height to the same mistake
+   from the other direction. 3.1 is the fallback because most of these are Steam's. */
 
 body:has(#screen-library.active) .bd {
-  inset: 0 0 auto 0;
-  height: 58%;
+  top: 0; left: 0; right: 0; bottom: auto;
+  height: auto;
+  aspect-ratio: var(--art-aspect, 3.1);
+  max-height: 100%;
   filter: none;
   background-position: top center;
   /* The fade is a share of this element, not of the screen, which is the reason

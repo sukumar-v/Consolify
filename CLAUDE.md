@@ -139,6 +139,28 @@ Stop the scrolled grid from clipping through the All games header
   previous run is also non-empty and testing emptiness would make stale data
   uncorrectable. Controller support is always Steam's: IGDB has no equivalent.
 
+## Settings, themes and the keyboard
+
+- A bundled theme is installed once and then kept up to date by the `version` in its theme.json
+  (`ThemeService.SyncBuiltIn`). It used to skip any folder that already existed, which froze a
+  bundled theme at whatever shipped the day it was first installed -- every later fix to Marquee
+  landed in the app and was never seen, because the copy being loaded was the old one in
+  %APPDATA%. Bump the version whenever a bundled theme changes or nobody gets the change. The
+  folder is copied to `theme-backups` first, so an edited theme is recoverable rather than gone.
+- `CopySettings` has to list every setting. `HideCursorSystemWide` was wired through the UI, the
+  host and the CSS but never copied, so the toggle moved on screen and was gone again on the next
+  state push -- a whole feature that silently did nothing.
+- Restore-defaults keeps `TvDeviceName`. Which screen is the television is a fact about the room,
+  not a preference, and clearing it moves the launcher off the screen the user is looking at.
+- The keyboard toggle is evaluated BEFORE the `serviceActive` gate, like the menu combo and the
+  screenshot key: inside a focused game the rest of the pad is silent, and the keyboard is most
+  useful exactly there. `KeyboardInGame` decides whether it may fire; closing a keyboard that is
+  already up is always allowed, or an opted-out player could strand one on screen.
+- In Press mode the toggle button is consumed on the press (`toggleFired` is set there), so it
+  never also reaches the UI. That is why Start is a bad choice for it -- Start is the Menu button
+  -- and why the Settings row warns about exactly that. Hold leaves the tap free, which is the
+  point of having both.
+
 ## Screens and the switcher
 
 - Library is the only top-level screen. Collections became a filter category (`F.collections`,
@@ -189,11 +211,37 @@ Stop the scrolled grid from clipping through the All games header
 - `applyArt` takes an optional `fit`. Scenery must always `cover` — a full-bleed backdrop has no
   edges of its own to protect, and `artFit` letterboxed the detail page's 3:1 hero inside its
   16:9 box, which is where the black bars came from. Only tiles are worth fitting.
-- The detail page bands its hero the same way the library does (62% of the height, masked out at
-  the bottom) rather than stretching a 3:1 picture over a 16:9 screen. Steam has no good 16:9
-  backdrop to use instead: `page_bg_generated_v6b.jpg` is 16:9 but only 28-63 KB of
-  auto-generated blur.
+- Full-width art is cut to the art, not to a number. `applyArt` measures what loaded and writes
+  `--art-aspect` on the element; the detail hero and Marquee's backdrop are `aspect-ratio:
+  var(--art-aspect, 3.1)` with `max-height: 100%`. A fixed height only ever suited one source:
+  62% of a 16:9 stage is 2.87:1, so Steam's 3.1:1 hero lost the sides and IGDB's 16:9 artwork lost
+  42% of its height. Steam has no good 16:9 backdrop to swap in either -- `page_bg_generated_v6b`
+  is 16:9 but 28-63 KB of auto-generated blur.
+- `artFit` must measure the CONTENT box, not `clientWidth/clientHeight`. `background-origin:
+  content-box` -- what holds tile art clear of the rounded corners -- makes `cover` size against
+  the content box, so measuring the padding box read the continue row as 1.79:1 when it was 1.86:1;
+  a 1.75:1 capsule then looked like a perfect fit and lost a strip off each side. That was the
+  "the sides are cut off, not just the corners" report, and rounding was not the cause of it.
+- Every landscape box is cut to 1.75:1 at the content box, which is Steam's capsule exactly:
+  `.cont-art` 300x176 less 5px padding, `.playing-art` 360 wide against the card's 210, Marquee's
+  tile 270x160 less its 6px inset. The grid tile is 174x261, which is 2:3 -- box art's own shape --
+  and nine of them plus eight 24px gaps is the same 1760 run eight 199px ones made. `GRID_COLS`
+  and `.grid-item` have to move together.
+- The critic score is labelled with `criticSource`, never with "Metacritic" by default. Steam's
+  appdetails carries a real Metacritic score and says so; IGDB's `aggregated_rating` is its own
+  average and is not Metacritic, so a fixed label would be wrong about half the time.
+- Only an ISO release date is reformatted, and its three numbers are read out of the string rather
+  than through `Date`. Parsing "2024-02-02T00:00:00Z" reads UTC and printing reads back local, so
+  west of Greenwich every release came out a day early. Steam's own "2 Feb, 2024", "Q1 2024" and
+  bare years are passed through: reformatting them means guessing a day.
 - `.detail-main` is anchored with `margin-top: auto`. A game with no metadata has a much shorter
   column than one with everything, and centring put the Play button in a different place on each.
 - The detail page uses `LogoFile` when there is one, falling back to the text title. Both stay in
   the DOM; `renderDetail` toggles `hidden`.
+- `revealOffset` snaps to the ends for the scroller's first and last focusable. Nothing focusable
+  above the first row means the space above it is not slack, it is that row's section heading --
+  clearing REVEAL_MARGIN for the focus glow scrolled the heading off the moment you walked back up,
+  which is why the first category in every Settings tab kept vanishing.
+- A on a settings category reads the category off the element, not off `settingsTab`. Hovering a
+  category highlights it without selecting it, so A opened whichever one had last been activated:
+  the highlight said Keyboard and Controller's rows appeared, which reads as A doing nothing.

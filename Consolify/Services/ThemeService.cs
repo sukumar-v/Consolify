@@ -118,13 +118,20 @@ public class ThemeService : IDisposable
     }
 
     /// <summary>
-    /// Copy the themes that ship with the app into the user's themes folder.
+    /// Install the themes that ship with the app into the user's themes folder, and bring an
+    /// already-installed copy up to date when the shipped one has moved on.
     ///
-    /// A folder that is already there is left completely alone -- these are starting points,
-    /// and silently overwriting someone's edits to one would be the worst possible behaviour
-    /// for a theme engine. Delete a folder to get the shipped version back.
+    /// This used to skip any folder that already existed, which quietly meant a bundled theme was
+    /// frozen at whatever shipped the day it was first installed: every later fix to Marquee --
+    /// tile art no longer cropped, the backdrop no longer blown up -- landed in the app and was
+    /// never seen, because the copy being loaded was the old one on disk.
+    ///
+    /// The version in theme.json is what decides. Same version, nothing happens. A different one
+    /// and the shipped files replace what is there -- but the whole folder is copied aside first,
+    /// so a theme someone has been editing is recoverable rather than gone. Delete a folder to get
+    /// the shipped version back cleanly.
     /// </summary>
-    public static void SeedBuiltIn()
+    public static void SyncBuiltIn()
     {
         try
         {
@@ -134,20 +141,75 @@ public class ThemeService : IDisposable
 
             foreach (var dir in Directory.GetDirectories(src))
             {
-                var dst = Path.Combine(Paths.ThemesDir, Path.GetFileName(dir));
-                if (Directory.Exists(dst)) continue;
+                var id = Path.GetFileName(dir);
+                var dst = Path.Combine(Paths.ThemesDir, id);
 
-                Directory.CreateDirectory(dst);
-                foreach (var f in Directory.GetFiles(dir))
-                    File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: true);
-                Log.Info($"Installed the bundled theme '{Path.GetFileName(dir)}'");
+                if (!Directory.Exists(dst))
+                {
+                    CopyTheme(dir, dst);
+                    Log.Info($"Installed the bundled theme '{id}'");
+                    continue;
+                }
+
+                var shipped = VersionOf(dir);
+                var installed = VersionOf(dst);
+                if (shipped is null || installed == shipped) continue;
+
+                var backup = BackUp(dst, id, installed);
+                CopyTheme(dir, dst);
+                Log.Info($"Updated the bundled theme '{id}' from {installed ?? "an unversioned copy"} " +
+                         $"to {shipped}" + (backup is null ? "" : $"; the old copy is in {backup}"));
             }
         }
         catch (Exception ex)
         {
             // Never block startup over a theme; the launcher just opens with fewer of them.
-            Log.Info($"Seeding bundled themes failed: {ex.Message}");
+            Log.Info($"Syncing bundled themes failed: {ex.Message}");
         }
+    }
+
+    /// <summary>The version string from a theme folder's manifest, or null if it has none.</summary>
+    private static string? VersionOf(string dir)
+    {
+        var manifest = Path.Combine(dir, "theme.json");
+        if (!File.Exists(manifest)) return null;
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<ThemeInfo>(File.ReadAllText(manifest), JsonOpts);
+            return string.IsNullOrWhiteSpace(parsed?.Version) ? null : parsed!.Version;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Move a theme folder aside before it is replaced. Outside the themes directory on purpose:
+    /// a backup left next to the real thing would be listed in Settings as a second theme.
+    /// </summary>
+    private static string? BackUp(string dir, string id, string? version)
+    {
+        try
+        {
+            var root = Path.Combine(Paths.DataDir, "theme-backups");
+            Directory.CreateDirectory(root);
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var dst = Path.Combine(root, $"{id}-{version ?? "unversioned"}-{stamp}");
+            CopyTheme(dir, dst);
+            return dst;
+        }
+        catch (Exception ex)
+        {
+            // A backup that cannot be written is not a reason to leave the user on a stale theme,
+            // but it is a reason to say so.
+            Log.Info($"Could not back up the theme '{id}' before updating it: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void CopyTheme(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.GetFiles(src))
+            File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: true);
     }
 
     /// <summary>

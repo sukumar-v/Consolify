@@ -9,8 +9,9 @@ public class AppSettings
     /// </summary>
     public string AccentColor { get; set; } = "#F0A253";
     /// <summary>Folder name under %APPDATA%\Consolify\themes, or "" for the built-in look.
-    /// A theme that has been deleted falls back to the default rather than failing.</summary>
-    public string Theme { get; set; } = "";
+    /// A theme that has been deleted falls back to the default rather than failing. Marquee ships
+    /// with the app, so a fresh install opens on it rather than on the plain built-in look.</summary>
+    public string Theme { get; set; } = "marquee";
     /// <summary>Hide the button-hint bar along the bottom of every screen. Off by default: it is
     /// the only thing telling a new player what A and Y do, so it is opt-out, not opt-in.</summary>
     public bool HideLegend { get; set; }
@@ -38,7 +39,9 @@ public class AppSettings
     public bool SwitchPrimaryOnLaunch { get; set; } = true;
     public bool RepositionGameWindow { get; set; } = true;
     public bool KeepFocus { get; set; } = true;        // pull focus back when the desktop steals it
-    public bool LaunchOnStartup { get; set; }
+    /// <summary>On by default: a launcher you have to go and find on the desktop is not a
+    /// launcher anyone uses from a sofa.</summary>
+    public bool LaunchOnStartup { get; set; } = true;
 
     // Gamepad → mouse
     public bool GamepadMouseEnabled { get; set; } = true;
@@ -56,8 +59,10 @@ public class AppSettings
     // Button bindings (used outside the launcher UI; inside it A/B/Y/X/MENU follow the on-screen legend)
     public string LeftClickButton { get; set; } = "A";
     public string RightClickButton { get; set; } = "B";
-    /// <summary>Gamepad combo that minimizes/restores the launcher, e.g. "LS + RS". "Off" disables it.</summary>
-    public string MinimizeCombo { get; set; } = "LS + RS";
+    /// <summary>Gamepad combo that minimizes/restores the launcher, e.g. "LS + RS". "Off" disables
+    /// it. Guide is the button a console player already reaches for, so that is the default --
+    /// Windows and Steam both grab it, and the Settings row says so and how to free it.</summary>
+    public string MinimizeCombo { get; set; } = "Guide";
     /// <summary>Gamepad button or combo that taps the screenshot key. "Off" disables it.
     /// Evaluated even inside a focused game, which is the only place it is any use.</summary>
     public string ScreenshotCombo { get; set; } = "Off";
@@ -68,10 +73,24 @@ public class AppSettings
     public int KeyRepeatDelayMs { get; set; } = 350;
     /// <summary>Gap between repeats once it is moving; smaller is faster.</summary>
     public int KeyRepeatIntervalMs { get; set; } = 90;
-    public string KeyboardToggleButton { get; set; } = "Start";
-    public int KeyboardToggleHoldMs { get; set; } = 600;
+    /// <summary>Shows and hides the on-screen keyboard. RB rather than Start because Start is the
+    /// launcher's own Menu button, and in Press mode the keyboard takes the press outright.</summary>
+    public string KeyboardToggleButton { get; set; } = "RB";
+    /// <summary>"Press" (a tap) or "Hold". A tap is the quicker of the two and is the default;
+    /// Hold is for anyone whose toggle button also has a job inside the launcher.</summary>
+    public string KeyboardToggleMode { get; set; } = "Press";
+    /// <summary>How long the button is held in Hold mode. Not used in Press mode.</summary>
+    public int KeyboardToggleHoldMs { get; set; } = 400;
+    /// <summary>
+    /// Whether the toggle button reaches the keyboard while a game holds the foreground.
+    ///
+    /// Off by default: inside a game every button belongs to the game, and a keyboard sliding up
+    /// over one mid-fight is a surprise nobody asked for. Closing a keyboard that is already up is
+    /// always allowed regardless, so this can never strand one on screen.
+    /// </summary>
+    public bool KeyboardInGame { get; set; }
     /// <summary>Builtin (the Consolify keyboard) | TabTip | Osk.</summary>
-    public string KeyboardApp { get; set; } = "Builtin";
+    public string KeyboardApp { get; set; } = "TabTip";
     /// <summary>Multiplier on the Consolify keyboard's key size, 0.6 .. 1.6. The base size is a
     /// fraction of the display height, so this only nudges it away from that.</summary>
     public double KeyboardScale { get; set; } = 1.0;
