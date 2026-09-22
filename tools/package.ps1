@@ -58,7 +58,10 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)" }
 # The UI is loaded off disk through a WebView2 virtual host mapping, so ui\ has to sit next to
 # the exe -- it is the one thing single-file publishing does not swallow. Fail loudly if the
 # csproj ever stops copying it, rather than shipping a zip that opens to a black screen.
-foreach ($required in 'Consolify.exe', 'ui\index.html', 'ui\app.js', 'ui\app.css', 'ui\radial.js') {
+# themes\ is here for the same reason: ThemeService seeds the user's themes folder from the copy
+# next to the exe, so a zip without it installs a launcher whose theme list is empty.
+foreach ($required in 'Consolify.exe', 'ui\index.html', 'ui\app.js', 'ui\app.css', 'ui\radial.js',
+                      'themes\polish\theme.json', 'themes\polish\theme.css', 'themes\polish\theme.html') {
     if (-not (Test-Path (Join-Path $staging $required))) { throw "Missing from the publish output: $required" }
 }
 
