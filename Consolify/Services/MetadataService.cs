@@ -499,10 +499,14 @@ public class MetadataService
             if (igdb.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, filled, ct);
             if (igdb.ArtworkUrl is { } wide)
             {
-                // The only 16:9 art anything gives us, when it is 16:9 at all -- IGDB's artworks
-                // are user uploads and Fits throws out the squares and the portraits. That is why
-                // this has a slot of its own rather than being squeezed into the 3.1:1 hero.
-                any |= await StoreRemoteAsync(g, Slot.Backdrop, wide, filled, ct);
+                // Only when there is no hero. Fits can tell that an artwork is 16:9 and cannot
+                // tell that it is any good, and IGDB's artworks are user uploads in no particular
+                // order -- Persona 3's first one is a blue diagonal, two floating leaves and 31 KB
+                // of JPEG, against 873 KB of key art in Steam's hero. Steam's library_hero is
+                // curated and is the picture the store itself shows, so it wins whenever it
+                // exists; this slot is for the games that have nothing else.
+                if (!filled.Contains(Slot.Hero))
+                    any |= await StoreRemoteAsync(g, Slot.Backdrop, wide, filled, ct);
                 // And as the tile of last resort, for a game with no capsule and nothing from
                 // SteamGridDB. Fits keeps anything squarer than 1.3:1 out of a landscape box.
                 any |= await StoreRemoteAsync(g, Slot.Tile, wide, filled, ct);
@@ -536,6 +540,7 @@ public class MetadataService
         if (!Fits(slot, dest))
         {
             try { File.Delete(dest); } catch { /* a cache file; leaving it costs nothing */ }
+            Unassign(g, slot, name);
             return false;
         }
 
@@ -640,6 +645,27 @@ public class MetadataService
             case Slot.Logo when g.LogoFile != name && !IsCustom(g.LogoFile):
                 g.LogoFile = name; return true;
             default: return false;
+        }
+    }
+
+    /// <summary>
+    /// Let go of a file we just deleted, if this game was pointing at it.
+    ///
+    /// A rejected download is removed from disk, and a previous pass may already have written its
+    /// name into the game -- the same source, the same slot, the same filename, accepted back when
+    /// nothing checked the shape. Left alone that is a library entry naming a file that is not
+    /// there, which renders as no picture at all and survives every refresh, because a name only
+    /// ever gets replaced by a download that succeeds.
+    /// </summary>
+    private static void Unassign(Game g, Slot slot, string name)
+    {
+        switch (slot)
+        {
+            case Slot.Cover when g.CoverFile == name: g.CoverFile = null; break;
+            case Slot.Tile when g.BannerFile == name: g.BannerFile = null; break;
+            case Slot.Hero when g.HeroFile == name: g.HeroFile = null; break;
+            case Slot.Backdrop when g.BackdropFile == name: g.BackdropFile = null; break;
+            case Slot.Logo when g.LogoFile == name: g.LogoFile = null; break;
         }
     }
 

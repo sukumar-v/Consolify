@@ -797,11 +797,26 @@ function bannerUrl(g) { return artUrl(g.bannerFile) || coverUrl(g); }
    A flat colour is a better answer than a cover in a slot that is not for covers. */
 function heroUrl(g) { return artUrl(g.heroFile) || artUrl(g.bannerFile); }
 
-/* What goes behind a whole screen. IGDB's artwork is 1920x1080, which is the shape of the screen
-   it is going on, so it fills one with nothing cropped and nothing scaled up -- the only source we
-   have that can. Steam publishes no usable 16:9 art at all, so its games fall back to the 3.1:1
-   hero, which is banded at its own aspect over a blurred bed of itself instead. */
-function backdropUrl(g) { return artUrl(g.backdropFile) || heroUrl(g); }
+/*
+ * Everything that could go behind a whole screen, best first.
+ *
+ * The hero leads. It used to be second, on the theory that IGDB's 1920x1080 artwork is the shape
+ * of the screen and therefore fills one with nothing cropped -- which is true about its SHAPE and
+ * says nothing about the picture. IGDB's artworks are user uploads in no particular order, and
+ * the first one is as likely to be a flat background plate as the game: Persona 3's was a blue
+ * diagonal, two floating leaves and 31 KB of JPEG, against 873 KB of key art in Steam's hero.
+ * Steam's library_hero is curated, it is the same picture the store shows, and the band-over-a-
+ * blurred-bed treatment handles its 3.1:1 perfectly well. So the 16:9 slot is now the fallback,
+ * which is what it is actually good for: games with no hero at all.
+ *
+ * A LIST rather than one URL because a name in the library can outlive the file it points at, and
+ * the right answer to a picture that will not load is the next one down, not a flat colour.
+ */
+function backdropUrls(g) {
+  return [artUrl(g.heroFile), artUrl(g.backdropFile), artUrl(g.bannerFile)].filter(Boolean);
+}
+
+function backdropUrl(g) { return backdropUrls(g)[0] || null; }
 
 function logoUrl(g) { return artUrl(g.logoFile); }
 
@@ -1136,12 +1151,23 @@ function setBackdrop(game) {
   // element a theme hangs it in -- see setArtAspect. Waiting for the image also means the old
   // backdrop holds until the new one can be drawn at the right size, instead of appearing at the
   // wrong one and resizing. The key guard drops art the highlight has already moved past.
-  queueArt(url, (src, w, h) => {
-    if (bdCurrentKey !== key) return;
-    if (src) { back.style.backgroundImage = `url('${src}')`; setArtAspect(back, w, h); }
-    else flat();
-    show(src);
-  });
+  //
+  // Down the list on a failure rather than straight to a flat colour. A library entry can name a
+  // file that is no longer on disk -- a download rejected for being the wrong shape is deleted,
+  // and the field that pointed at it is not always cleared in the same pass -- and one stale name
+  // should cost that picture, not the whole backdrop.
+  const candidates = backdropUrls(game);
+  const tryFrom = (i) => {
+    if (i >= candidates.length) { flat(); show(null); return; }
+    queueArt(candidates[i], (src, w, h) => {
+      if (bdCurrentKey !== key) return;
+      if (!src) { tryFrom(i + 1); return; }
+      back.style.backgroundImage = `url('${src}')`;
+      setArtAspect(back, w, h);
+      show(src);
+    });
+  };
+  tryFrom(0);
 }
 
 /* ============================== tab bars ============================== */

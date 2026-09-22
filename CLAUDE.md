@@ -162,6 +162,22 @@ Stop the scrolled grid from clipping through the All games header
   follows the highlight, walking along a row changed the shape of the picture every few tiles.
   The bounds are wide on purpose — they reject the wrong KIND of picture, not one a few percent
   off. Art we cannot decode (SteamGridDB serves .webp) is accepted rather than discarded.
+- **`Fits` can tell that an artwork is 16:9 and cannot tell that it is any good.** Persona 3's
+  first IGDB artwork passed the gate at 1920x1080 and is a blue diagonal, two floating leaves and
+  31 KB of JPEG — against 873 KB of key art in Steam's hero. So `backdropUrls` puts the **hero
+  first** and the 16:9 backdrop second, and the enrich only fills the Backdrop slot when nothing
+  filled Hero. `library_hero` is curated and is the picture the store itself shows; the
+  band-over-a-blurred-bed treatment handles its 3.1:1 perfectly well. A side effect worth having:
+  every backdrop in the library is now the same shape, so the picture no longer changes proportion
+  as the highlight moves.
+- `setBackdrop` walks a LIST of candidates and drops to the next on a load failure. A name in the
+  library can outlive the file it points at — a download rejected for being the wrong shape is
+  deleted, and only a *successful* download ever replaces a name — so one stale entry used to
+  cost the whole backdrop, permanently, through any number of refreshes. `Unassign` now clears the
+  field when the file it names is the one being rejected, and the UI falls through regardless.
+- `library_hero_2x.jpg` 404s for a lot of older apps (Celeste, Hollow Knight, TUNIC, Aseprite,
+  Henry Stickmin all only have the 1x). That is what SteamGridDB's hero is for, and it is why the
+  order is Steam 2x → service → Steam 1x rather than just "Steam".
 - `heroUrl` stops at the tile. It must never fall back to the portrait cover: 2:3 art hung
   across a screen at its own aspect is a tall column of box art, and a flat colour is the
   better answer for a game with no wide art at all.
