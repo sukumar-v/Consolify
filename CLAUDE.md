@@ -356,3 +356,18 @@ Stop the scrolled grid from clipping through the All games header
 - A on a settings category reads the category off the element, not off `settingsTab`. Hovering a
   category highlights it without selecting it, so A opened whichever one had last been activated:
   the highlight said Keyboard and Controller's rows appeared, which reads as A doing nothing.
+
+## Running two copies
+
+- `App.OnStartup` takes a `Consolify_SingleInstance` mutex, and a second copy used to just
+  `Shutdown()`. That happens **before** `Log.Info("---- Consolify starting ----")`, so launching
+  the exe while a copy was already running did nothing at all: no window, no error, and not one
+  line in the log to say a start had been attempted. Whatever the running copy happened to be
+  showing then got blamed on the build. A second copy now signals `Consolify_ShowExisting` and the
+  running one calls `Unpark()` and logs that it did.
+- So: **never leave a test instance running.** The user launches
+  `publish\Consolify.exe` by hand and from the HKCU Run key, and a copy left behind after a test
+  silently swallows every launch of theirs. Kill it in the same turn it is finished with.
+- A gap in the log where a start should be is the signature of this. If the user reports something
+  and the log has no `---- Consolify starting ----` for it, they were looking at an instance
+  somebody else started.
