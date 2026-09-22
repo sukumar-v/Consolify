@@ -387,3 +387,36 @@ Stop the scrolled grid from clipping through the All games header
 - A gap in the log where a start should be is the signature of this. If the user reports something
   and the log has no `---- Consolify starting ----` for it, they were looking at an instance
   somebody else started.
+
+## PEGI
+
+- **Steam carries the age boards itself** — `appdetails` returns a `ratings` object with one entry
+  per board (`pegi`, `esrb`, `usk`, `cero`, …), keyed by app id, keyless, no title matching. That
+  makes it a strictly better source than IGDB for anything on Steam, and it is one word in the
+  filter list: `ratings`. The filter list is exhaustive, so leaving the word out drops the whole
+  block silently, which is what "PEGI never shows up" was for a long time.
+- The rating arrives as a **string**, and some boards put letters in it ("m", "r18", "z"), so only
+  PEGI's own five numbers are accepted. A game with no `pegi` entry has no European rating —
+  most indies do not. 4 of 20 in the test library have one, and that is correct, not a failure.
+- The proxy's IGDB age extraction is **separately still broken**: `/v1/facts` returns `pegi: null`
+  for everything, including Cyberpunk 2077 and The Witcher 3, on a verified fresh `X-Cache: MISS`.
+  The likely cause is `AGE_SHAPES` stepping down to the last entry (which asks for no age fields
+  at all) and `ageShape` then sticking for the life of the isolate — and a 400 from an unrelated
+  field, such as `external_games.category`, would be misattributed to the age fields and trigger
+  exactly that. It only matters now for games that are not on Steam at all.
+
+## Fitted art and the bed
+
+- **A bed must be stretched to the box, not centre-cropped.** `background-size: cover` showed a
+  zoomed MIDDLE of the picture behind a strip that sits directly above and below that same
+  picture's own top and bottom edges: two pieces of one image that do not line up, dimmed to 55%.
+  The eye reads that as what it looks like — a bar. `background-size: 100% 100%` matches the sharp
+  layer's horizontal scale, so the strip is the art's own colours carrying on past its edge and
+  stops registering as a border at all. Both `.art-bed` and Polish's `.tv-bed`.
+- The small `transform: scale(1.08)` is only there to keep the blur's feathered edge outside the
+  rounded box. It used to be 1.14, which was fighting the misalignment rather than the feather.
+- **Do not solve leftover strips by cropping.** A 2.14:1 tile cropped to 1.75:1 loses 18% of its
+  width: REANIMAL and Forza Horizon 6 survive that (centred logos) and Shotgun Cop Man does not —
+  its title runs vertically down the left edge and is gone. Edge-detail heuristics do not separate
+  the two cases reliably (measured: 0.79 vs 0.48 and 0.60 of centre std-dev, n=3). The bed is the
+  answer; "Change tile art" in Manage is the escape hatch for a tile somebody dislikes.

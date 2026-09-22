@@ -45,7 +45,7 @@ public class MetadataService
     /// about not re-hitting the network for the same answer; it was never meant to pin a library
     /// to whatever the app happened to know the day it first scanned.
     /// </summary>
-    private const int FetchVersion = 3;
+    private const int FetchVersion = 4;
 
     /// <summary>
     /// Which source wrote a file, as part of its name.
@@ -380,8 +380,11 @@ public class MetadataService
     private async Task<(bool Ok, string? HeaderImage)> FetchSteamFactsAsync(Game g, string appId,
         bool serviceAnswered, CancellationToken ct)
     {
+        // "ratings" is the one that carries the age boards, and it has to be asked for by name --
+        // the filter list is exhaustive, so leaving it out drops the whole block silently.
         var url = $"https://store.steampowered.com/api/appdetails?appids={appId}&l=english" +
-                  "&filters=basic,genres,metacritic,release_date,developers,publishers,controller_support";
+                  "&filters=basic,genres,metacritic,release_date,developers,publishers," +
+                  "controller_support,ratings";
 
         using var res = await Http.GetAsync(url, ct);
         if (!res.IsSuccessStatusCode) return (false, null);
@@ -413,6 +416,12 @@ public class MetadataService
             g.CriticSource = "Metacritic";
         }
 
+        // Steam carries the age boards itself, PEGI among them, keyed by app id and with no key
+        // and no title matching -- which makes it a better source for this than IGDB ever was.
+        // Read before the early return below, for the same reason as the two above: it is worth
+        // having whether or not the service answered.
+        if (g.PegiRating is null && SteamPegi(d) is { } pegi) g.PegiRating = pegi;
+
         // The rest is Steam's only when the service did not answer at all. Keyed on that rather
         // than on whether each field happens to be empty: a field left over from a previous run is
         // also non-empty, and testing emptiness would make stale values impossible to correct.
@@ -437,6 +446,30 @@ public class MetadataService
         }
 
         return (true, Str("header_image"));
+    }
+
+    /// <summary>
+    /// The PEGI age out of Steam's own ratings block, or null.
+    ///
+    /// `ratings` holds one entry per board -- esrb, pegi, usk, cero, oflc and a dozen more -- so
+    /// the board is named rather than guessed at, and only PEGI's own ages are accepted. The
+    /// rating arrives as a STRING ("18"), and a few boards put letters there ("m", "r18", "z"),
+    /// so anything that is not one of PEGI's five numbers is not a PEGI age and is dropped.
+    ///
+    /// Plenty of games have no entry at all: a European rating only exists if somebody paid for
+    /// one, which most indies have not. That is a fact about the game, not a failure here.
+    /// </summary>
+    private static int? SteamPegi(JsonElement data)
+    {
+        if (!data.TryGetProperty("ratings", out var ratings) || ratings.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!ratings.TryGetProperty("pegi", out var pegi) || pegi.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!pegi.TryGetProperty("rating", out var r) || r.ValueKind != JsonValueKind.String)
+            return null;
+
+        return int.TryParse(r.GetString(), out var age) && age is 3 or 7 or 12 or 16 or 18
+            ? age : null;
     }
 
     // ---------- Everything else ----------

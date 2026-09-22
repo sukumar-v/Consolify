@@ -1,7 +1,7 @@
 {
   "name": "Polish",
   "author": "Consolify",
-  "version": "3.2",
+  "version": "3.3",
   "description": "Full-bleed art, recents on a dock, the grid on the way down",
   "tokens": {
     "--bg": "#05070B",
