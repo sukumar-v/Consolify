@@ -74,13 +74,24 @@ public class IgdbClient : IFactsProvider
         $"https://images.igdb.com/igdb/image/upload/t_{size}/{imageId}.jpg";
 
     /// <summary>
-    /// Searches by title and returns only a confidently matching game, or null. The confidence
-    /// rule lives in TitleMatch and is deliberately unforgiving -- see the note there about why a
-    /// near miss is worse than nothing.
+    /// The game, or null.
+    ///
+    /// By Steam app id first, which IGDB records in external_games (category 1 is Steam). That is
+    /// an exact lookup with no title in it, so it cannot answer with a different game -- the same
+    /// guarantee Steam's own endpoints give, and the reason it is safe to ask this source before
+    /// Steam at all. The shared proxy has always worked this way; this client did not, so a user
+    /// who supplied their own credentials was quietly getting the weaker path.
+    ///
+    /// Falling back to a title search for anything IGDB does not index under that id, and for
+    /// everything that was never on Steam. That result goes through TitleMatch, whose confidence
+    /// rule is deliberately unforgiving -- see the note there about why a near miss is worse than
+    /// nothing at all.
     /// </summary>
     public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct)
     {
         if (!await EnsureTokenAsync(ct)) return null;
+
+        if (steamAppId is not null && await ByAppIdAsync(steamAppId, ct) is { } byId) return byId;
 
         // APIcalypse. The quotes around the search term are part of the syntax, so a title
         // containing one has to lose it or the whole query is rejected.
@@ -137,12 +148,43 @@ public class IgdbClient : IFactsProvider
     };
     private static int _ageShape;
 
-    /// <summary>One search, retried down the age-rating shapes when IGDB rejects a field name.</summary>
-    private async Task<JsonDocument?> SearchAsync(string term, string title, CancellationToken ct)
+    /// <summary>
+    /// The game IGDB files under this Steam app id, or null. external_games holds a game's
+    /// storefront ids and category 1 is Steam, so this is a direct lookup rather than a search.
+    ///
+    /// Several rows can come back -- an edition or a regional variant carries its parent's ids --
+    /// so version_parent entries are dropped and the most followed of what is left wins, exactly
+    /// as in the title path.
+    /// </summary>
+    private async Task<IgdbGame?> ByAppIdAsync(string steamAppId, CancellationToken ct)
+    {
+        // Straight into an APIcalypse string literal, so anything but digits is refused rather
+        // than escaped. Every id we hold is numeric; one that is not is a bug, not a query.
+        if (!steamAppId.All(char.IsAsciiDigit)) return null;
+
+        using var doc = await QueryAsync(
+            $"where external_games.category = 1 & external_games.uid = \"{steamAppId}\";", 5,
+            $"app {steamAppId}", ct);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+
+        var hit = doc.RootElement.EnumerateArray()
+            .Where(e => !e.TryGetProperty("version_parent", out _))
+            .OrderByDescending(Popularity)
+            .Select(e => (JsonElement?)e)
+            .FirstOrDefault();
+        return hit is null ? null : Parse(hit.Value);
+    }
+
+    private Task<JsonDocument?> SearchAsync(string term, string title, CancellationToken ct) =>
+        QueryAsync($"search \"{term}\";", 20, $"'{title}'", ct);
+
+    /// <summary>One query, retried down the age-rating shapes when IGDB rejects a field name.</summary>
+    private async Task<JsonDocument?> QueryAsync(string clause, int limit, string label,
+        CancellationToken ct)
     {
         for (var i = _ageShape; i < AgeShapes.Length; i++)
         {
-            var body = $"search \"{term}\"; fields {BaseFields}{AgeShapes[i]}; limit 20;";
+            var body = $"{clause} fields {BaseFields}{AgeShapes[i]}; limit {limit};";
             using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.igdb.com/v4/games")
             {
                 Content = new StringContent(body, Encoding.UTF8, "text/plain")
@@ -165,11 +207,11 @@ public class IgdbClient : IFactsProvider
             // 400 is "I do not know that field", the one failure another shape can fix.
             if (res.StatusCode != System.Net.HttpStatusCode.BadRequest)
             {
-                Log.Info($"IGDB: search for '{title}' returned {(int)res.StatusCode}");
+                Log.Info($"IGDB: query for {label} returned {(int)res.StatusCode}");
                 return null;
             }
         }
-        Log.Info($"IGDB: search for '{title}' was rejected in every field shape");
+        Log.Info($"IGDB: query for {label} was rejected in every field shape");
         return null;
     }
 

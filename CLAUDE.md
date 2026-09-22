@@ -76,9 +76,13 @@ Stop the scrolled grid from clipping through the All games header
 - Every metadata field is cosmetic and every failure is swallowed. Offline, the launcher
   keeps whatever the scanner copied out of Steam's local cache (which is half-size: the
   cached "library_600x900" is really 300x450).
-- Art the user picks by hand is written as `custom_<id>.<ext>`. That prefix is the only
+- Art the user picks by hand is written as `custom_<id>[_<slot>].<ext>`. That prefix is the only
   thing keeping it — nothing else ever writes that name, so neither a rescan nor an
-  enrich can overwrite the file or point the game away from it.
+  enrich can overwrite the file or point the game away from it. The cover has no suffix (it was
+  the only pickable slot once and the name is on disk in everyone's install); the tile is
+  `_tile`. The guard in `Assign` covers every slot, and `CustomSlots` seeds `filled` so a picked
+  slot is not even downloaded for. `HasFetchedArt` has to accept a custom name too, or a game
+  with hand-picked tile art reads as "no art" and rejoins the queue on every single start.
 - Non-Steam games have only a title to match on, so both keyed providers go through
   `TitleMatch`, which accepts nothing short of exact-after-normalising (accents, `&`,
   apostrophes and punctuation folded; one trailing edition suffix discounted). "Portal"
@@ -103,6 +107,26 @@ Stop the scrolled grid from clipping through the All games header
 - The proxy's title matching is a courtesy; the launcher re-checks every response
   against `TitleMatch` itself. A proxy that is wrong, stale or replaced still cannot put
   another game's art on a tile.
+- **Bumping `SCHEMA` does nothing on its own — the worker has to be deployed.** PEGI was added
+  to `proxy/src/worker.js` and never shipped, so the live service kept answering without the
+  field at all and no amount of launcher-side work could show a rating. `curl
+  <endpoint>/v1/facts?title=<something-nobody-has-asked-for>` and look for `X-Cache: MISS`:
+  a fresh answer that is still missing a field means the deploy, not the cache.
+- `MetadataService.FetchVersion` is the other half of that. A build that learns a new field
+  has to be able to go back and ask for it, and the 14-day freshness window would otherwise
+  hold a library on the old answers. Bump it whenever a field is added or a picture starts
+  being picked differently; everything stamped older is fetched again on the next pass.
+- SteamGridDB's landscape grids are **920x430 and 460x215, and both are 2.14:1** — it has no
+  1.75:1 shape at all. Steam's `capsule_616x353` is the only source of one, so the capsule is
+  asked for *before* the service (`PreferSteamCapsuleAsync`) and only that one picture is. Ask
+  the service first for the tile and every game in the library grows a blurred bed, because
+  every tile is suddenly the one shape the box is not cut to. A game with no capsule --
+  REANIMAL, Forza Horizon 6, Shotgun Cop Man all 404 for it -- still falls through to the
+  service, whose 920x430 is twice the header's resolution in the same shape.
+- Both keyed clients now ask by Steam app id when there is one, as the proxy always has: IGDB
+  via `external_games.category = 1`, SteamGridDB via `/games/steam/<appid>`. They used to
+  search by title regardless, so a user who supplied their own credentials was getting the
+  weaker path — the opposite of what supplying them is for.
 - `JsonElement.TryGetInt32` and friends **throw** on a JSON `null` rather than returning
   false — they return false only for a number that will not fit. A `"criticScore": null`,
   which is most games, took out that game's whole enrichment silently. Read numbers
@@ -226,12 +250,15 @@ Stop the scrolled grid from clipping through the All games header
   var(--art-aspect, 3.1)` with `max-height: 100%`. A fixed height only ever suited one source:
   62% of a 16:9 stage is 2.87:1, so Steam's 3.1:1 hero lost the sides and IGDB's 16:9 artwork lost
   42% of its height.
-- Polish floors the library backdrop at `--bd-fill` (72%) on top of that aspect. At its own shape
-  a 3.1:1 hero is 57% of a 16:9 screen and stopped dead there -- a hard horizontal edge across the
-  middle with the bed below it. The floor carries it past the title and into the dock, where the
-  fade has room to happen; the price is about 20% of the width. It is one number: down towards 58%
-  keeps every pixel and brings the band back, up towards 90% takes more screen and less picture.
-  Art that is already tall enough is untouched either way.
+- **A height floor on the backdrop cannot buy height without buying width.** `.bd` has `left` and
+  `right` pinned and an `aspect-ratio`, so `min-height: 72%` grew the *element* to 1605px inside a
+  1280px screen and `#backdrop`'s `overflow: hidden` threw away everything past the right edge — a
+  fifth of the picture, off one side only, and on a 4K panel the fifth that survived was being
+  upscaled 1.25x to get there. Both halves of "cropped and blurry", from one number. `--bd-fill`
+  now defaults to 0 and `max-width: 100%` means raising it costs the bottom of the picture rather
+  than the sides, which is the cheaper edge: key art puts its logo across the middle and the
+  element is anchored `top`. The sharp layer hangs at its own height and the blurred bed carries
+  the rest of the screen, which is what the bed is for.
 - A mask has to fade to nothing at the element's own edge. Polish's stopped at 99% of a band that
   was only 57% tall, so the art was still clearly visible where it ended -- which is what read as
   cut rather than dissolved.
@@ -258,9 +285,17 @@ Stop the scrolled grid from clipping through the All games header
 - The critic score is labelled with `criticSource`, never with "Metacritic" by default. Steam's
   appdetails carries a real Metacritic score and says so; IGDB's `aggregated_rating` is its own
   average and is not Metacritic, so a fixed label would be wrong about half the time.
-- The score and the PEGI age sit together above the stats hairline, each a panel with a caption.
-  A bare "82" is a number with no unit -- it could be a rank or a percentage -- and a bare "16"
-  reads like one too.
+- The score and the PEGI age sit together on the right, level with the stats hairline: the corner
+  of a game's box, which is where an age mark has been printed for thirty years. Each is a panel
+  with a caption -- a bare "82" is a number with no unit and a bare "16" reads like one too -- and
+  the PEGI group is `row-reverse` so the tablet, not a line of small type, is what sits in the
+  corner. Positioned absolutely out of the column: the stats are anchored to the bottom of the
+  page and the ratings are not always there, so in flow a game with a score would put its Play
+  button somewhere different from a game without one.
+- The wordmark gets a pool of shade of its own (`.detail-titleblock::before`, only when the logo
+  is showing). A logo is whatever colour its designer chose and the key art behind it is the same
+  palette -- Cyberpunk's yellow on yellow, and the reason a screen-wide scrim is not the answer:
+  anything heavy enough to separate them flattens the picture everywhere else.
 - IGDB moved age ratings from numeric enums (`category`/`rating`) to references
   (`organization`/`rating_category`), and APIcalypse fails the WHOLE query with a 400 for one
   unknown field -- so guessing wrong costs the description and the score as well as the rating.

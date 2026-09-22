@@ -801,6 +801,11 @@ function backdropUrl(g) { return artUrl(g.backdropFile) || heroUrl(g); }
 
 function logoUrl(g) { return artUrl(g.logoFile); }
 
+/* Art the user picked by hand. The host writes it under a "custom_" name precisely so nothing
+   else can ever write that name, which makes the prefix a reliable answer to "did somebody
+   choose this?" -- and therefore to "is there anything to undo?". */
+function isCustomArt(file) { return typeof file === "string" && file.startsWith("custom_"); }
+
 function hashHue(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
@@ -2688,7 +2693,28 @@ function manageItems() {
   });
   if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
     items.push({ label: `Launch through ${g.platform} again`, icon: "store", action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
-  items.push({ label: "Change cover art", icon: "image", action: () => { send({ cmd: "pickCover", id: g.id }); closeManage(); } });
+  // Two pictures, two entries. They are different shapes and they appear in different places, so
+  // one "change artwork" that set both would put whichever file was chosen into a slot it is the
+  // wrong shape for. The subtitles say where each one shows up, because "cover" and "tile" are
+  // our words for them and nobody else's.
+  items.push({
+    label: "Change tile art", icon: "image", sub: "Library tiles · 1.75:1",
+    action: () => { send({ cmd: "pickCover", id: g.id, slot: "tile" }); closeManage(); },
+  });
+  items.push({
+    label: "Change cover art", icon: "image", sub: "Portrait box art · 2:3",
+    action: () => { send({ cmd: "pickCover", id: g.id, slot: "cover" }); closeManage(); },
+  });
+  // Only once there is something to undo. A picked file outranks every source for good -- see
+  // Assign -- so without this there is no way back to the fetched art short of editing the JSON.
+  if (isCustomArt(g.bannerFile)) items.push({
+    label: "Use the fetched tile art again", icon: "refresh",
+    action: () => { send({ cmd: "resetArt", id: g.id, slot: "tile" }); closeManage(); },
+  });
+  if (isCustomArt(g.coverFile)) items.push({
+    label: "Use the fetched cover again", icon: "refresh",
+    action: () => { send({ cmd: "resetArt", id: g.id, slot: "cover" }); closeManage(); },
+  });
   if (g.manual) items.push({
     label: "Remove from library", icon: "trash", danger: true,
     action: () => { send({ cmd: "removeGame", id: g.id }); closeManage(); switchView(detailReturn); },

@@ -136,10 +136,19 @@ public class UiBridge
                 break;
             }
 
+            // "slot" says which picture: the portrait cover, or the landscape tile the library
+            // grid is made of. Absent means the cover, which is what the only caller used to mean.
             case "pickCover":
             {
                 var id = msg["id"]?.GetValue<string>();
-                if (id is not null) PickCover(id);
+                if (id is not null) PickArt(id, msg["slot"]?.GetValue<string>() ?? "cover");
+                break;
+            }
+
+            case "resetArt":
+            {
+                var id = msg["id"]?.GetValue<string>();
+                if (id is not null) ResetArt(id, msg["slot"]?.GetValue<string>() ?? "cover");
                 break;
             }
 
@@ -535,7 +544,7 @@ public class UiBridge
             Filter = "Images (*.jpg;*.jpeg;*.png;*.webp)|*.jpg;*.jpeg;*.png;*.webp"
         };
         if (ShowDialog(art))
-            game.CoverFile = CopyCover(art.FileName, game.Id);
+            game.CoverFile = CopyArt(art.FileName, game.Id, "");
 
         _library.AddManual(game);
         PushState();
@@ -570,33 +579,80 @@ public class UiBridge
         Push(new { type = "toast", message = $"{game.Title} now launches {Path.GetFileName(dlg.FileName)} directly" });
     }
 
-    private void PickCover(string id)
+    /// <summary>
+    /// The two pictures worth letting somebody replace by hand, and why they are separate.
+    ///
+    /// They are not the same shape and they are not in the same places. The cover is portrait box
+    /// art, 2:3; the tile is the 1.75:1 landscape sheet the library grid and the recents dock are
+    /// made of. One dialog that set both would put whichever file was chosen into a slot it was
+    /// the wrong shape for, which is the exact mistake that made tiles look like they carried
+    /// another game's art in the first place.
+    /// </summary>
+    private static readonly Dictionary<string, (string Label, string Suffix)> ArtSlots = new()
+    {
+        ["cover"] = ("cover art", ""),
+        ["tile"] = ("tile art", "_tile"),
+    };
+
+    private void PickArt(string id, string slot)
     {
         var game = _library.Find(id);
-        if (game is null) return;
+        if (game is null || !ArtSlots.TryGetValue(slot, out var def)) return;
+
         var art = new Microsoft.Win32.OpenFileDialog
         {
-            Title = $"Choose cover art for {game.Title}",
+            Title = $"Choose {def.Label} for {game.Title}",
             Filter = "Images (*.jpg;*.jpeg;*.png;*.webp)|*.jpg;*.jpeg;*.png;*.webp"
         };
         if (!ShowDialog(art)) return;
-        game.CoverFile = CopyCover(art.FileName, game.Id);
+
+        var name = CopyArt(art.FileName, game.Id, def.Suffix);
+        if (name is null) { Push(new { type = "toast", message = "That image could not be copied" }); return; }
+
+        if (slot == "tile") game.BannerFile = name; else game.CoverFile = name;
         _library.Save();
         PushState();
     }
 
     /// <summary>
+    /// Back to whatever the last fetch found. Clearing the field rather than deleting the file:
+    /// the covers folder is a cache and an orphan in it costs nothing, where a delete on a path
+    /// built from a game id is the kind of thing that only has to be wrong once. The next enrich
+    /// refills the slot -- the stamp is cleared so it does not wait a fortnight to do it.
+    /// </summary>
+    private void ResetArt(string id, string slot)
+    {
+        var game = _library.Find(id);
+        if (game is null || !ArtSlots.ContainsKey(slot)) return;
+
+        if (slot == "tile") game.BannerFile = null; else game.CoverFile = null;
+        game.MetadataFetched = null;
+        _library.Save();
+        PushState();
+        Push(new { type = "toast", message = "Artwork will be fetched again on the next scan" });
+    }
+
+    /// <summary>
     /// Art the user chose by hand. The "custom_" prefix is what keeps it: it is the one name
     /// neither the scanner nor MetadataService ever writes, so a rescan cannot overwrite the file
-    /// and an enrich cannot point the game away from it.
+    /// and an enrich cannot point the game away from it. The suffix keeps one slot's choice from
+    /// landing on top of another's.
     /// </summary>
-    private static string? CopyCover(string source, string gameId)
+    private static string? CopyArt(string source, string gameId, string suffix)
     {
         try
         {
             var safe = gameId.Replace(':', '_');
-            var dest = Path.Combine(Paths.CoversDir, $"custom_{safe}{Path.GetExtension(source).ToLowerInvariant()}");
+            var ext = Path.GetExtension(source).ToLowerInvariant();
+            var dest = Path.Combine(Paths.CoversDir, $"custom_{safe}{suffix}{ext}");
             File.Copy(source, dest, overwrite: true);
+
+            // A second pick with a different extension would otherwise leave the old file behind
+            // and, since the name is what the UI loads, leave it showing until a restart.
+            foreach (var stale in Directory.GetFiles(Paths.CoversDir, $"custom_{safe}{suffix}.*"))
+                if (!string.Equals(stale, dest, StringComparison.OrdinalIgnoreCase))
+                    try { File.Delete(stale); } catch { /* a cache file; not worth failing over */ }
+
             return Path.GetFileName(dest);
         }
         catch { return null; }

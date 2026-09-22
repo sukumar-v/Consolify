@@ -35,6 +35,18 @@ public class MetadataService
     private const int StoreGapMs = 1500;
     private static readonly TimeSpan Freshness = TimeSpan.FromDays(14);
 
+    /// <summary>
+    /// What this build knows how to fetch. Bump it whenever a field is added or a picture starts
+    /// being chosen differently, and every entry stamped with an older number is fetched again on
+    /// the next pass.
+    ///
+    /// Without this a library only picks up a change after the freshness window runs out, which
+    /// is a fortnight of the app knowing about PEGI ratings and never asking for one. Freshness is
+    /// about not re-hitting the network for the same answer; it was never meant to pin a library
+    /// to whatever the app happened to know the day it first scanned.
+    /// </summary>
+    private const int FetchVersion = 2;
+
     private static readonly HttpClient Http = CreateClient();
 
     private DateTime _lastStoreCall = DateTime.MinValue;
@@ -73,7 +85,8 @@ public class MetadataService
     private static readonly (string Remote, Slot Slot, string Suffix)[] SteamArt =
     {
         ("library_600x900_2x.jpg", Slot.Cover, "_hd"),       // the full-size portrait, 600x900 up
-        ("capsule_616x353.jpg",    Slot.Tile,  "_hdtile"),   // 616x353, the landscape tile
+        // The capsule is not here: it is asked for before the service, not after. See
+        // PreferSteamCapsuleAsync. header.jpg is the fallback for it and stays where it is.
         ("header.jpg",             Slot.Tile,  "_hdhead"),   // 460x215 fallback for the above
         ("library_hero_2x.jpg",    Slot.Hero,  "_hdhero2x"), // 3840x1240 -- see below
         ("library_hero.jpg",       Slot.Hero,  "_hdhero"),   // 1920x620, the fallback
@@ -132,12 +145,23 @@ public class MetadataService
                     appId = await search.FindAppIdAsync(g.Title, ct);
                 }
 
-                // The service first, then Steam for whatever it did not answer. SteamGridDB's art
+                // A slot holding art the user chose by hand is already settled: counting it as
+                // filled means nothing is downloaded for it at all, rather than fetched and then
+                // discarded by the guard in Assign.
+                var filled = CustomSlots(g);
+                var touched = false;
+
+                // One exception to "the service first", and only one picture: Steam's
+                // capsule_616x353 is 1.75:1, which is the shape every landscape tile in the app is
+                // cut to. See PreferSteamCapsuleAsync.
+                if (appId is not null) touched |= await PreferSteamCapsuleAsync(g, appId, filled, ct);
+
+                // Then the service, then Steam for whatever it did not answer. SteamGridDB's art
                 // is often better shaped than Steam's own -- a proper landscape tile for a game
                 // that only publishes a 2.14:1 header -- while Steam still holds the Metacritic
                 // score and the controller-support flag, which IGDB has no equivalent of.
-                var filled = new HashSet<Slot>();
-                var (touched, serviceFacts) = await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
+                var (elsewhere, serviceFacts) = await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
+                touched |= elsewhere;
 
                 // Steam runs after, as the fallback: it fills every art slot and every field the
                 // service left empty, and it always supplies controller support, which IGDB has
@@ -148,7 +172,11 @@ public class MetadataService
                 // not looked up again on every launch -- but NOT when every source that could have
                 // answered was unavailable. Otherwise a typo'd key or an outage would mark the
                 // library "tried" and fixing it would appear to do nothing for a fortnight.
-                if (appId is not null || !AllUnavailable(facts, art)) g.MetadataFetched = DateTime.UtcNow;
+                if (appId is not null || !AllUnavailable(facts, art))
+                {
+                    g.MetadataFetched = DateTime.UtcNow;
+                    g.MetadataVersion = FetchVersion;
+                }
                 if (touched) changed++;
             }
             catch (OperationCanceledException) { break; }
@@ -197,6 +225,11 @@ public class MetadataService
 
     private static bool NeedsFetch(Game g)
     {
+        // Filled in by a build that fetched less than this one does, so the answers on file are
+        // not wrong, just short. Checked before freshness on purpose: the window is there to stop
+        // us asking the same question twice, not to stop us asking a new one.
+        if (g.MetadataVersion != FetchVersion) return true;
+
         // Art can go missing on its own -- a cleared covers folder, a half-finished first run --
         // so a game inside the freshness window is still due if its files are not there. Nothing
         // is excluded up front any more: with the keyless Steam tiers there is always something
@@ -205,8 +238,14 @@ public class MetadataService
         return true;
     }
 
+    /// <summary>
+    /// True when the tile is art this pass would not improve on: something downloaded, or
+    /// something the user chose. Without the second half a hand-picked tile reads as "no fetched
+    /// art" forever and puts its game back in the queue on every single start.
+    /// </summary>
     private static bool HasFetchedArt(Game g) =>
-        g.BannerFile is { } b && b.Contains("_hd") && File.Exists(Path.Combine(Paths.CoversDir, b));
+        g.BannerFile is { } b && (b.Contains("_hd") || IsCustom(b))
+        && File.Exists(Path.Combine(Paths.CoversDir, b));
 
     private static string? SteamAppId(Game g) =>
         g.Id.StartsWith("steam:", StringComparison.Ordinal) && g.Id.Length > 6 ? g.Id[6..] : null;
@@ -236,6 +275,27 @@ public class MetadataService
         return gotArt || gotFacts;
     }
 
+    /// <summary>
+    /// The one picture worth asking Steam for before anything else: capsule_616x353, which is
+    /// 1.75:1 and is exactly the shape every landscape tile in the app is cut to.
+    ///
+    /// SteamGridDB's landscape grids are 920x430 and 460x215, and both are 2.14:1. Letting the
+    /// service take the tile slot first -- the right order for everything else, since an id lookup
+    /// cannot answer with the wrong game -- therefore replaced a capsule that filled its tile
+    /// corner to corner with art that leaves a strip top and bottom. Every tile in the library
+    /// grew a blurred mat: the bed doing its job on art that never needed it.
+    ///
+    /// First refusal, and nothing more. A game that publishes no capsule -- REANIMAL and Forza
+    /// Horizon 6 both 404 for it -- falls through to the service untouched, and a 2.14:1 grid is
+    /// still a far better tile than Steam's 460x215 header.
+    /// </summary>
+    private async Task<bool> PreferSteamCapsuleAsync(Game g, string appId, HashSet<Slot> filled,
+        CancellationToken ct) =>
+        await FetchSteamEntryAsync(g, appId, SteamCapsule, filled, ct);
+
+    private static readonly (string Remote, Slot Slot, string Suffix) SteamCapsule =
+        ("capsule_616x353.jpg", Slot.Tile, "_hdtile");
+
     private async Task<bool> FetchSteamArtAsync(Game g, string appId, string? headerImage,
         HashSet<Slot> filled, CancellationToken ct)
     {
@@ -244,23 +304,10 @@ public class MetadataService
         // Which slots this pass has already filled. Several entries compete for one slot -- the
         // capsule then header.jpg, the 2x hero then the 1x -- and they are listed best first, so
         // the first to succeed wins and the rest are skipped for that slot.
-        foreach (var (remote, slot, suffix) in SteamArt)
+        foreach (var entry in SteamArt)
         {
             if (ct.IsCancellationRequested) break;
-            if (filled.Contains(slot)) continue;
-
-            var name = ArtPrefix(g) + suffix + Path.GetExtension(remote);
-            var dest = Path.Combine(Paths.CoversDir, name);
-
-            // Already have this exact asset, so nothing to fetch -- and because the name identifies
-            // the source, this cannot mask a better one that has not been tried yet.
-            if (File.Exists(dest)) { filled.Add(slot); any |= Assign(g, slot, name); continue; }
-
-            var url = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/{remote}";
-            if (!await DownloadAsync(url, dest, ct)) continue;
-
-            filled.Add(slot);
-            any |= Assign(g, slot, name);
+            any |= await FetchSteamEntryAsync(g, appId, entry, filled, ct);
         }
 
         // Last resort for the tile, and the only art newer apps publish at all. Checked against
@@ -270,6 +317,26 @@ public class MetadataService
             any |= await StoreRemoteAsync(g, Slot.Tile, headerImage, filled, ct);
 
         return any;
+    }
+
+    /// <summary>One entry off the CDN, skipped when its slot is already taken.</summary>
+    private async Task<bool> FetchSteamEntryAsync(Game g, string appId,
+        (string Remote, Slot Slot, string Suffix) entry, HashSet<Slot> filled, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested || filled.Contains(entry.Slot)) return false;
+
+        var name = ArtPrefix(g) + entry.Suffix + Path.GetExtension(entry.Remote);
+        var dest = Path.Combine(Paths.CoversDir, name);
+
+        // Already have this exact asset, so nothing to fetch -- and because the name identifies
+        // the source, this cannot mask a better one that has not been tried yet.
+        if (File.Exists(dest)) { filled.Add(entry.Slot); return Assign(g, entry.Slot, name); }
+
+        var url = $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/{entry.Remote}";
+        if (!await DownloadAsync(url, dest, ct)) return false;
+
+        filled.Add(entry.Slot);
+        return Assign(g, entry.Slot, name);
     }
 
     /// <summary>Facts, plus the header image URL appdetails names -- the art step needs it as a
@@ -443,24 +510,46 @@ public class MetadataService
         return ext is ".jpg" or ".jpeg" or ".png" or ".webp" ? ext : ".jpg";
     }
 
-    /// <summary>Points the game at art we just wrote. Returns true when it actually changed.</summary>
+    /// <summary>
+    /// Points the game at art we just wrote. Returns true when it actually changed.
+    ///
+    /// Art the user picked by hand outranks anything we can download, in every slot -- the cover
+    /// was the only one that could be picked when this was written, and the guard was on that one
+    /// alone. Now that a tile can be chosen too, an enrich that moved it back would make the
+    /// option look like it had not worked.
+    /// </summary>
     private static bool Assign(Game g, Slot slot, string name)
     {
         switch (slot)
         {
-            // A cover the user picked by hand outranks anything we can download.
             case Slot.Cover when g.CoverFile != name && !IsCustom(g.CoverFile):
                 g.CoverFile = name; return true;
-            case Slot.Tile when g.BannerFile != name: g.BannerFile = name; return true;
-            case Slot.Hero when g.HeroFile != name: g.HeroFile = name; return true;
-            case Slot.Backdrop when g.BackdropFile != name: g.BackdropFile = name; return true;
-            case Slot.Logo when g.LogoFile != name: g.LogoFile = name; return true;
+            case Slot.Tile when g.BannerFile != name && !IsCustom(g.BannerFile):
+                g.BannerFile = name; return true;
+            case Slot.Hero when g.HeroFile != name && !IsCustom(g.HeroFile):
+                g.HeroFile = name; return true;
+            case Slot.Backdrop when g.BackdropFile != name && !IsCustom(g.BackdropFile):
+                g.BackdropFile = name; return true;
+            case Slot.Logo when g.LogoFile != name && !IsCustom(g.LogoFile):
+                g.LogoFile = name; return true;
             default: return false;
         }
     }
 
     private static bool IsCustom(string? file) =>
         file is not null && file.StartsWith("custom_", StringComparison.Ordinal);
+
+    /// <summary>The slots this game already has hand-picked art in.</summary>
+    private static HashSet<Slot> CustomSlots(Game g)
+    {
+        var set = new HashSet<Slot>();
+        if (IsCustom(g.CoverFile)) set.Add(Slot.Cover);
+        if (IsCustom(g.BannerFile)) set.Add(Slot.Tile);
+        if (IsCustom(g.HeroFile)) set.Add(Slot.Hero);
+        if (IsCustom(g.BackdropFile)) set.Add(Slot.Backdrop);
+        if (IsCustom(g.LogoFile)) set.Add(Slot.Logo);
+        return set;
+    }
 
     private static async Task<bool> DownloadAsync(string url, string dest, CancellationToken ct)
     {

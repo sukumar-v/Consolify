@@ -24,7 +24,7 @@
 const CACHE_TTL = 60 * 60 * 24 * 30;   // 30 days. Game facts do not change; art rarely does.
 const MISS_TTL = 60 * 60 * 24 * 3;     // Remember "no match" too, but re-check sooner: a game may
                                        // be added to a database after we first ask for it.
-const SCHEMA = "v4";                   // bump when a fetcher changes shape or its picking
+const SCHEMA = "v5";                   // bump when a fetcher changes shape or its picking
                                        // rules; it is part of every cache key, so stale answers retire
 const RATE_LIMIT = 240;                // requests per IP per window
 const RATE_WINDOW = 60;                // seconds

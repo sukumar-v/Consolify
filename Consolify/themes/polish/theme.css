@@ -103,26 +103,32 @@ body:has(#screen-library.active) .bd {
   top: 0; left: 0; right: 0; bottom: auto;
   height: auto;
   aspect-ratio: var(--art-aspect, 3.1);
-  /* How far down the sharp layer reaches, as a floor under its natural height.
-     At its own aspect a 3.1:1 hero is 57% of a 16:9 screen, and it stopped there -- a hard
-     horizontal edge across the middle of the screen with the blurred bed below it. The floor
-     carries it past the title and into the dock, where the fade has somewhere to happen.
-     The price is the sides: filling 72% of the height with a 3.1:1 picture shows about 80% of
-     its width. Turn this down towards 58% to keep every pixel of the width and take the band
-     back; turn it up towards 90% for more of the screen and less of the picture. Art that is
-     already tall enough -- IGDB's 16:9 -- is untouched by it either way. */
-  min-height: var(--bd-fill, 72%);
+  /* No floor by default, and this is the whole fix for "the backdrop is cropped and blurry".
+     A floor cannot make a picture taller without also making it wider: left and right are both
+     pinned, so aspect-ratio grew the ELEMENT instead, and at 72% a 3.1:1 hero came out 1605px
+     wide inside a 1280px screen. Everything past the right edge was clipped away -- a fifth of
+     the picture, off one side, and on a 4K panel the 20% that was left was being scaled up by
+     a quarter to get there. Both of the things that looked wrong, from one number.
+
+     So the sharp layer hangs at its own height and the blurred bed below carries the rest of
+     the screen, which is what the bed is for. Raise --bd-fill to push the art further down;
+     max-width means that now costs the bottom of the picture rather than its sides, which is
+     the cheaper edge to lose -- key art puts its logo across the middle and this is anchored
+     to the top. Art already taller than the floor is untouched either way. */
+  min-height: var(--bd-fill, 0%);
+  max-width: 100%;
   max-height: 100%;
   filter: none;
   background-position: top center;
   /* The fade is a share of this element, not of the screen, which is the reason
      the element is cut to the art: put it on a full-height box and the gradient
      lands below the picture and never touches it. */
-  /* Fading over the bottom 58% rather than the bottom 35%, and all the way to the element's
-     own edge. The short fade ended while the art was still clearly visible, which is what made
-     it look cut rather than dissolved. */
-  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 100%);
-          mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 100%);
+  /* Fading over the bottom two thirds, and all the way to the element's own edge. The short
+     fade ended while the art was still clearly visible, which is what made it look cut rather
+     than dissolved -- and with no floor holding the band down, there is less height for the
+     dissolve to happen in, so it starts higher than it did. */
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 34%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 0, #000 34%, transparent 100%);
   transition: opacity 300ms linear, filter 380ms var(--ease), transform 380ms var(--ease);
 }
 body:has(#screen-library.active) .bd.visible { opacity: 1; }

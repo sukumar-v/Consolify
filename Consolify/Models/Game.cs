@@ -61,4 +61,9 @@ public class Game
     /// <summary>When it was fetched, so a rescan does not re-hit the network for everything.
     /// Null means never tried.</summary>
     public DateTime? MetadataFetched { get; set; }
+    /// <summary>What the app knew how to fetch when this entry was last filled in. A build that
+    /// learned a new field or a better-shaped picture bumps MetadataService.FetchVersion, and
+    /// everything stamped with an older one is fetched again -- otherwise a library sits on the
+    /// old answers until the freshness window runs out, which is not what that window is for.</summary>
+    public int MetadataVersion { get; set; }
 }

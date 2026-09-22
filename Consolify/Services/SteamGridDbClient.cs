@@ -47,13 +47,20 @@ public class SteamGridDbClient : IArtProvider
     public static bool IsConfigured(string? key) => !string.IsNullOrWhiteSpace(key);
 
     /// <summary>
-    /// Finds the game by title and collects one image of each shape, or null if nothing matched
-    /// confidently. Art is looked up by SteamGridDB's own game id once the title has matched, so
-    /// the only guess in the whole exchange is the one TitleMatch adjudicates.
+    /// Collects one image of each shape, or null if nothing matched confidently.
+    ///
+    /// By Steam app id when there is one: SteamGridDB indexes by it directly, so that lookup
+    /// cannot come back with a different game and there is no matching to adjudicate at all. The
+    /// title search is the fallback, for games SteamGridDB does not hold under that id and for
+    /// everything that was never on Steam -- and what it returns still goes through TitleMatch.
+    ///
+    /// This is the same route the shared proxy takes. Without it, a user who supplied their own
+    /// key got the weaker of the two paths for every game, which is backwards.
     /// </summary>
     public async Task<SteamGridArt?> FindArtAsync(string title, string? steamAppId, CancellationToken ct)
     {
-        var id = await SearchAsync(title, ct);
+        var id = steamAppId is null ? null : await ByAppIdAsync(steamAppId, ct);
+        id ??= await SearchAsync(title, ct);
         if (id is null) return null;
 
         // Asked for in the order a tile wants them. Dimensions are a filter, not a promise: a game
@@ -65,6 +72,16 @@ public class SteamGridDbClient : IArtProvider
 
         if (portrait is null && tile is null && hero is null && logo is null) return null;
         return new SteamGridArt { Portrait = portrait, Tile = tile, Hero = hero, Logo = logo };
+    }
+
+    /// <summary>SteamGridDB's own game id for a Steam app id, or null if it does not hold one.</summary>
+    private async Task<int?> ByAppIdAsync(string steamAppId, CancellationToken ct)
+    {
+        var doc = await GetAsync($"{Root}/games/steam/{Uri.EscapeDataString(steamAppId)}", ct);
+        if (doc is null) return null;
+        using (doc)
+            return doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
+                ? JsonNum.Int(data, "id") : null;
     }
 
     private async Task<int?> SearchAsync(string title, CancellationToken ct)

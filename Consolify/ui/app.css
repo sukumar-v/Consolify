@@ -233,13 +233,27 @@ html, body {
 .detail-platform:empty { display: none; }
 .detail-platform svg { width: 30px; height: 30px; }
 
-/* Ratings sit directly above the stats hairline, so what other people thought of the game reads
-   as part of the same block of evidence as how long you have played it. Each is a panel and a
-   caption: the number is never left on its own to be mistaken for a rank or a percentage. */
-.detail-numbers { display: flex; flex-direction: column; gap: 26px; }
-.detail-ratings { display: flex; align-items: center; gap: 34px; }
+/* Ratings sit over on the right, level with the stats hairline and clear of the text column --
+   the corner of a game's box, which is where an age mark has been printed for thirty years and
+   the first place anyone looks for one. It is also the part of the screen where the art has
+   finished fading, so the two panels land on background rather than on a picture.
+
+   Absolutely positioned out of the column rather than placed above the hairline in flow: the
+   stats have to stay where they are, anchored to the bottom of the page, and the ratings are not
+   always there. In flow, a game with a score would put its Play button in a different place from
+   a game without one, which is the thing .detail-main's margin-top: auto exists to prevent. */
+.detail-numbers { position: relative; align-self: stretch; }
+.detail-ratings {
+  position: absolute; right: 0; bottom: calc(100% + 20px);
+  display: flex; align-items: flex-end; gap: 30px;
+}
 .detail-ratings:empty { display: none; }
 .rating-score, .rating-pegi { display: flex; align-items: center; gap: 15px; }
+/* The age mark hard against the right edge, its caption inboard of it. Reversed only for this
+   one: the PEGI tablet is the graphic everybody recognises, so it is what should be sitting in
+   the corner, not a line of small type. */
+.rating-pegi { flex-direction: row-reverse; }
+.rating-pegi .rating-side { text-align: right; }
 .rating-side { display: flex; flex-direction: column; gap: 5px; }
 .rating-name { font-size: 14px; letter-spacing: 0.14em; }
 .rating-sub {
@@ -353,9 +367,19 @@ body.no-legend .legend { display: none; }
   -webkit-mask-image: linear-gradient(180deg, #000 0, #000 58%, transparent 99%);
           mask-image: linear-gradient(180deg, #000 0, #000 58%, transparent 99%);
 }
-/* Lighter than it was on both axes. The art no longer sits behind the whole column, so the
-   scrims only have to carry the crumb at the top and the title where the two overlap. */
-.detail-shade-x { position: absolute; inset: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--bg) 58%, transparent) 0, color-mix(in srgb, var(--bg) 20%, transparent) 52%, transparent 100%); }
+/* Two, one from each side. The left one carries the whole text column and is the heavier of the
+   pair; the right one is a vignette rather than a scrim -- it only has to keep the ratings legible
+   over whatever the art happens to be doing in that corner, and taking the right edge down as
+   well stops the picture running out at a hard vertical line.
+
+   Heavier on the left than it was. The bottom of this page fades to the background and the sides
+   did not, so a logo the same colour as the art behind it had nothing to separate it from. */
+.detail-shade-x {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--bg) 74%, transparent) 0, color-mix(in srgb, var(--bg) 30%, transparent) 46%, transparent 76%),
+    linear-gradient(270deg, color-mix(in srgb, var(--bg) 44%, transparent) 0, transparent 26%);
+}
 .detail-shade-y { position: absolute; inset: 0; background: linear-gradient(0deg, var(--bg) 26%, color-mix(in srgb, var(--bg) 70%, transparent) 46%, transparent 72%); }
 /* The type here was set a size larger than it needed to be all the way down, which on a 1920
    stage made a two-line title out of most names and left the column reading as one dense block.
@@ -376,7 +400,24 @@ body.no-legend .legend { display: none; }
   display: flex; flex-direction: column; gap: 62px; align-items: flex-start;
   margin-top: auto; margin-bottom: 52px;
 }
-.detail-titleblock { display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
+.detail-titleblock { position: relative; display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
+/* A pool of shade under the wordmark.
+   A logo is whatever colour its designer chose and the art behind it is usually the same palette
+   -- a red wordmark on red key art disappears into it, and no amount of scrim across the whole
+   screen fixes that without also flattening the picture. So the shade is local: an ellipse under
+   the lettering, soft enough at its edge that there is no visible shape to it, and only present
+   when there is a logo to carry. The text title needs none of this; type has its own weight. */
+.detail-titleblock:has(.detail-logo:not([hidden]))::before {
+  content: ""; position: absolute; pointer-events: none;
+  left: -110px; top: -70px; width: 860px; height: 300px;
+  background: radial-gradient(54% 52% at 38% 45%,
+    color-mix(in srgb, var(--bg-deep) 80%, transparent) 0,
+    color-mix(in srgb, var(--bg-deep) 50%, transparent) 46%,
+    transparent 76%);
+}
+/* Everything in the block sits over that pool. Without this the ::before, being a later child in
+   paint order than the text nodes it shares a stacking context with, would cover them. */
+.detail-titleblock > * { position: relative; }
 .detail-titleblock h1 {
   /* 62px keeps all but the longest names on one line, where 88px wrapped most of them. */
   margin: 0; font-size: 62px; font-weight: 600;
