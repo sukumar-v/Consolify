@@ -84,6 +84,50 @@ sessions locally, and rescans every time it starts, so a game installed yesterda
 Anything the scanners drag in that isn't a game (benchmarks, wallpaper tools, redistributables)
 gets hidden with one button.
 
+Turn on **Show games you own but haven't installed** under Settings → Library and your whole Steam
+library comes in too, the way Playnite's Steam integration does it. The account is read off the
+Steam client's own login, so there is nothing to sign into; anything not on disk sits greyed out
+in the grid, and pressing A on one hands it to Steam to install — the tile turns playable the
+moment the download finishes. Steam's default privacy settings are enough. A profile that keeps
+its game details private needs a free [Steam Web API key](https://steamcommunity.com/dev/apikey)
+pasted into the row under the toggle, which is the one case where a key is ever asked for.
+
+**Epic, GOG and Xbox** work the way they do in Playnite: sign in to each store once, from
+Settings → Library, and its library is listed here. The sign-in is the store's own web page in a
+window of its own — the stick is the mouse, the keyboard toggle raises the on-screen keyboard —
+and Consolify keeps only the resulting token, encrypted for your Windows account. Pressing A on a
+game you own but do not have opens the right store ready to install: the Epic Games Launcher, GOG
+Galaxy (or the game's gog.com page when Galaxy is not installed), or the Microsoft Store. The
+Xbox list is your profile's title history, which is what Xbox Live exposes; **Show the PC Game
+Pass catalogue** adds every game included with PC Game Pass, from Microsoft's public catalogue,
+with no sign-in at all.
+
+### The Xbox sign-in needs an app registration
+
+Xbox Live only issues tokens to programs Microsoft knows about. Playnite works because its author
+registered Playnite as an application with Microsoft — the "Let this app access your info?"
+prompt you see there is the consent screen for that registration. The old trick of signing in as
+one of Microsoft's own first-party clients is being withdrawn: the Xbox app's own id is now
+refused outright (a 403 from the user-token service), and the one Consolify falls back to can
+stop working the same way at any time.
+
+Registering one takes five minutes and costs nothing:
+
+1. Sign in at https://portal.azure.com with any Microsoft account, open **Microsoft Entra ID →
+   App registrations → New registration**.
+2. Name it (say, "Consolify"). Under **Supported account types** choose **Personal Microsoft
+   accounts only**.
+3. Under **Redirect URI** pick the platform **Public client/native (mobile & desktop)** and enter
+   `https://login.live.com/oauth20_desktop.srf`. Register.
+4. On the app's **Authentication** page set **Allow public client flows** to **Yes** and save. No
+   client secret is needed, or wanted.
+5. Copy the **Application (client) ID** from the Overview page.
+
+Paste it into **Settings → Library → Xbox sign-in app id** and sign in again; the consent prompt
+will now name your registration. If you build Consolify yourself, put the same id into
+`DefaultClientId` in `XboxAccountClient.cs` and everybody who runs your build gets the Xbox sign-in
+with nothing to set up — which is exactly what Playnite ships.
+
 The TV is treated as a first-class display: the launcher places itself there pixel-exactly, makes
 it the Windows primary before a game starts so the game opens on the right screen, and puts your
 old primary back when you quit.
@@ -224,9 +268,10 @@ behaviour and screen structure. Things that could not map 1:1 to local desktop r
 5. **Genre filter and Metacritic sort** — no offline data source (store metadata needs
    authenticated web APIs), so the Filter overlay offers platform/favorites/installed filters
    and A–Z / Z–A / recency / playtime / size sorts instead.
-6. **Not-installed titles** — the design dims games that are owned but not installed. Locally
-   only installed games are discoverable (store catalogs need authenticated APIs), so
-   "not installed" shows for entries whose files have been removed since scanning.
+6. **Not-installed titles** — the design dims games that are owned but not installed. Steam's
+   library is imported through its Web API, and Epic, GOG and Xbox libraries through a sign-in to
+   each store, when set up (see above). Without them, "not installed" only shows for entries whose
+   files have been removed since scanning.
 7. **Sample imagery** — the design's placeholder photos are replaced by real cover art
    (Steam caches both portrait covers and landscape banners; Xbox supplies square store logos;
    manual entries use user-picked images) with a procedural gradient-and-initials placeholder

@@ -29,7 +29,26 @@ public class Game
     public bool Manual { get; set; }
     public bool Favorite { get; set; }
     public bool Hidden { get; set; }                 // kept out of the library, listed under Hidden
+    /// <summary>How to ask the game's own store to install it, for an entry that is owned but
+    /// not on disk: steam://install, Epic's apps/…?action=install, goggalaxy://openGameView, the
+    /// Microsoft Store's product page. Null for anything installed and for a store with no such
+    /// route, and it is the only thing the Install button keys off.</summary>
+    public string? InstallUri { get; set; }
+    /// <summary>Xbox only: the package family name, which is what an installed Xbox game and a
+    /// catalogue entry for the same game have in common when nothing else matches.</summary>
+    public string? PackageFamilyName { get; set; }
+    /// <summary>Art the game's own store published, used as the last fallback after Steam and the
+    /// service: Galaxy's GOG-hosted covers, the Microsoft Store's posters.</summary>
+    public string? RemoteCoverUrl { get; set; }
+    public string? RemoteBackdropUrl { get; set; }
     public bool PreferDirectLaunch { get; set; } // user chose an exe to bypass the store launcher
+    /// <summary>
+    /// The copy this game launches from when it is in more than one store -- picked under Manage
+    /// → Launch with. The page groups entries by title into one tile, and among the copies of one
+    /// game at most one carries this. Without it the tile takes an installed copy first, then the
+    /// stores in order: Steam, Epic, GOG, Xbox.
+    /// </summary>
+    public bool PreferredEdition { get; set; }
 
     // ---- Fetched metadata ----
     // Everything below is filled in by MetadataService and is purely cosmetic: the launcher works

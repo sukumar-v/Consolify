@@ -24,6 +24,9 @@ public class GameLaunchService
     public string? RunningGameId { get; private set; }
 
     private string? _runningInstallDir;
+    /// <summary>Set when the close came from Consolify itself (the in-game menu, the game menu, a
+    /// swap). Nothing is going to take over from the game then, so nothing is waited for.</summary>
+    private volatile bool _closeRequested;
     private readonly Dictionary<uint, bool> _pidCache = new();
     private readonly object _pidGate = new();
 
@@ -53,6 +56,7 @@ public class GameLaunchService
         var monitorCts = new CancellationTokenSource();
 
         _runningInstallDir = game.InstallDir;
+        _closeRequested = false;
         lock (_pidGate) _pidCache.Clear();
 
         try
@@ -87,12 +91,30 @@ public class GameLaunchService
                 while (tracked is not null)
                 {
                     Log.Info($"Tracking game process {tracked.ProcessName} (pid {tracked.Id}) for {game.Title}");
+                    var trackedSince = DateTime.UtcNow;
 
                     await tracked.WaitForExitAsync();
-                    tracked = game.InstallDir is not null
-                        ? await WaitForProcessFromDir(game.InstallDir, TimeSpan.FromSeconds(15))
-                        : null;
+                    if (game.InstallDir is null) break;
+
+                    // Anything of the game's still running right now carries the session on: a
+                    // launcher hands over to the game before it exits (REDprelauncher starts
+                    // REDlauncher, which starts Cyberpunk2077.exe), so the successor is already
+                    // there the moment its parent goes.
+                    tracked = FindProcessFromDir(game.InstallDir);
+                    if (tracked is not null || _closeRequested) continue;
+
+                    // Nothing running. This used to wait a flat 15 seconds for a successor after
+                    // every exit, which is the pause between a game closing and the launcher
+                    // coming back. The long wait is only earned by a process that lived a few
+                    // seconds -- a pre-launcher that exits before the game has started. Something
+                    // that ran for minutes was the game, and gets a second, for a game that
+                    // restarts itself after a settings change.
+                    var grace = DateTime.UtcNow - trackedSince < TimeSpan.FromSeconds(90)
+                        ? TimeSpan.FromSeconds(15)
+                        : TimeSpan.FromSeconds(1);
+                    tracked = await WaitForProcessFromDir(game.InstallDir, grace);
                 }
+                Log.Info($"{game.Title} has exited");
             }
             else
             {
@@ -161,25 +183,35 @@ public class GameLaunchService
         return Process.Start(psi);
     }
 
-    /// <summary>Poll running processes until one's image path is inside the game's install dir.</summary>
+    /// <summary>
+    /// Poll running processes until one's image path is inside the game's install dir. Every
+    /// quarter second rather than every one and a half: this runs while the user is waiting for
+    /// the launcher to come back, and a scan of the process list costs a few milliseconds.
+    /// </summary>
     private static async Task<Process?> WaitForProcessFromDir(string installDir, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
-        var prefix = installDir.TrimEnd('\\') + "\\";
-
-        while (DateTime.UtcNow < deadline)
+        while (true)
         {
-            foreach (var p in Process.GetProcesses())
+            if (FindProcessFromDir(installDir) is { } found) return found;
+            if (DateTime.UtcNow >= deadline) return null;
+            await Task.Delay(250);
+        }
+    }
+
+    /// <summary>A running process whose image is inside the install dir, right now, or null.</summary>
+    private static Process? FindProcessFromDir(string installDir)
+    {
+        var prefix = installDir.TrimEnd('\\') + "\\";
+        foreach (var p in Process.GetProcesses())
+        {
+            try
             {
-                try
-                {
-                    var path = GetProcessPath(p.Id);
-                    if (path is not null && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                        return p;
-                }
-                catch { /* process may have exited */ }
+                var path = GetProcessPath(p.Id);
+                if (path is not null && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return p;
             }
-            await Task.Delay(1500);
+            catch { /* exited between the listing and the query */ }
+            p.Dispose();
         }
         return null;
     }
@@ -228,6 +260,7 @@ public class GameLaunchService
     public int RequestClose()
     {
         if (!GameRunning) return 0;
+        _closeRequested = true;
         int n = 0;
         foreach (var p in Process.GetProcesses())
         {

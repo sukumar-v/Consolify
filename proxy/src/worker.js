@@ -6,13 +6,15 @@
  * exists for the same reason: a desktop binary cannot keep a secret, and Twitch's terms say the
  * client secret must never be exposed to users.
  *
- * Two endpoints, both GET, both cached:
+ * Three endpoints, all GET:
  *
  *   /v1/facts?title=<title>   description, developer, genres, release date, critic score
  *   /v1/art?title=<title>     portrait / tile / hero / logo image URLs
+ *   /v1/owned?steamid=<id>    the games a Steam account owns, for the uninstalled half of a
+ *                             library -- the one route that is not cached, see ownedGames
  *
- * Either may answer 404, which means "no confident answer", not "something broke". The launcher
- * treats a 404 and a network failure identically: it keeps whatever art it already had.
+ * The first two may answer 404, which means "no confident answer", not "something broke". The
+ * launcher treats a 404 and a network failure identically: it keeps whatever art it already had.
  *
  * The cache is the whole economy of this service. IGDB allows 4 requests a second across the
  * entire credential -- not per user -- so an uncached proxy would fall over the moment more than
@@ -35,6 +37,13 @@ export default {
 
     if (request.method !== "GET") return json({ error: "method not allowed" }, 405);
     if (url.pathname === "/v1/health") return json({ ok: true });
+    if (url.pathname === "/v1/owned") {
+      try { return await ownedGames(env, request, url); }
+      catch (err) {
+        console.error(`/v1/owned: ${err && err.message}`);
+        return json({ error: "upstream failed" }, 502);
+      }
+    }
 
     const title = (url.searchParams.get("title") || "").trim();
     // A Steam app id, when the caller has one. Worth far more than a title: both upstreams can be
@@ -338,6 +347,56 @@ async function sgdb(env, path) {
   if (res.status === 401) throw new Error("sgdb key rejected");
   if (!res.ok) return null;   // 404 means "nothing of that shape", which is not an error
   return res.json();
+}
+
+/* ----------------------------------------------------------- Steam library */
+
+/**
+ * The games a Steam account owns, installed or not, so the launcher can show the whole library
+ * rather than the part on disk.
+ *
+ * Needs a Steam Web API key, which is the one credential here that is optional: without
+ * STEAM_API_KEY set this answers 501 and the launcher tells the user to add their own key. Any
+ * key can read a profile whose game details are public, which is Steam's default; a private one
+ * comes back with no games at all, reported here as 403 so the launcher can say what to change.
+ *
+ * Not cached in KV, and marked uncacheable for the edge. It is one person's data, it changes
+ * whenever they buy something, and the launcher already holds the last answer for six hours on
+ * its own. The rate limit still applies, since every call here is an upstream call.
+ */
+async function ownedGames(env, request, url) {
+  const steamid = (url.searchParams.get("steamid") || "").trim();
+  if (!/^7656\d{13}$/.test(steamid)) return json({ error: "steamid must be a 64-bit Steam id" }, 400);
+  if (!env.STEAM_API_KEY) return json({ error: "steam library lookups are not enabled on this service" }, 501);
+  if (await rateLimited(request, env))
+    return json({ error: "slow down" }, 429, { "Retry-After": String(RATE_WINDOW) });
+
+  const api = new URL("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/");
+  api.search = new URLSearchParams({
+    key: env.STEAM_API_KEY, steamid, include_appinfo: "1", include_played_free_games: "1", format: "json",
+  }).toString();
+  const res = await fetch(api);
+  // A rejected key is this service's misconfiguration, not the caller's. It surfaces as the
+  // generic 502 so Steam's own error page, which talks about the key parameter, reaches nobody.
+  if (!res.ok) throw new Error(`steam ${res.status}`);
+
+  const body = await res.json();
+  const games = body && body.response && body.response.games;
+  if (!Array.isArray(games)) return json({ error: "private" }, 403, { "Cache-Control": "no-store" });
+
+  // Steam's own shape, trimmed to what the launcher reads, so it parses this and a direct call
+  // with the user's own key identically.
+  return json({
+    response: {
+      game_count: games.length,
+      games: games.map(g => ({
+        appid: g.appid,
+        name: g.name,
+        playtime_forever: g.playtime_forever || 0,
+        rtime_last_played: g.rtime_last_played || 0,
+      })),
+    },
+  }, 200, { "Cache-Control": "private, no-store" });
 }
 
 /* ------------------------------------------------------------- shared bits */

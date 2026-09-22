@@ -29,6 +29,12 @@ public static class Paths
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Consolify", "webview2");
     public static string SettingsFile { get; } = Path.Combine(DataDir, "settings.json");
     public static string LibraryFile { get; } = Path.Combine(DataDir, "library.json");
+    /// <summary>The last list of games the Steam account owned, so a start with no network keeps
+    /// the uninstalled half of the library rather than losing it until the next fetch.</summary>
+    public static string SteamOwnedFile { get; } = Path.Combine(DataDir, "steam-owned.json");
+    /// <summary>The PC Game Pass catalogue as last fetched; it is a few dozen requests to
+    /// rebuild and changes a handful of times a month.</summary>
+    public static string GamePassFile { get; } = Path.Combine(DataDir, "gamepass.json");
     public static string LogFile { get; } = Path.Combine(DataDir, "consolify.log");
 
     public static void EnsureCreated()
@@ -262,6 +268,7 @@ public class LibraryStore
                     s.Sessions = old.Sessions;
                     s.Favorite = old.Favorite;
                     s.Hidden = old.Hidden;
+                    s.PreferredEdition = old.PreferredEdition;
                     if (old.LastPlayed is not null && (s.LastPlayed is null || old.LastPlayed > s.LastPlayed))
                         s.LastPlayed = old.LastPlayed;
                     // Art: the scan only ever finds Steam's local half-size cache, so anything
@@ -298,6 +305,12 @@ public class LibraryStore
                     // was filled in by an older build, and the whole library is re-fetched on
                     // every single start.
                     s.MetadataVersion = old.MetadataVersion;
+                    // Just installed. The lite pass an uninstalled Steam game gets (see
+                    // MetadataService) stops at the cover and the tile; clearing the stamp is
+                    // what fetches the hero, the backdrop and the wordmark now that there is a
+                    // detail page worth dressing. Placed after the copy above, or the copy would
+                    // put the old stamp straight back.
+                    if (s.Installed && !old.Installed) s.MetadataFetched = null;
                     // user overrides survive rescans
                     if (!string.IsNullOrWhiteSpace(old.Args)) s.Args = old.Args;
                     if (old.PreferDirectLaunch) { s.PreferDirectLaunch = true; s.ExePath = old.ExePath; }
@@ -331,7 +344,7 @@ public class LibraryStore
     /// library to the local cache. "_hd" stays in the list for installs that have not re-fetched
     /// yet; it costs nothing and its absence would cost them their art for one pass.
     /// </summary>
-    private static readonly string[] FetchedMarkers = { "_st_", "_sv_", "_hd" };
+    private static readonly string[] FetchedMarkers = { "_st_", "_sv_", "_pf_", "_hd" };
 
     private static string? KeepBest(string? scanned, string? existing)
     {

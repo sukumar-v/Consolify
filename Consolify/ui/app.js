@@ -22,6 +22,8 @@ let S = {
   gameRunning: false,
   runningGameId: null,
   scanning: false,
+  steamAccount: null,                    // { steamId, personaName, ownedCount, fetchedAt, error }
+  stores: null,                          // { epic|gog|xbox: { signedIn, user, count, fetchedAt, error }, gamePass: { count, fetchedAt, error } }
   padConnected: false,
 };
 
@@ -33,7 +35,7 @@ let detailGameId = null;
 let detailReturn = "library";            // where B goes back to from detail
 
 /* filter & sort (session state) — empty sets mean "no restriction" */
-const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, hidden: false, sort: "az" };
+const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, hidden: false, sort: "az", search: "" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
 const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
@@ -42,7 +44,7 @@ const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "Vi
 const SCREENSHOT_COMBOS = ["Off", "View + Y", "View + X", "View + A", "View + B", "LB + RB", "LS + RS"];
 
 const SORTS = [
-  { id: "az", label: "A – Z" },
+  { id: "az", label: "Installed, then A – Z" },
   { id: "za", label: "Z – A" },
   { id: "recent", label: "Recently played" },
   { id: "played", label: "Most played" },
@@ -58,10 +60,12 @@ function resetFilters() {
   F.fav = false;
   F.hidden = false;
   F.sort = "az";
+  setSearch("");
 }
 
 function activeFilterCount() {
-  return F.platforms.size + F.status.size + F.collections.size + (F.fav ? 1 : 0) + (F.hidden ? 1 : 0);
+  return F.platforms.size + F.status.size + F.collections.size + (F.fav ? 1 : 0) + (F.hidden ? 1 : 0)
+    + (F.search ? 1 : 0);
 }
 
 /* Collections a game belongs to are stored on the collection, not the game, so membership is a
@@ -72,7 +76,7 @@ function activeFilterCount() {
 function askDeleteCollection(c) {
   const n = (c.gameIds || []).length;
   confirmState = {
-    title: `DELETE ${c.name.toUpperCase()}?`,
+    title: `Delete “${c.name}”?`,
     body: n ? `The collection goes; the ${n} game${n === 1 ? "" : "s"} in it stay in your library.`
             : "The collection is empty, so nothing else changes.",
     yesLabel: "Yes, delete",
@@ -296,6 +300,16 @@ function navMove(dir) {
   const cur = focusEl();
   if (!cur) { setFocusEl(list[0]); afterFocusMove(); return true; }
 
+  // Scrolled away with the right stick: the highlight is somewhere off screen, and stepping from
+  // there would scroll the list straight back to it. Land on the first thing in view instead.
+  const resumed = wheelScrolled && resumeInView(cur, list);
+  wheelScrolled = false;
+  if (resumed) {
+    setScopeKey(scope, Nav.keyOf(resumed));
+    afterFocusMove();
+    return true;
+  }
+
   const horizontal = dir === "Left" || dir === "Right";
   const axis = horizontal ? "y" : "x";
   const from = cur.getBoundingClientRect();
@@ -316,7 +330,10 @@ function navMove(dir) {
      exhausted the wrap below takes over, and only if there is nothing to wrap to
      does it fall back to the whole scope (which is what lets a theme put a
      sidebar to the left of a grid and have Right cross into it). */
-  let pool = list.filter(el => el !== cur);
+  // data-nav-skip: can hold the highlight, but is never walked to. The search box is reached with
+  // View or from the Filter menu only -- Up off the top row landing in it read as a mistake.
+  const walkable = list.filter(el => !el.hasAttribute("data-nav-skip"));
+  let pool = walkable.filter(el => el !== cur);
   if (horizontal) {
     const sameBand = pool.filter(el => {
       const r = el.getBoundingClientRect();
@@ -335,8 +352,8 @@ function navMove(dir) {
   };
 
   let best = pick(pool);
-  if (!best) best = Nav.wrapTarget(list, cur, dir);
-  if (!best && pool.length !== list.length - 1) best = pick(list.filter(el => el !== cur));
+  if (!best) best = Nav.wrapTarget(walkable, cur, dir);
+  if (!best && pool.length !== walkable.length - 1) best = pick(walkable.filter(el => el !== cur));
   if (!best) return false;
 
   setScopeKey(scope, Nav.keyOf(best));
@@ -345,6 +362,77 @@ function navMove(dir) {
   navAnchorAxis = axis;
   afterFocusMove();
   return true;
+}
+
+/*
+ * Set by a vertical wheel -- which is what the right stick sends -- and consumed by the next
+ * D-pad step. Only a WHEEL counts: revealFocus scrolls smoothly, so during a fast run of Down
+ * presses the highlight is briefly half out of view on every step, and treating that as "the
+ * user scrolled away" would throw the run back to the top of the screen.
+ */
+let wheelScrolled = false;
+window.addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) wheelScrolled = true;
+}, { passive: true, capture: true });
+
+/*
+ * The right stick sends real wheel events, and a wheel goes to whatever is under the cursor. In
+ * pad mode the cursor is hidden and could be anywhere -- over the Continue row, the top bar, the
+ * backdrop -- and in Classic the grid is only the bottom half of the screen, so most of the time
+ * the stick scrolled nothing at all. Polish got away with it because its grid fills the screen.
+ *
+ * So a vertical wheel that lands on nothing that can scroll that way is handed to the list the
+ * user is actually in: the open menu, else the scroller around the highlight, else the screen's
+ * own list. A wheel that DOES land on a scroller is left alone, so a real mouse is unaffected.
+ */
+function wheelHome() {
+  const scope = Nav.activeScope();
+  if (!scope) return null;
+  if (scope.classList.contains("overlay")) return scope.querySelector(".ov-scroll, .guide-body");
+  const cur = focusEl(scope);
+  const around = cur && scrollParentOf(cur, "y");
+  if (around) return around;
+  if (view === "library") return $("gridScroll");
+  if (view === "settings") return $("settingsScroll");
+  return null;
+}
+
+function canScrollY(el, dy) {
+  if (!el || el.scrollHeight <= el.clientHeight + 1) return false;
+  if (!/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return false;
+  return dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0;
+}
+
+window.addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || e.ctrlKey) return;
+  for (let p = e.target instanceof Element ? e.target : null; p; p = p.parentElement)
+    if (canScrollY(p, e.deltaY)) return;          // already over something that will scroll
+  const home = wheelHome();
+  if (!home || !canScrollY(home, e.deltaY)) return;
+  e.preventDefault();
+  const step = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * home.clientHeight : e.deltaY;
+  home.scrollTop += step;
+}, { passive: false });
+
+/** The first focusable in view in the scroller the highlight has been scrolled out of, or null
+    when the highlight is still on screen and an ordinary step should happen. */
+function resumeInView(cur, list) {
+  const sc = scrollParentOf(cur, "y");
+  if (!sc) return null;
+  const view = sc.getBoundingClientRect();
+  const visible = (r) => {
+    const h = Math.min(r.bottom, view.bottom) - Math.max(r.top, view.top);
+    return h >= r.height * 0.6;
+  };
+  if (visible(cur.getBoundingClientRect())) return null;
+  const inView = list.filter(el => sc.contains(el) && visible(el.getBoundingClientRect()));
+  if (!inView.length) return null;
+  // Top row first, then leftmost: the first item of the first row on screen.
+  inView.sort((a, b) => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return (Math.round(ra.top) - Math.round(rb.top)) || (ra.left - rb.left);
+  });
+  return inView[0];
 }
 
 function afterFocusMove() {
@@ -375,7 +463,11 @@ function paintNav() {
      item clears the ring, and a layout that flipped back every time the pointer wandered
      would be unusable. */
   const region = cur ? cur.closest("[data-region]") : null;
-  if (region) scope.dataset.focusRegion = region.dataset.region;
+  // The search box sits in the top bar, but what it is ABOUT is the grid: while a search is being
+  // typed or is standing, say "grid" so a theme lays the results out in view. Polish would
+  // otherwise slide back to its resting hero and leave the results as a peek under the dock.
+  if (cur && cur.id === "libSearch" && (searchOpen || F.search)) scope.dataset.focusRegion = "grid";
+  else if (region) scope.dataset.focusRegion = region.dataset.region;
   else delete scope.dataset.focusRegion;
 
   updateContinueScroll(true);
@@ -620,6 +712,7 @@ function revealIn(scroller, el, isFirst, isLast) {
  * when focused) and add nothing to load.
  */
 const ICONS = {
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/>',
   filter: '<path d="M3 4h18l-7 8.5V20l-4-2v-5.5L3 4z"/>',
   sort: '<path d="M4 6h10M4 12h7M4 18h4"/><path d="M17 5v14M20.5 15.5 17 19l-3.5-3.5"/>',
   sortAsc: '<path d="M4 6h4M4 12h8M4 18h12"/><path d="M18 5v14M21 16l-3 3-3-3"/>',
@@ -705,6 +798,10 @@ function iconSvg(name) {
  * menu out as a row or a grid without any of the callers knowing.
  */
 function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
+  // Every step rebuilds the list, and emptying it snapped the scroll back to the top -- so on a
+  // menu longer than its box the smooth reveal restarted from 0 on every press and the last rows
+  // could go unseen. Hold the position across the rebuild; revealFocus moves it from there.
+  const keepTop = listEl.scrollTop;
   listEl.innerHTML = "";
   items.forEach((r, i) => {
     if (r.cat) {
@@ -722,18 +819,25 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
     let right = "";
     if (r.summary !== undefined) right = `<div class="ov-value"><span class="ov-summary">${esc(r.summary)}</span><span class="arrow">▸</span></div>`;
     else if (r.checked !== undefined) right = `<span class="ov-check${r.checked ? "" : " off"}">${r.checked ? (r.star ? "★" : r.radio ? "●" : "✓") : "○"}</span>`;
-    else if (r.sub) right = `<span class="ov-sub">${esc(r.sub)}</span>`;
     // A picture of the window replaces the icon rather than joining it: the icon was standing in
     // for exactly this, and showing both says the same thing twice.
     const lead = r.thumb
       ? `<div class="ov-thumb${r.thumbIsIcon ? " is-icon" : ""}" style="background-image:url('${r.thumb}')"></div>`
       : iconSvg(r.icon);
-    el.innerHTML = `<div class="ov-label">${lead}<span>${esc(r.label ?? r.name)}</span></div>${right}`;
+    // The subtitle goes UNDER the label, never beside it. Side by side, a long subtitle took the
+    // row's width and squeezed the label down to its first two letters -- "Install" read "In…".
+    const text = r.sub
+      ? `<span class="ov-text"><span class="ov-name">${esc(r.label ?? r.name)}</span><span class="ov-sub">${esc(r.sub)}</span></span>`
+      : `<span>${esc(r.label ?? r.name)}</span>`;
+    if (r.sub) el.classList.add("two-line");
+    el.innerHTML = `<div class="ov-label">${lead}${text}</div>${right}`;
     el.addEventListener("mouseenter", () => { if (hoverEnabled()) onHover(i); });
     el.addEventListener("click", () => onClick(i));
     listEl.appendChild(el);
   });
   if (footEl) footEl.innerHTML = footHtml;
+  listEl.scrollTop = keepTop;
+  watchOverflow(listEl);
 
   // The caller owns the index, so point the scope's highlight at whatever it chose.
   const scope = listEl.closest("[data-focus-scope]");
@@ -742,6 +846,20 @@ function renderMenu(listEl, footEl, items, idx, footHtml, onHover, onClick) {
   const show = focusVisible();
   Nav.focusables(scope).forEach(el => el.classList.toggle("focused", show && el === cur));
   if (cur && show) revealFocus(cur);
+}
+
+/* A menu taller than its box fades at whichever edge has more beyond it. The scrollbar is hidden
+   on purpose, and without this a list that ran past its box simply looked complete. */
+function markOverflow(el) {
+  el.classList.toggle("more-above", el.scrollTop > 2);
+  el.classList.toggle("more-below", el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+}
+function watchOverflow(el) {
+  if (!el.dataset.overflowWatched) {
+    el.dataset.overflowWatched = "1";
+    el.addEventListener("scroll", () => markOverflow(el), { passive: true });
+  }
+  markOverflow(el);
 }
 
 /** Step an overlay's index by moving through the DOM, so the list need not be a column. */
@@ -1032,6 +1150,13 @@ function shortMeta(g) {
   return g.platform + played;
 }
 
+/* A game that was never installed has no size to report: the Steam account lists what you own,
+   not how big it is. Printing the dash fmtSize gives for zero read as a broken field. */
+function uninstalledMeta(g) {
+  return g.sizeBytes ? `${g.platform} · ${fmtSize(g.sizeBytes)} · not installed`
+                     : `${g.platform} · not installed`;
+}
+
 function gameById(id) { return S.games.find(g => g.id === id) || null; }
 
 function toast(msg, ms = 2600) {
@@ -1233,7 +1358,7 @@ function gameView(g) {
     lastPlayed: fmtLastPlayed(g.lastPlayed),
     size: fmtSize(g.sizeBytes),
     sessions: g.sessions || 0,
-    meta: g.installed ? shortMeta(g) : `${g.platform} · ${fmtSize(g.sizeBytes)} · not installed`,
+    meta: g.installed ? shortMeta(g) : uninstalledMeta(g),
     initials: initials(g.title),
     // Fetched metadata. Empty string rather than undefined, so a template that prints one of
     // these for a game we know nothing about leaves a gap instead of the word "undefined".
@@ -1285,7 +1410,7 @@ function makeGridTile(g, onHover, onClick, onDetails) {
 
   const label = document.createElement("div");
   label.className = "grid-label";
-  const meta = g.installed ? shortMeta(g) : `${g.platform} · ${fmtSize(g.sizeBytes)} · not installed`;
+  const meta = g.installed ? shortMeta(g) : uninstalledMeta(g);
   label.innerHTML = `<div class="grid-title">${esc(g.title)}</div><div class="grid-meta">${esc(meta)}</div>`;
   item.appendChild(label);
 
@@ -1307,7 +1432,9 @@ function makeGridTile(g, onHover, onClick, onDetails) {
 function sortGames(list) {
   const score = (g) => (typeof g.criticScore === "number" ? g.criticScore : -1);
   const by = {
-    az: (a, b) => a.title.localeCompare(b.title),
+    // The default puts what you can play right now first. With a whole store account imported,
+    // A to Z alone buried the dozen installed games among hundreds you would have to download.
+    az: (a, b) => (b.installed ? 1 : 0) - (a.installed ? 1 : 0) || a.title.localeCompare(b.title),
     za: (a, b) => b.title.localeCompare(a.title),
     recent: (a, b) => new Date(b.lastPlayed || 0) - new Date(a.lastPlayed || 0),
     played: (a, b) => (b.playtimeMinutes || 0) - (a.playtimeMinutes || 0),
@@ -1326,6 +1453,110 @@ const GRID_COLS = 9;
 
 /** Games eligible for the library: everything the user hasn't hidden. */
 function visibleGames() { return S.games.filter(g => !g.hidden); }
+
+/* ============================== editions ==============================
+ *
+ * One game, several stores. 1000xRESIST owned on Steam and on Xbox is one tile, not two: the
+ * library entries stay separate (each has its own install state, launch route and playtime, and
+ * the host keys everything by id), and the page groups them by title for display.
+ *
+ * Which edition a tile stands for is decided in this order:
+ *   1. the one the user picked under Manage → "Launch with", which the host remembers
+ *   2. an installed one over one that is not -- the tile should launch, not offer a download
+ *   3. the stores in EDITION_ORDER, Steam first, when more than one is installed
+ *   4. the one with more playtime
+ * The others are listed in the game menu ("Play on Xbox", "Install on Xbox") and under Manage.
+ *
+ * Two entries from the SAME store never group, even with identical titles: Steam sells two games
+ * called exactly "DOOM", and merging them would hide one the account paid for.
+ */
+const EDITION_ORDER = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
+const EDITION_SUFFIXES = [
+  "game of the year edition", "anniversary edition", "definitive edition", "enhanced edition",
+  "complete edition", "ultimate edition", "standard edition", "special edition", "deluxe edition",
+  "goty edition", "gold edition", "remastered",
+];
+let EDITIONS = new Map();   // game id -> { members: Game[] }
+
+/* The same folding TitleMatch does on the host -- accents, apostrophes, "&", punctuation, one
+   trailing edition -- plus the Microsoft Store's habit of labelling the PC build. */
+function titleKey(title) {
+  let s = String(title || "").toLowerCase()
+    .replace(/&/g, " and ").replace(/['’‘´`]/g, "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[™®©]/g, "");
+  s = s.replace(/\s*\((?:game preview|early access|pc|windows(?: 1[01])?)\)\s*$/, "")
+       .replace(/\s*[-–:]\s*(?:windows(?: 1[01])?|pc)(?: edition)?\s*$/, "")
+       .replace(/[^a-z0-9]+/g, " ").trim();
+  for (const suffix of EDITION_SUFFIXES)
+    if (s.endsWith(" " + suffix)) { s = s.slice(0, -suffix.length - 1).trim(); break; }
+  return s;
+}
+
+function rankEditions(members) {
+  const order = (g) => { const i = EDITION_ORDER.indexOf(g.platform); return i < 0 ? 99 : i; };
+  return [...members].sort((a, b) =>
+    (b.preferredEdition ? 1 : 0) - (a.preferredEdition ? 1 : 0)
+    || (b.installed ? 1 : 0) - (a.installed ? 1 : 0)
+    || order(a) - order(b)
+    || (b.playtimeMinutes || 0) - (a.playtimeMinutes || 0));
+}
+
+/* Rebuilt on every state push. Hidden games are left out of the grouping: hiding is done to a
+   whole game (see the game menu), and a hidden one is its own entry in the hidden view. */
+function buildEditions() {
+  EDITIONS = new Map();
+  const byKey = new Map();
+  for (const g of S.games) {
+    const key = g.hidden ? "" : titleKey(g.title);
+    let group = null;
+    if (key) {
+      const groups = byKey.get(key) || [];
+      byKey.set(key, groups);
+      group = groups.find(x => !x.members.some(m => m.platform === g.platform)) || null;
+      if (!group) { group = { members: [] }; groups.push(group); }
+    } else {
+      group = { members: [] };
+    }
+    group.members.push(g);
+    EDITIONS.set(g.id, group);
+  }
+}
+
+/** Every store this game is in, the one its tile launches first. */
+function editionsOf(g) {
+  const group = g && EDITIONS.get(g.id);
+  return group ? rankEditions(group.members) : (g ? [g] : []);
+}
+
+/** The edition a tile for this game stands for. */
+function primaryEdition(g) { return editionsOf(g)[0] || g; }
+
+/*
+ * One entry per game out of a list of library entries. When a filter has already narrowed the
+ * list -- a platform filter of "Xbox", say -- the tile stands for the best edition that is still
+ * IN the list, so filtering to Xbox shows the Xbox copy rather than hiding the game or showing
+ * the Steam one.
+ */
+function collapseEditions(list) {
+  const inList = new Set(list.map(g => g.id));
+  const seen = new Set();
+  const out = [];
+  for (const g of list) {
+    const group = EDITIONS.get(g.id);
+    if (group) { if (seen.has(group)) continue; seen.add(group); }
+    const members = group ? group.members : [g];
+    const rep = rankEditions(members).find(m => inList.has(m.id)) || g;
+    out.push({ rep, members });
+  }
+  return out;
+}
+
+/** Tell the host which edition launches, and apply it here straight away so the tile follows. */
+function preferEdition(g) {
+  const members = editionsOf(g);
+  members.forEach(m => { m.preferredEdition = m.id === g.id; });
+  send({ cmd: "preferEdition", id: g.id, siblings: members.filter(m => m.id !== g.id).map(m => m.id) });
+}
 
 /* Continue carousel geometry.
    Measured off the rendered tiles rather than assumed: the built-in layout is a 300px tile on a
@@ -1428,17 +1659,21 @@ function libraryData() {
   // separate view rather than "show hidden as well": the point of asking is to look over what you
   // put away and take something back out, and mixing them back into 200 tiles is not that.
   const base = F.hidden ? S.games.filter(g => g.hidden) : visibleGames();
-  let filtered = base;
-  if (F.platforms.size) filtered = filtered.filter(g => F.platforms.has(g.platform));
-  if (F.fav) filtered = filtered.filter(g => g.favorite);
-  if (F.collections.size) filtered = filtered.filter(gameInSelectedCollection);
+  // The platform filter narrows the entries BEFORE they are grouped into games, so it picks which
+  // edition shows; everything else is a question about the game as a whole.
+  let groups = collapseEditions(F.platforms.size ? base.filter(g => F.platforms.has(g.platform)) : base);
+  if (F.fav) groups = groups.filter(x => x.members.some(m => m.favorite));
+  if (F.collections.size) groups = groups.filter(x => x.members.some(gameInSelectedCollection));
   if (F.status.size === 1) {
     const wantInstalled = F.status.has("Installed");
-    filtered = filtered.filter(g => g.installed === wantInstalled);
+    groups = groups.filter(x => x.rep.installed === wantInstalled);
   }
+  const needle = searchKey(F.search);
+  if (needle) groups = groups.filter(x => x.members.some(m => searchKey(m.title).includes(needle)));
+  const filtered = groups.map(x => x.rep);
 
-  const cont = base
-    .filter(g => g.lastPlayed && g.installed)
+  const cont = collapseEditions(base.filter(g => g.lastPlayed && g.installed))
+    .map(x => x.rep)
     .sort((a, b) => new Date(b.lastPlayed) - new Date(a.lastPlayed))
     .slice(0, CONTINUE_MAX);
 
@@ -1459,6 +1694,7 @@ function filterSummary(total) {
   if (F.collections.size) bits.push(S.collections.filter(c => F.collections.has(c.id)).map(c => c.name.toUpperCase()).join(" + "));
   if (F.status.size === 1) bits.push([...F.status][0].toUpperCase());
   if (F.hidden) bits.push("HIDDEN");
+  if (F.search) bits.push(`MATCHING “${F.search.toUpperCase()}”`);
   const sort = SORTS.find(s => s.id === F.sort);
   if (F.sort !== "az" && sort) bits.push(sort.label.toUpperCase());
   // Only as a note on the library you ARE looking at. While the hidden view is on, these games
@@ -1502,7 +1738,9 @@ function renderLibrary() {
   // fade still has to come on.
   watchScrolled($("gridScroll"));
 
-  $("titleCount").textContent = `${S.games.length} TITLE${S.games.length === 1 ? "" : "S"}`;
+  // Games, not entries: a game owned on two stores is one title.
+  const titles = collapseEditions(visibleGames()).length;
+  $("titleCount").textContent = `${titles} TITLE${titles === 1 ? "" : "S"}`;
   $("gridLabel").textContent = filterSummary(total);
 
   // Continue carousel (landscape banner art)
@@ -1551,6 +1789,8 @@ function renderLibrary() {
     note.className = "empty-note";
     note.innerHTML = S.scanning
       ? "Scanning your Steam, Epic, GOG and Xbox libraries…"
+      : F.search
+        ? `No games match “${esc(F.search)}”. Press <b>VIEW</b> to change the search, or <b>B</b> while typing to clear it.`
       : (visibleGames().length
         ? "Nothing matches the current filter. Press <b>X</b> to change it, or <b>Y</b> to reset."
         : "No games found yet. Use the <b>+ Add game</b> tile below, or rescan from <b>Settings → Library</b>.");
@@ -1603,6 +1843,7 @@ function libraryNav(btn) { navMove(btn); }
    anywhere, or invent a row of its own, and activation still works. */
 const ACTIONS = {
   addGame: () => send({ cmd: "addManual" }),
+  search: () => openSearch(),
   resume: () => send({ cmd: "resumeGame" }),
   "tab:library": () => switchView("library"),
 };
@@ -1618,7 +1859,7 @@ function libraryAccept(btn) {
     const running = el.dataset.role === "playing";
     if (btn === "A") {
       if (running) send({ cmd: "resumeGame" });
-      else if (!g.installed) toast(`${g.title} is not installed`);
+      else if (!g.installed) offerInstall(g);
       else launchGame(g);
     } else if (btn === "Y") {
       openGameMenu(g.id, "library");
@@ -1636,6 +1877,9 @@ function libraryInput(btn) {
     case "Up": case "Down": case "Left": case "Right": libraryNav(btn); break;
     case "A": case "Y": libraryAccept(btn); break;
     case "X": openFilter(); break;
+    // View is the button with the two squares, left of the guide button. LB and RB were free too,
+    // but RB is the keyboard toggle by default and the pair is a minimize combo option.
+    case "View": openSearch(); break;
     // Settings lost its tab, so this is the way in. Menu is the pad's ☰ button; holding it is
     // still the keyboard toggle, and only a tap gets here.
     case "Menu": switchView("settings"); break;
@@ -1663,7 +1907,7 @@ function launchGame(g) {
     if (S.runningGameId === g.id) { send({ cmd: "resumeGame" }); return; }
     const running = gameById(S.runningGameId);
     confirmState = {
-      title: running ? `CLOSE ${running.title.toUpperCase()}?` : "CLOSE THE RUNNING GAME?",
+      title: running ? `Close ${running.title}?` : "Close the running game?",
       body: `${g.title} will start once it has closed.`,
       yesLabel: `Close and play ${g.title}`,
       icon: "play", danger: false,
@@ -1676,6 +1920,41 @@ function launchGame(g) {
   }
   toast(`Launching ${g.title}…`);
   send({ cmd: "launch", id: g.id });
+}
+
+/* The host decides what can be installed and writes the store's own URI onto the entry --
+   steam://install, Epic's launcher, goggalaxy://, the Microsoft Store -- so the page only has to
+   ask whether there is one. An installed game never carries it. */
+function canInstall(g) { return !!g.installUri; }
+
+const STORE_NAMES = { Steam: "Steam", Epic: "the Epic Games Launcher", GOG: "GOG Galaxy", Xbox: "the Microsoft Store" };
+function storeName(g) {
+  // A GOG game on a PC without Galaxy opens its own page on gog.com, where the installer is.
+  if (g.platform === "GOG" && /^https:\/\/www\.gog\.com/.test(g.installUri || "")) return "gog.com";
+  return STORE_NAMES[g.platform] || g.platform;
+}
+
+/* A confirm rather than a straight send, for two reasons. The launcher steps aside for the
+   store's window -- it is topmost on the TV and the window would open behind it -- and vanishing
+   on one press of A is a surprise; and the body is the only place to say how to come back. */
+function offerInstall(g) {
+  if (!canInstall(g)) { toast(`${g.title} is not installed`); return; }
+  const combo = S.settings && S.settings.minimizeCombo && S.settings.minimizeCombo !== "Off"
+    ? S.settings.minimizeCombo : null;
+  const store = storeName(g);
+  const Store = store.charAt(0).toUpperCase() + store.slice(1);
+  confirmState = {
+    title: `Install ${g.title}?`,
+    body: `${Store} opens with ${g.title} ready to install. Consolify steps aside while it does` +
+      (combo ? `; press ${combo} to come back.` : "; start Consolify again to come back.") +
+      " The tile turns playable once the download has finished.",
+    yesLabel: `Install with ${store.replace(/^the /, "")}`,
+    icon: "download", danger: false,
+    onYes: () => send({ cmd: "install", id: g.id }),
+  };
+  confirmIdx = 0;
+  $("overlay-confirm").classList.add("active");
+  renderConfirm();
 }
 
 /* ============================== detail ============================== */
@@ -1737,7 +2016,9 @@ function renderDetailStats(g) {
     ? fmtPlaytime(g.playtimeMinutes / g.sessions) : null);
   add("LAST PLAYED", g.lastPlayed ? fmtLastPlayed(g.lastPlayed) : null);
   add("RELEASED", fmtReleased(g.releaseDate));
-  stats.push({ label: g.installed ? "ON DISK" : "DOWNLOAD", value: fmtSize(g.sizeBytes) });
+  // A game that was never installed has no size on record, and a dash in a stats row reads as
+  // something missing rather than something unknowable.
+  if (g.installed || g.sizeBytes) stats.push({ label: g.installed ? "ON DISK" : "DOWNLOAD", value: fmtSize(g.sizeBytes) });
 
   el.innerHTML = stats.map(s =>
     `<div class="stat"><div class="stat-label mono">${esc(s.label)}</div>` +
@@ -1838,7 +2119,9 @@ const PLATFORM_ICONS = {
 function renderDetailPlatform(g) {
   const el = $("detailPlatform");
   const icon = PLATFORM_ICONS[g.platform];
-  el.innerHTML = (icon ? iconSvg(icon) : "") + `<span>${esc(g.platform)}</span>`;
+  const others = editionsOf(g).filter(m => m.id !== g.id).map(m => m.platform);
+  el.innerHTML = (icon ? iconSvg(icon) : "") + `<span>${esc(g.platform)}</span>` +
+    (others.length ? `<span class="also-on">also on ${esc(others.join(", "))}</span>` : "");
 }
 
 /*
@@ -1913,7 +2196,9 @@ function renderDetail() {
   renderDetailDescriptors(g);
   renderDetailStats(g);
 
-  $("playLabel").textContent = g.playtimeMinutes > 0 ? "Continue" : "Play";
+  $("playLabel").textContent = !g.installed
+    ? (canInstall(g) ? "Install" : "Not installed")
+    : (g.playtimeMinutes > 0 ? "Continue" : "Play");
 
   const art = $("detailArt");
   art.className = "detail-art";
@@ -1945,7 +2230,7 @@ function detailActivate() {
   const g = gameById(detailGameId);
   const el = focusEl();
   const act = el ? el.dataset.act : null;
-  if (act === "play" && g) { if (!g.installed) toast(`${g.title} is not installed`); else launchGame(g); }
+  if (act === "play" && g) { if (!g.installed) offerInstall(g); else launchGame(g); }
   else if (act === "collect") openCollect();
   else if (act === "manage") openManage();
 }
@@ -2111,6 +2396,26 @@ function allSettingsRows() {
     action: () => send({ cmd: "addManual" }),
   });
 
+  rows.push({ section: "STEAM ACCOUNT", cat: "library" });
+  rows.push(toggleRow("Show games you own but haven't installed", steamAccountHint(),
+    () => !!s.steamShowOwned, v => set(() => s.steamShowOwned = v)));
+  rows.push(secretRow("Steam Web API key", s,
+    "Optional. Only needed if your Steam profile keeps its game details private. Free from steamcommunity.com/dev/apikey — any domain name will do",
+    () => s.steamApiKey, v => set(() => s.steamApiKey = v)));
+
+  rows.push({ section: "EPIC, GOG & XBOX", cat: "library" });
+  rows.push(storeRow("epic", "Epic Games account",
+    "Sign in to list every game you own on the Epic Games Store. Anything not installed shows greyed out and installs from here"));
+  rows.push(storeRow("gog", "GOG account",
+    "Sign in to list every game you own on GOG. Installs go through GOG Galaxy when it is here, and through gog.com when it is not"));
+  rows.push(storeRow("xbox", "Xbox account",
+    "Sign in with your Microsoft account to list the PC games on your Xbox profile — the ones it has seen you play"));
+  rows.push(toggleRow("Show the PC Game Pass catalogue", gamePassHint(),
+    () => !!s.gamePassCatalog, v => set(() => s.gamePassCatalog = v)));
+  rows.push(secretRow("Xbox sign-in app id", s,
+    "Optional. Only if Microsoft stops accepting the Xbox app's own sign-in: the client id of an app registration of your own. See the README",
+    () => s.xboxClientId, v => set(() => s.xboxClientId = v)));
+
   // Collections are made from a game's own menu, so this is only the other half of that: the
   // place to get rid of one. Nothing lists them otherwise now that the tab is gone.
   if (S.collections.length) {
@@ -2166,7 +2471,7 @@ function allSettingsRows() {
     type: "action", label: "Restore", danger: true,
     action: () => {
       confirmState = {
-        title: "RESTORE DEFAULT SETTINGS?",
+        title: "Restore default settings?",
         body: "Theme, accent, display, gamepad and keyboard settings all go back to their defaults. Your library, collections and playtime are not affected.",
         yesLabel: "Restore defaults",
         icon: "refresh", danger: true,
@@ -2200,6 +2505,65 @@ function secretRow(name, s, hint, get, setV) {
     action: () => openInput(name.toUpperCase(), cur(), v => setV(v.trim())),
   };
 }
+/* The state of the Steam link, in one line under its toggle. It names the account because the
+   account is read off the Steam client rather than typed in, and the wrong one would otherwise be
+   invisible; it carries the count because an empty answer and a broken fetch look identical. */
+function steamAccountHint() {
+  const a = S.steamAccount;
+  if (!a || !a.steamId) return "No Steam login was found on this PC. Sign in to Steam once, then rescan";
+  const who = `Signed in to Steam as ${a.personaName || a.steamId}`;
+  if (!S.settings || !S.settings.steamShowOwned)
+    return `${who}. Lists your whole Steam library, with anything not on disk greyed out and installable with A`;
+  if (a.error) return `${who} · ${a.error}`;
+  if (a.fetchedAt) return `${who} · ${a.ownedCount} game${a.ownedCount === 1 ? "" : "s"} in your library`;
+  return `${who} · fetching your library…`;
+}
+
+/* One row per store you sign in to, the way Playnite's library plugins work. Being signed in IS the
+   opt-in: there is no separate toggle, because a store you have signed into and then hidden the
+   games of is two settings saying opposite things. The hint carries the account name, because a
+   wrong account would otherwise be invisible, and the count, because an empty answer and a broken
+   fetch look identical. */
+function storeRow(store, name, offHint) {
+  const st = S.stores && S.stores[store];
+  const signedIn = !!(st && st.signedIn);
+  let hint = offHint;
+  if (signedIn) {
+    const who = st.user ? `Signed in as ${st.user}` : "Signed in";
+    hint = st.error ? `${who} · ${st.error}`
+      : st.fetchedAt ? `${who} · ${st.count} game${st.count === 1 ? "" : "s"}`
+      : `${who} · fetching your library…`;
+  }
+  return {
+    name, hint, type: "action", label: signedIn ? "Sign out" : "Sign in",
+    action: () => {
+      if (signedIn) askSignOut(store, name);
+      else { toast("Opening the sign-in window…"); send({ cmd: "storeSignIn", store }); }
+    },
+  };
+}
+
+function askSignOut(store, name) {
+  confirmState = {
+    title: `Sign out of ${name.replace(/ account$/i, "")}?`,
+    body: "The games you own there leave the library. Anything installed stays, and signing in again brings the rest back.",
+    yesLabel: "Sign out",
+    icon: "x", danger: true,
+    onYes: () => send({ cmd: "storeSignOut", store }),
+  };
+  confirmIdx = 0;
+  $("overlay-confirm").classList.add("active");
+  renderConfirm();
+}
+
+function gamePassHint() {
+  const g = S.stores && S.stores.gamePass;
+  if (!S.settings || !S.settings.gamePassCatalog)
+    return "Every game included with PC Game Pass, installable from here. Playing one needs the Xbox app and a subscription";
+  if (g && g.error) return g.error;
+  return g && g.count ? `${g.count} games in the catalogue` : "Fetching the catalogue…";
+}
+
 function toggleRow(name, hint, get, setV) {
   return {
     name, hint, type: "toggle", value: get(),
@@ -2525,6 +2889,7 @@ function closeFilter() {
 function filterMenuRows() {
   const n = activeFilterCount();
   return [
+    { name: "Search", icon: "search", summary: F.search ? `“${F.search}”` : "By title", run: () => { closeFilter(); openSearch(); } },
     { name: "Filter", icon: "filter", summary: n ? `${n} active` : "All games", open: "filter" },
     { name: "Sort", icon: "sort", summary: SORTS.find(s => s.id === F.sort).label, open: "sort" },
   ];
@@ -2611,9 +2976,10 @@ function renderFilter() {
 function filterActivate() {
   const row = currentFilterRows()[filterIdx];
   if (!row) return;
+  if (row.run) { row.run(); return; }
   if (row.open) { filterLevel = row.open; filterIdx = 0; renderFilter(); return; }
   row.toggle();
-  if (row.radio) { filterLevel = null; filterIdx = 1; }  // sort is single-select: pick and close
+  if (row.radio) { filterLevel = null; filterIdx = 2; }  // sort is single-select: pick and close
   applyFilter();
 }
 
@@ -2653,21 +3019,38 @@ function gameMenuItems() {
   const g = gameById(gameMenu.gameId);
   if (!g) return [];
   const running = S.gameRunning && S.runningGameId === g.id;
-  const items = [
+  // A fixed order, whatever the game: View game first, then what gets you playing (Resume,
+  // Install, the other stores), then the rest. Art is changed from the detail page's Manage.
+  const top = [
     { label: "View game", icon: "info", sub: "Full details page", action: () => { const f = gameMenu.from; closeGameMenu(); openDetail(g.id, f); } },
+  ];
+  if (running) top.push({ label: "Resume game", icon: "play", sub: "Back to the running game",
+    action: () => { closeGameMenu(); send({ cmd: "resumeGame" }); } });
+  if (!g.installed && canInstall(g)) top.push({ label: "Install", icon: "download",
+    sub: `Through ${storeName(g)}; the tile turns playable when it is done`,
+    action: () => { closeGameMenu(); offerInstall(g); } });
+  // The same game in the other stores it is in. Played from here once, not made the default --
+  // that is what Manage > Launch with is for.
+  editionsOf(g).filter(m => m.id !== g.id).forEach(m => {
+    if (m.installed) top.push({ label: `Play on ${m.platform}`, icon: "play",
+      sub: "Just this once. Manage → Launch with changes the default",
+      action: () => { closeGameMenu(); launchGame(m); } });
+    else if (canInstall(m)) top.push({ label: `Install on ${m.platform}`, icon: "download",
+      sub: `Through ${storeName(m)}`,
+      action: () => { closeGameMenu(); offerInstall(m); } });
+  });
+  const items = [
+    ...top,
     { label: g.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
     { label: "Add to collection", icon: "folderPlus", action: () => { closeGameMenu(); openCollect(g.id); } },
-    { label: "Change cover art", icon: "image", action: () => { closeGameMenu(); send({ cmd: "pickCover", id: g.id }); } },
+    // Hiding is done to the whole game: hiding only the Steam copy would just bring the Xbox one
+    // out from behind it as a tile of its own.
     { label: g.hidden ? "Unhide" : "Hide", icon: g.hidden ? "eye" : "eyeOff",
       sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
-      action: () => { send({ cmd: "toggleHidden", id: g.id }); closeGameMenu(); } },
+      action: () => { send({ cmd: "setHidden", ids: editionsOf(g).map(m => m.id), hidden: !g.hidden }); closeGameMenu(); } },
   ];
-  if (running) {
-    items.unshift({ label: "Resume game", icon: "play", sub: "Back to the running game",
-      action: () => { closeGameMenu(); send({ cmd: "resumeGame" }); } });
-    items.push({ label: "Close game", icon: "x", danger: true,
-      action: () => { closeGameMenu(); send({ cmd: "closeGame" }); } });
-  }
+  if (running) items.push({ label: "Close game", icon: "x", danger: true,
+    action: () => { closeGameMenu(); send({ cmd: "closeGame" }); } });
   // Deleting the entry for the game you are in the middle of playing is never what you meant,
   // so this one only shows while it is not running.
   if (g.manual && !running) items.push({
@@ -2767,6 +3150,29 @@ function manageItems() {
   const g = gameById(detailGameId);
   if (!g) return [];
   const items = [];
+  // Only for a game in more than one store. Picking one makes it what the tile launches, over
+  // the default of "whichever is installed, Steam first".
+  const editions = editionsOf(g);
+  if (editions.length > 1) {
+    items.push({ cat: "LAUNCH WITH" });
+    // Listed in the fixed store order, not in rank order. Ranked, the chosen store jumped to the
+    // top the moment it was chosen, and the row under the highlight changed out from beneath it.
+    const byStore = (a, b) => EDITION_ORDER.indexOf(a.platform) - EDITION_ORDER.indexOf(b.platform);
+    [...editions].sort(byStore).forEach(m => items.push({
+      label: m.platform, icon: PLATFORM_ICONS[m.platform] || "store", radio: true,
+      checked: m.id === g.id,
+      action: () => {
+        if (m.id === g.id) return;
+        preferEdition(m);
+        detailGameId = m.id;
+        renderDetail();
+        renderManage();
+        renderLibrary();
+        toast(`${g.title} now launches with ${m.platform}${m.installed ? "" : " (not installed yet)"}`);
+      },
+    }));
+    items.push({ cat: "THIS COPY" });
+  }
   items.push({
     label: "Set launch arguments", icon: "terminal", sub: g.args || "e.g. --launcher-skip",
     action: () => {
@@ -2822,6 +3228,8 @@ function closeManage() { manageOpen = false; $("overlay-manage").classList.remov
 function renderManage() {
   const items = manageItems();
   manageIdx = Math.max(0, Math.min(manageIdx, items.length - 1));
+  // A section heading cannot take the highlight; start on the row under it.
+  while (items[manageIdx] && items[manageIdx].cat && manageIdx < items.length - 1) manageIdx++;
   renderMenu($("manageList"), $("manageFoot"), items, manageIdx,
     foot(["A", "Select"], ["B", "Back"]),
     (i) => { if (manageIdx !== i) { manageIdx = i; renderManage(); } },
@@ -2839,21 +3247,25 @@ function manageInput(btn) {
 
 /* ============================== confirm overlay ============================== */
 
+/*
+ * A dialog, not a menu. It used to be a one-row list -- a single highlighted option that could
+ * not be moved off, with the explanation squeezed into that row's subtitle -- which read as a
+ * menu with something missing. Now it is what a console asks you with: a heading, the details,
+ * and the two buttons that answer it, A to go ahead and B to back out. There is nothing to
+ * navigate, so nothing is highlighted.
+ *
+ * Defaults suit the destructive cases, which is most of them; an install or a game swap passes
+ * its own icon and clears `danger`, since starting something is not a red action.
+ */
 function renderConfirm() {
   if (!confirmState) return;
+  const danger = confirmState.danger !== false;
+  $("confirmDialog").classList.toggle("danger", danger);
+  $("confirmIcon").innerHTML = iconSvg(confirmState.icon || "trash");
   $("confirmTitle").textContent = confirmState.title;
-  // Defaults suit the destructive cases, which is most of them; swapping games passes its own
-  // icon and clears `danger`, since starting a game is not a red action.
-  const items = [{
-    label: confirmState.yesLabel || "Yes, delete",
-    sub: confirmState.body,
-    icon: confirmState.icon || "trash",
-    danger: confirmState.danger !== false,
-  }];
-  confirmIdx = 0;
-  renderMenu($("confirmList"), $("confirmFoot"), items, confirmIdx,
-    foot(["A", "Confirm"], ["B", "Cancel"]),
-    () => {}, () => confirmChoose(true));
+  $("confirmBody").textContent = confirmState.body || "";
+  $("confirmBody").hidden = !confirmState.body;
+  $("confirmYesLabel").textContent = confirmState.yesLabel || "Delete";
 }
 
 function confirmChoose(yes) {
@@ -2863,12 +3275,19 @@ function confirmChoose(yes) {
   if (yes && st) st.onYes();
 }
 
+/* A answers regardless of where the pointer is: the dialog is the only thing on screen that can
+   take an answer, so there is no "A over empty space" to guard against. */
 function confirmInput(btn) {
   switch (btn) {
-    case "A": if (focusVisible()) confirmChoose(true); break;
+    case "A": confirmChoose(true); break;
     case "B": confirmChoose(false); break;
   }
 }
+
+$("confirmYes").addEventListener("click", () => confirmChoose(true));
+$("confirmNo").addEventListener("click", () => confirmChoose(false));
+// A click on the dimmed screen around the dialog is a no, the way it is everywhere else.
+$("overlay-confirm").addEventListener("click", (e) => { if (e.target.id === "overlay-confirm") confirmChoose(false); });
 
 /* ============================== text input overlay ============================== */
 
@@ -2879,7 +3298,9 @@ function openInput(title, value, onConfirm) {
   const field = $("inputField");
   field.value = value;
   $("overlay-input").classList.add("active");
+  send({ cmd: "focusPage" });   // see openSearch: no keystrokes reach the page without it
   setTimeout(() => { field.focus(); field.select(); }, 50);
+  setTimeout(() => { if (document.activeElement !== field) { field.focus(); field.select(); } }, 250);
   send({ cmd: "showKeyboard" });
 }
 
@@ -2899,6 +3320,114 @@ $("inputField").addEventListener("keydown", (e) => {
   if (e.key === "Enter") closeInput(true);
   if (e.key === "Escape") closeInput(false);
 });
+
+/*
+ * The keyboard toggle can be bound to View, and in Press mode the host takes the toggle button
+ * outright -- the page never saw the press, so on the library View raised the keyboard and search
+ * never opened. The page now says when it wants View itself: on the library, with nothing on top
+ * of it and no search already open. Everywhere else the toggle keeps the button. Search raises the
+ * keyboard anyway, so nothing is lost.
+ *
+ * Published on change, from the input path and on a short timer as well, because overlays open
+ * from the mouse and the host too, not only from the pad.
+ */
+let claimedButtons = "";
+function publishClaims() {
+  const overlayUp = overlayOpen() || radialOpen || !!radialSub || ingameOpen
+    || document.body.classList.contains("overlay-mode");
+  const want = view === "library" && !overlayUp && !searchOpen ? "View" : "";
+  if (want === claimedButtons) return;
+  claimedButtons = want;
+  send({ cmd: "claimButtons", buttons: want ? [want] : [] });
+}
+setInterval(publishClaims, 400);
+
+/* ============================== library search ==============================
+ *
+ * A field in the library top bar, so it is there in every theme -- both slot the top bar, and
+ * Polish hides the section headings. View opens it and raises the on-screen keyboard; every
+ * keystroke refilters the grid live. Enter, A or Down keeps the search and drops the highlight on
+ * the first result; Escape or B while typing clears it. With a search standing, the field shows
+ * it and the grid heading says so, and View opens it again to change it.
+ *
+ * Matching is by folded title (see titleKey), across every store a game is in, and it is a
+ * substring match on words -- "hollow" finds Hollow Knight and Hollow Knight: Silksong.
+ */
+let searchOpen = false;
+let searchReturnKey = null;   // where the highlight was before View, for B to put it back
+
+function searchKey(text) { return titleKey(text); }
+
+function setSearch(value) {
+  F.search = String(value || "").trim();
+  const field = document.getElementById("searchField");
+  if (field && field.value !== value) field.value = value || "";
+  const box = document.getElementById("libSearch");
+  if (box) box.classList.toggle("has-query", !!F.search);
+}
+
+function openSearch() {
+  if (view !== "library") switchView("library");
+  const scope = document.getElementById("screen-library");
+  const box = $("libSearch");
+  if (!searchOpen) {
+    const was = scope.dataset.focusCurrent || null;
+    searchReturnKey = was === "search" ? null : was;
+  }
+  searchOpen = true;
+  box.classList.add("active");
+  // The highlight moves up to the field, so what is being driven is what is lit.
+  setInputMode("pad");
+  setFocusEl(box);
+  paintNav();
+  const field = $("searchField");
+  field.value = F.search;
+  // The page only receives keystrokes once the HOST has put keyboard focus into the WebView --
+  // the launcher is driven by the pad and nothing in the page is normally focused, so a DOM
+  // focus() alone gives a field with no caret that the on-screen keyboard types into nothing.
+  send({ cmd: "focusPage" });
+  const place = () => { field.focus(); field.setSelectionRange(field.value.length, field.value.length); };
+  place();
+  setTimeout(place, 80);
+  setTimeout(place, 250);
+  send({ cmd: "showKeyboard" });
+}
+
+function closeSearch(keep) {
+  if (!searchOpen) return;
+  searchOpen = false;
+  $("libSearch").classList.remove("active");
+  $("searchField").blur();
+  send({ cmd: "hideKeyboard" });
+  if (!keep) setSearch("");
+  renderLibrary();
+  const scope = document.getElementById("screen-library");
+  // Kept: straight onto the first result, which is the point of having searched. Cleared: back
+  // to wherever the highlight was before View, so a cancelled search changes nothing.
+  const first = keep && F.search && document.querySelector("#gridScroll [data-focusable]");
+  if (first) setFocusEl(first);
+  else if (!keep && searchReturnKey) setScopeKey(scope, searchReturnKey);
+  if (!focusEl(scope)) ensureFocus(scope);
+  searchReturnKey = null;
+  setInputMode("pad");
+  afterFocusMove();
+}
+
+function searchInput(btn) {
+  switch (btn) {
+    case "A": case "Down": closeSearch(true); break;
+    case "B": closeSearch(false); break;
+  }
+}
+
+$("searchField").addEventListener("input", (e) => { setSearch(e.target.value); renderLibrary(); });
+$("searchField").addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if (e.key === "Enter" || e.key === "ArrowDown") { e.preventDefault(); closeSearch(true); }
+  if (e.key === "Escape") { e.preventDefault(); closeSearch(false); }
+});
+$("libSearch").addEventListener("mousedown", (e) => { if (!searchOpen) { e.preventDefault(); openSearch(); } });
+$("libSearch").addEventListener("mouseenter", () => { if (hoverEnabled() && !searchOpen) { setFocusEl($("libSearch")); paintNav(); } });
 
 /* ============================== couch setup guide ============================== */
 
@@ -2980,6 +3509,7 @@ function handleInput(btn, src) {
   // highlight the pointer has cleared, so A over empty space does nothing.
   if (DIRECTIONS.has(btn)) setInputMode("pad");
   if (confirmState) { confirmInput(btn); return; }
+  if (searchOpen) { searchInput(btn); return; }
   if (radialSub) { radialSubInput(btn); return; }
   if (radialOpen) { radialInput(btn); return; }
   if (ingameOpen) { ingameInput(btn); return; }
@@ -2994,11 +3524,16 @@ function handleInput(btn, src) {
   else if (view === "settings") settingsInput(btn);
 }
 
+// After every press, so the claim follows the screen the press just led to.
+const routeInput = handleInput;
+handleInput = function (btn, src) { routeInput(btn, src); publishClaims(); };
+
 const KEYMAP = {
   ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
   Enter: "A", Escape: "B", Backspace: "B",
   KeyY: "Y", KeyX: "X",
   BracketLeft: "LB", BracketRight: "RB",
+  Slash: "View",
 };
 
 window.addEventListener("keydown", (e) => {
@@ -3019,6 +3554,7 @@ function handleHostMessage(m) {
       const firstState = S.settings === null;
       const wasEmpty = S.games.length === 0;
       S.games = m.games || [];
+      buildEditions();
       S.collections = m.collections || [];
       // A collection can be deleted while it is still being filtered on. Left alone, the stale id
       // matches nothing and the library goes empty with no visible reason why.
@@ -3034,6 +3570,8 @@ function handleHostMessage(m) {
       S.gameRunning = m.gameRunning;
       S.runningGameId = m.runningGameId;
       S.scanning = m.scanning;
+      S.steamAccount = m.steamAccount || null;
+      S.stores = m.stores || null;
       if (S.settings) S.settings.launchOnStartup = m.startupRegistered;
       applyTheme();
       // First real library: let clampFocus drop the highlight onto the first game rather
@@ -3151,7 +3689,7 @@ function mockHandle(msg) {
       id: platform.toLowerCase() + ":" + title.toLowerCase().replace(/[^a-z]/g, ""),
       title, platform, installed: true, manual: platform === "Manual",
       playtimeMinutes: 0, sessions: 0, lastPlayed: null, sizeBytes: 0,
-      favorite: false, hidden: false, preferDirectLaunch: false, args: null,
+      favorite: false, hidden: false, preferDirectLaunch: false, args: null, installUri: null,
       coverFile: seedP(title), bannerFile: seedW(title), heroFile: seedH(title),
       // Stand-in metadata, so the preview exercises the detail page's facts row. Individual
       // entries below override it -- including back to nothing, which is what a game we could
@@ -3181,15 +3719,18 @@ function mockHandle(msg) {
       g("Tin Orchard", "Epic", { playtimeMinutes: 75, sessions: 2, lastPlayed: new Date(now - 12 * 86400000).toISOString() }),
       g("Paper Lanterns", "Epic"), g("Ninefold", "Manual"),
       g("Bellwether", "GOG"),
-      g("Iron Compass", "Steam", { installed: false, sizeBytes: 42 * 1024 ** 3 }),
-      g("Low Country", "GOG", { installed: false, sizeBytes: 18 * 1024 ** 3 }),
-      g("Solaria Drift", "Epic", { installed: false, sizeBytes: 61 * 1024 ** 3 }),
-      g("Hollow Reef", "Steam", { installed: false, sizeBytes: 27 * 1024 ** 3 }),
+      g("Iron Compass", "Steam", { installed: false, sizeBytes: 42 * 1024 ** 3, installUri: "steam://install/1" }),
+      g("Low Country", "GOG", { installed: false, installUri: "goggalaxy://openGameView/1" }),
+      g("Solaria Drift", "Epic", { installed: false, installUri: "com.epicgames.launcher://apps/Solaria?action=install" }),
+      g("Hollow Reef", "Steam", { installed: false, sizeBytes: 27 * 1024 ** 3, installUri: "steam://install/2" }),
       g("Glassmoor", "Manual", { installed: false, sizeBytes: 55 * 1024 ** 3 }),
       g("Tidewrack", "GOG", { installed: false, sizeBytes: 12 * 1024 ** 3 }),
       g("Forza Horizon 5", "Xbox", { playtimeMinutes: 1240, sessions: 18, sizeBytes: 110 * 1024 ** 3 }),
       g("Sea of Thieves", "Xbox", { sizeBytes: 78 * 1024 ** 3 }),
-      g("Starfield", "Xbox", { installed: false, sizeBytes: 125 * 1024 ** 3 }),
+      // The same game in two stores, to exercise the grouping: one tile, launches the installed Xbox copy.
+      g("Forza Horizon 5", "Steam", { installed: false, installUri: "steam://install/1551360" }),
+      g("Hollow Reef", "Xbox", { installed: false, installUri: "ms-windows-store://pdp/?productid=9XXXXXXXXXXX" }),
+      g("Starfield", "Xbox", { installed: false, installUri: "ms-windows-store://pdp/?productid=9NCJSXWZRJPS" }),
       g("Wallpaper Engine", "Steam", { hidden: true, sizeBytes: 2 * 1024 ** 3 }),
     ];
     if (mockHandle._fav) games.forEach(x => { if (mockHandle._fav[x.id] !== undefined) x.favorite = mockHandle._fav[x.id]; });
@@ -3199,11 +3740,20 @@ function mockHandle(msg) {
       type: "state",
       games,
       collections: mockCollections,
+      steamAccount: { steamId: "76561198000000000", personaName: "couchplayer", ownedCount: 212,
+        fetchedAt: new Date().toISOString(), error: null },
+      stores: {
+        epic: { signedIn: true, user: "couchplayer", count: 35, fetchedAt: new Date().toISOString(), error: null },
+        gog: { signedIn: false, user: null, count: 0, fetchedAt: null, error: null },
+        xbox: { signedIn: true, user: "CouchGamer", count: 12, fetchedAt: null, error: "The sign-in has expired. Sign in again" },
+        gamePass: { count: 0, fetchedAt: null, error: null },
+      },
       settings: S.settings || {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
         boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "", metadataEndpoint: "",
+        steamShowOwned: true, steamApiKey: "", gamePassCatalog: false, xboxClientId: "",
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,

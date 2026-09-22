@@ -47,8 +47,12 @@ public partial class MainWindow : Window
         _windows = new WindowService(_displays);
         _launcher = new GameLaunchService(_displays, _settings, _library);
         _gamepad = new GamepadService(_settings,
-            isLauncherForeground: () => NativeMethods.GetForegroundWindow() == _hwnd,
-            isGameFocused: () => _launcher.IsGameForeground());
+            // An open overlay menu owns the pad whoever Windows thinks is in front. If the
+            // foreground could not be taken off the game (see TakeForeground), the menu was on
+            // screen but the pad still went to the game -- a menu that looked frozen until a
+            // mouse click handed Windows' foreground over.
+            isLauncherForeground: () => _overlayActive || NativeMethods.GetForegroundWindow() == _hwnd,
+            isGameFocused: () => !_overlayActive && _launcher.IsGameForeground());
 
         _launcher.GameStarted += _ => Dispatcher.Invoke(OnGameStarted);
         _launcher.GameExited += _ => Dispatcher.Invoke(OnGameExited);
@@ -247,7 +251,40 @@ public partial class MainWindow : Window
         Show();                      // PositionOnTargetDisplay restores Topmost for the TV
         PositionOnTargetDisplay();
         Activate();
-        NativeMethods.SetForegroundWindow(_hwnd);
+        TakeForeground();
+    }
+
+    /// <summary>
+    /// SetForegroundWindow, in the form Windows actually grants.
+    ///
+    /// Windows only lets a program take the foreground if it received the last input -- and a
+    /// controller read through XInput is not input as far as that rule is concerned. So with a
+    /// game in front, the plain call is refused: the window shows (it is topmost), but the game
+    /// keeps the foreground and the keyboard focus, which is why the Guide menu needed a mouse
+    /// click before anything worked. Joining the foreground window's input queue for the length
+    /// of the call is the sanctioned way round it; the two queues are separated again at once.
+    /// </summary>
+    private void TakeForeground()
+    {
+        var fg = NativeMethods.GetForegroundWindow();
+        if (fg == _hwnd) return;
+        if (NativeMethods.SetForegroundWindow(_hwnd) && NativeMethods.GetForegroundWindow() == _hwnd) return;
+
+        var fgThread = fg == IntPtr.Zero ? 0 : NativeMethods.GetWindowThreadProcessId(fg, out _);
+        var ours = NativeMethods.GetCurrentThreadId();
+        var attached = fgThread != 0 && fgThread != ours && NativeMethods.AttachThreadInput(ours, fgThread, true);
+        try
+        {
+            NativeMethods.BringWindowToTop(_hwnd);
+            NativeMethods.SetForegroundWindow(_hwnd);
+            Activate();
+        }
+        finally
+        {
+            if (attached) NativeMethods.AttachThreadInput(ours, fgThread, false);
+        }
+        if (NativeMethods.GetForegroundWindow() != _hwnd)
+            Log.Info("Could not take the foreground from the game; the menu still owns the pad");
     }
 
     private void OnGameStarted()
@@ -270,6 +307,21 @@ public partial class MainWindow : Window
     /// Drop always-on-top around a modal file dialog. Without this the dialog opens *behind* the
     /// full-screen launcher and looks like nothing happened.
     /// </summary>
+    /// <summary>
+    /// Keyboard focus into the WebView. WPF's Focus() on the control is what calls the
+    /// controller's MoveFocus, which is the only thing WebView2 accepts -- a Win32 SetFocus on
+    /// its render window is ignored. Needed only when a text field is about to be typed into.
+    /// </summary>
+    public void FocusPage()
+    {
+        if (_parked) return;
+        Activate();
+        WebView.Focus();
+    }
+
+    /// <summary>See GamepadService.UiClaimedButtons.</summary>
+    public void SetUiClaimedButtons(string[] buttons) => _gamepad.UiClaimedButtons = buttons;
+
     public void BeginModalDialog()
     {
         _suppressRefocus = true;

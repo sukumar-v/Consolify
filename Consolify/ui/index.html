@@ -26,6 +26,13 @@
   <div class="screen" id="screen-library" data-focus-scope>
     <header class="topbar" data-region="topbar">
       <div class="topbar-left" data-tabbar="library"></div>
+      <!-- Search. In the top bar rather than over the grid because every theme slots the top bar,
+           and Polish hides the section headings. View opens it; see openSearch in app.js. -->
+      <label class="lib-search" id="libSearch" data-focusable data-nav-skip data-focus-key="search" data-action="search">
+        <svg class="lib-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/></svg>
+        <input id="searchField" type="text" placeholder="Search your library" autocomplete="off" spellcheck="false" tabindex="-1">
+        <span class="lib-search-key btn-pill mono">VIEW</span>
+      </label>
       <div class="topbar-right mono">
         <span id="scanStatus"></span>
         <span id="titleCount">0 TITLES</span>
@@ -87,6 +94,7 @@
       <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
       <div class="legend-item"><div class="btn-badge">X</div><span>Filter</span></div>
       <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
+      <div class="legend-item"><div class="btn-pill mono">VIEW</div><span>Search</span></div>
       <div class="legend-item"><div class="btn-pill mono">MENU</div><span>Settings</span></div>
     </footer>
   </div>
@@ -200,11 +208,16 @@
   </div>
 
   <!-- ============ CONFIRM ============ -->
-  <div class="overlay" id="overlay-confirm" data-focus-scope>
-    <div class="quick-card menu-card">
-      <div class="quick-title mono" id="confirmTitle">ARE YOU SURE?</div>
-      <div class="ov-scroll" id="confirmList"></div>
-      <div class="ov-foot" id="confirmFoot"></div>
+  <!-- A dialog rather than a menu: the details, then A to go ahead and B to back out. -->
+  <div class="overlay" id="overlay-confirm">
+    <div class="dialog" id="confirmDialog" role="alertdialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+      <div class="dialog-icon" id="confirmIcon"></div>
+      <div class="dialog-title" id="confirmTitle">Are you sure?</div>
+      <div class="dialog-body" id="confirmBody"></div>
+      <div class="dialog-actions">
+        <div class="dialog-btn dialog-yes" id="confirmYes"><span class="btn-badge btn-a">A</span><span id="confirmYesLabel">Confirm</span></div>
+        <div class="dialog-btn dialog-no" id="confirmNo"><span class="btn-badge">B</span><span>Cancel</span></div>
+      </div>
     </div>
   </div>
 

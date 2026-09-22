@@ -34,6 +34,31 @@ public class AppSettings
     /// this exists for self-hosting and for testing, not as something anyone need ever set.</summary>
     public string MetadataEndpoint { get; set; } = "";
 
+    // Steam account
+    /// <summary>
+    /// Bring in the whole Steam library, not just the part on disk. The account is read off the
+    /// Steam client's own login file, so there is nothing to sign into; the list comes from the
+    /// Web API through the shared service, or through the key below. Off by default because it is
+    /// the one feature that sends something identifying -- the SteamID -- anywhere, and the README
+    /// promises "nothing phoned anywhere" for the plain scan.
+    /// </summary>
+    public bool SteamShowOwned { get; set; }
+    /// <summary>The user's own Steam Web API key, free from steamcommunity.com/dev/apikey. Only
+    /// needed when the profile keeps its game details private, which the shared key cannot read;
+    /// a key issued to the profile's owner can. Plain text in settings.json, like the rest.</summary>
+    public string SteamApiKey { get; set; } = "";
+
+    // Other stores
+    // Epic, GOG and Xbox are not settings at all: each is a sign-in, kept encrypted under
+    // %APPDATA%\Consolify\accounts, and being signed in is what turns the store's library on.
+    /// <summary>Every game included with PC Game Pass, from Microsoft's public catalogue, each
+    /// installable from here. A catalogue rather than a library, hence its own switch.</summary>
+    public bool GamePassCatalog { get; set; }
+    /// <summary>Optional. The client id of an Azure app registration of the user's own, for the
+    /// Xbox sign-in. Empty means the Xbox app's own client, which needs nothing; this is the way
+    /// out if Microsoft ever stops accepting that. See the README.</summary>
+    public string XboxClientId { get; set; } = "";
+
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"
     public bool SwitchPrimaryOnLaunch { get; set; } = true;

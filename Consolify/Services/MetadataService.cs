@@ -62,6 +62,9 @@ public class MetadataService
     /// decided by the code that runs rather than by whichever provider wrote last.
     /// </summary>
     private const string Steam = "_st", Service = "_sv";
+    /// <summary>Art the game's own store published: Galaxy's GOG-hosted covers, the Microsoft
+    /// Store's posters. A third source, so a third name -- see above for why that matters.</summary>
+    private const string Store = "_pf";
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -185,6 +188,18 @@ public class MetadataService
                 var filled = CustomSlots(g);
                 var touched = false;
 
+                // A game that is owned but not installed gets the lite pass: the cover and the
+                // tile, which are what the grid is made of, and Steam's own facts when Steam
+                // sells it. Not the 2x hero, the backdrop or the wordmark -- those dress a
+                // detail page, and at several hundred uninstalled games (a Game Pass catalogue
+                // alone is five hundred) they are most of a gigabyte for pictures behind games
+                // nobody has played -- and not the shared service, whose budget is everyone's
+                // and which would otherwise be asked twice per game per user. MergeScanned
+                // clears the stamp the moment the game turns installed, and the next pass fills
+                // the rest.
+                var lite = !g.Installed;
+                if (lite) { filled.Add(Slot.Hero); filled.Add(Slot.Backdrop); filled.Add(Slot.Logo); }
+
                 // One priority order for art, best source first, and the first to fill a slot
                 // keeps it. Steam's own library assets lead because they are published at fixed
                 // sizes that are exactly the shapes this app's boxes are cut to.
@@ -194,13 +209,23 @@ public class MetadataService
                 // game with no capsule, a wordmark, 16:9 key art -- and for every non-Steam game,
                 // where it is the only source there is. Facts come from here first regardless;
                 // Steam still holds the Metacritic score and the controller-support flag.
-                var (elsewhere, serviceFacts) = await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
+                var (elsewhere, serviceFacts) = lite
+                    ? (false, false)
+                    : await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
                 touched |= elsewhere;
 
                 // Steam runs after, as the fallback: it fills every art slot and every field the
                 // service left empty, and it always supplies controller support, which IGDB has
                 // no equivalent of.
                 if (appId is not null) touched |= await EnrichSteamAsync(g, appId, filled, serviceFacts, ct);
+
+                // The store's own art, last. Galaxy's GOG-hosted covers and the Microsoft Store's
+                // posters are proper box art, and for a game that is not on Steam and that the
+                // service does not know, they are the only picture there is.
+                if (g.RemoteCoverUrl is { } storeCover)
+                    touched |= await StoreRemoteAsync(g, Slot.Cover, storeCover, filled, ct, Store);
+                if (g.RemoteBackdropUrl is { } storeBackdrop)
+                    touched |= await StoreRemoteAsync(g, Slot.Backdrop, storeBackdrop, filled, ct, Store);
 
                 // Stamped even when nothing was found, so a game that genuinely has no metadata is
                 // not looked up again on every launch -- but NOT when every source that could have
@@ -278,7 +303,15 @@ public class MetadataService
     /// art" forever and puts its game back in the queue on every single start.
     /// </summary>
     private static bool HasFetchedArt(Game g) =>
-        g.BannerFile is { } b && (b.Contains(Steam) || b.Contains(Service) || IsCustom(b))
+        Fetched(g.BannerFile)
+        // An uninstalled game gets the lite pass, whose cover may be the only picture any source
+        // had -- a Game Pass game that is not on Steam has no capsule to fetch. Judged on the tile
+        // alone it would be "no art" and back in the queue on every start, for a search that
+        // answers the same nothing each time.
+        || (!g.Installed && Fetched(g.CoverFile));
+
+    private static bool Fetched(string? name) =>
+        name is { } b && (b.Contains(Steam) || b.Contains(Service) || b.Contains(Store) || IsCustom(b))
         && File.Exists(Path.Combine(Paths.CoversDir, b));
 
     private static string? SteamAppId(Game g) =>

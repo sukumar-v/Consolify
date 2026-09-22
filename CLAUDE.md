@@ -455,3 +455,162 @@ Stop the scrolled grid from clipping through the All games header
 - `F.hidden` is a separate VIEW, not "show hidden as well": the reason to ask is to look over what
   you put away and take something back out, and mixing them into 200 tiles is not that. The row
   carries the count, because an empty hidden view and a broken filter look identical.
+
+## The Steam account
+
+- Uninstalled Steam games come from the Web API's `GetOwnedGames`, which needs a key: the shared
+  proxy's `STEAM_API_KEY` (`/v1/owned`) for profiles whose game details are public, the user's own
+  key (`SteamApiKey`) for private ones. **There is no keyless route any more.** The community
+  `games?tab=all` page and the older `?xml=1` feed both redirect to a login for every profile,
+  public or not (checked Sept 2026), and nothing local lists the library with names: the
+  per-account `userdata/<id>/config/librarycache/*.json` are achievement pointers, `licensecache`
+  is encrypted, and `appcache/librarycache` is shared between every account that has logged in on
+  the PC, so it mixes libraries.
+- The account is read from `config/loginusers.vdf`. `MostRecent` is missing on some installs, so
+  the newest `Timestamp` is the fallback.
+- The answer is cached in `steam-owned.json`, keyed by SteamID, and held for six hours; a manual
+  Rescan forces it. A failed fetch serves the cache, so an offline start keeps the library. With the
+  toggle off the next scan drops the uninstalled entries, because `MergeScanned` only keeps what was
+  scanned plus manual entries -- that is the intended way to remove them.
+- `StateFlags` bit 4 is "fully installed". A download that has just begun already has a manifest
+  and a folder, so `Directory.Exists` alone showed it as installed for the whole download.
+- A `FileSystemWatcher` on every steamapps folder triggers a *quiet* scan 5s after the last
+  manifest write: no spinner, and `PushState` only when the (id, installed) signature changed. A
+  download rewrites its manifest every few seconds, and a full repaint each time throws the
+  highlight around under somebody browsing.
+- `install` parks the launcher (`Park()`) before opening `steam://install/<appid>`: the launcher is
+  topmost on the TV and Steam's dialog would open behind it. The UI's confirm says how to come back
+  (the minimize combo, or starting the exe again when the combo is Off).
+- The proxy route has to be **deployed with the secret set**, or every fetch answers 501 and the
+  Settings row says to add a key. Same trap as PEGI: the code being in `worker.js` proves nothing.
+
+## Store accounts: Epic, GOG, Xbox and Game Pass
+
+- Epic, GOG and Xbox libraries come from signing in to each store, the way Playnite does it: a
+  `StoreLoginWindow` (a WebView2 with a profile folder per store under
+  `%LOCALAPPDATA%\Consolify\webview2-accounts`) shows the store's own page, a probe runs after every
+  navigation and closes the window the moment it has what it came for. Tokens are DPAPI-encrypted
+  in `%APPDATA%\Consolify\accounts\<store>.bin`; the last library answer is plain JSON beside it,
+  held six hours and served on any failure. Sign-out deletes all three.
+- **GOG Galaxy's database was tried first and rejected**: it lists every connected store's library
+  locally with no login, but only for people who have Galaxy, and a store disconnected in Galaxy
+  keeps a stale list forever. The user asked for the Playnite route instead.
+- **Epic** signs in as the Epic Games Launcher's own OAuth client (`launcherAppClient2`, the one
+  Legendary, Heroic and Playnite all use). The library host is
+  `library-service.live.use1a.on.epicgames.com`; the `library-service.prod.epicgames.com` that
+  Playnite names no longer resolves. The catalogue is one request per item, so its answers are kept
+  in the cache file by id and only new items are looked up.
+- **GOG** is a cookie session. The Galaxy client credentials every open-source client carries
+  (`46899977096215655` and its secret) are answered `invalid_client` now, for a bad code and a bad
+  refresh token alike, so there is no OAuth route left. The sign-in window's `gog-al` cookie and
+  friends are copied out of WebView2's CookieManager and replayed by HttpClient with
+  `AllowAutoRedirect = false`: a 302 from the account page means the session is gone. Box art is
+  `api.gog.com/v2/games/<id>` (`_links.boxArtImage`), public and per game.
+- **Xbox** has no owned-games list; it has the title history (played games, any device), which is
+  what Playnite imports. Four tokens in a chain: Microsoft OAuth → user.auth.xboxlive.com →
+  xsts.auth.xboxlive.com (which carries the xuid and gamertag) → titlehub. The default sign-in
+  client is the Xbox app's own (`0000000048093EE3`, implicit flow, `MBI_SSL` scope), whose RPS
+  ticket prefix is tried as `t=`, bare, then `d=` on a 400. `XboxClientId` in Settings switches to
+  the code flow of an Azure registration of one's own (`d=` only), which is what Playnite ships
+  with. Neither could be verified end to end here: there was no account to sign in with.
+- **The PC Game Pass catalogue is keyless**: `catalog.gamepass.com/sigls/v2?id=<sigl>` (the "All PC
+  Games" list) answers with product ids, `displaycatalog.mp.microsoft.com/v7.0/products?bigIds=`
+  turns twenty at a time into titles, package family names and art (`Poster` is 2:3,
+  `SuperHeroArt` 16:9). Each answer carries every screenshot, so the whole list is ~30 MB; it is
+  held for a week in `gamepass.json`. The Store suffixes PC builds with " - Windows" or "(PC)",
+  which `CleanTitle` strips or the strict Steam title match never succeeds.
+- Ids: Xbox title history is `xbox:pfn:<pfn>`, the catalogue `xbox:store:<productId>`, an installed
+  Xbox game `xbox:<identity>`. All three carry `PackageFamilyName`, and `NotAlreadyFound` dedupes
+  on it -- owned against installed, and owned against owned, since a PFN is unique where a title
+  is not (Steam sells two games named exactly "DOOM").
+- **Every uninstalled game gets the lite metadata pass**, not just Steam's: cover and tile only,
+  facts from Steam by title, never the shared service. Five hundred catalogue games through the
+  proxy would be a thousand KV writes on a free tier that allows a thousand a day. The store's own
+  art (`RemoteCoverUrl`/`RemoteBackdropUrl`, written as `_pf_`) is the last fallback, and it is the
+  third name that `KeepBest`, `HasFetchedArt` and `MetadataService` all have to know.
+- `HasFetchedArt` accepts the cover alone for an uninstalled game. Judged on the tile, a Game Pass
+  game that is not on Steam has "no art", rejoins the queue on every start, and costs a paced Steam
+  search each time for the same nothing.
+- Only Steam has a manifest to watch. After any Install the library is re-read once a minute for up
+  to three hours (`BeginInstallPolling`), quietly, until the game is on disk.
+- `Game.InstallUri` is written by the service that listed the game and is the only thing the
+  Install button keys off; the host checks it against `InstallSchemes` before starting anything, so
+  a hand-edited library.json cannot turn Install into "run this". GOG's is `goggalaxy://` when
+  Galaxy is installed and the game's gog.com page otherwise.
+- The sign-in window is driven like the rest of the desktop: stick as mouse, keyboard toggle for the
+  on-screen keyboard (it types into the focused window), a Cancel button because B does not reach a
+  window that is not the launcher. `BeginModalDialog` around it, or it opens behind the launcher.
+- **The Xbox app's own client id (0000000048093EE3) is dead for user tokens**: sign-in succeeds,
+  then user.auth.xboxlive.com answers 403 to its ticket with every prefix. Verified on a real
+  account, Sept 2026. The way Playnite works is an Azure app registration of its own (client id in
+  its source, scopes `Xboxlive.signin Xboxlive.offline_access`, `d=` ticket) -- the "Let this app
+  access your info?" prompt is that registration's consent screen. `DefaultClientId` in
+  `XboxAccountClient` is the slot for a Consolify registration; until one exists the fallback is
+  `000000004C12AE6F` with `t=`, which @xboxreplay/xboxlive-auth reports working and which can go
+  the same way. The ticket loop tries every prefix on 400/401/403 and logs each answer.
+
+## Editions, the confirm dialog and search
+
+- **One game in several stores is one tile.** Library entries stay separate on the host (install
+  state, launch route, playtime and art are per copy, and everything is keyed by id); the page
+  groups them by `titleKey` in `buildEditions`, rebuilt on every state push. Never two copies from
+  the same store in one group: Steam sells two games named exactly "DOOM".
+- The tile stands for `rankEditions(...)[0]`: the copy picked under Manage → Launch with
+  (`Game.PreferredEdition`, carried through `MergeScanned`), then an installed copy, then Steam,
+  Epic, GOG, Xbox, then playtime. The game menu offers "Play on X" / "Install on X" for the others.
+- The platform filter runs BEFORE grouping, so filtering to Xbox shows the Xbox copy; every other
+  filter (favourite, collection, installed, search) is asked of the game as a whole.
+- Hide is sent as `setHidden` for every copy. Hiding one copy only brought the other out from behind
+  it as a tile of its own.
+- `titleKey` must stay in step with `TitleMatch` on the host, plus the Microsoft Store's " - Windows"
+  and "(Game Preview)" labels.
+- The confirm overlay is a dialog, not a menu: heading, body, and A / B chips that are also what a
+  mouse clicks. Nothing in it is focusable, so `confirmInput` takes A without `focusVisible()`.
+  Titles are sentence case now; the old all-caps title belonged to the menu-card style.
+- A menu row's subtitle sits under its label (`.two-line`). Side by side, a long subtitle ellipsised
+  the label down to "In…".
+- Search lives in the library top bar because both themes slot the top bar and Polish hides every
+  section heading. View opens it (LB/RB are minimize-combo options and RB is the keyboard toggle).
+  Typing refilters live; Enter/A/Down keeps it and lands on the first result; Esc/B clears it.
+- The default sort puts installed games first, then A to Z. The label says so.
+- A text field needs the HOST to hand keyboard focus to the WebView (`focusPage` →
+  `MainWindow.FocusPage` → `WebView.Focus()`, which is what calls the controller's MoveFocus).
+  DOM `focus()` alone gives a field with no caret that the on-screen keyboard types into nothing.
+  `openSearch` and `openInput` both send it.
+- The search box is a focusable in the library scope (`data-focus-key="search"`,
+  `data-action="search"`, `data-nav-skip`), so View lights it -- but the D-pad never walks to it:
+  `navMove` leaves `data-nav-skip` elements out of its candidates. View or the Filter menu only. While a search is
+  open or standing, `paintNav` publishes the focus region as "grid" so Polish shows the results.
+- `renderMenu` rebuilds its list on every step; it must restore `scrollTop` after emptying it, or a
+  menu longer than its box restarts its smooth reveal from 0 on each press and the last rows go
+  unseen (Persona 3 Reload's Manage). Overflowing menus fade the edge with more beyond it; the fade
+  is 28px, inside REVEAL_MARGIN, so it never dims the highlighted row.
+- Manage → Launch with lists stores in `EDITION_ORDER`, never rank order: ranked, the chosen store
+  jumped to the top and the row under the highlight changed.
+- After a vertical wheel (the right stick), the next D-pad step lands on the first item in view
+  when the highlight has been scrolled out of sight (`resumeInView`). Keyed on the wheel event,
+  not on visibility alone: during a fast run of presses the smooth reveal leaves the highlight half
+  out of view on every step.
+- **The page claims View on the library** (`publishClaims` → `claimButtons` →
+  `GamepadService.UiClaimedButtons`). When the keyboard toggle is bound to View, Press mode used to
+  spend the press before the UI saw it, so View raised the keyboard and search never opened. A
+  claimed press is delivered to the UI and marked spent for the toggle; the claim is dropped under
+  any overlay, while searching and on other screens, so the toggle keeps View everywhere else.
+- **Wheels are routed** to the list the user is in when they land on nothing scrollable
+  (`wheelHome`). The right stick sends real wheel events, which go to whatever is under the hidden
+  cursor; Classic's grid is only the bottom half of the screen, so the stick usually scrolled
+  nothing there. A wheel over a real scroller is left to the browser.
+
+## Over a game: the foreground and the exit
+
+- **Windows refuses SetForegroundWindow from a program that did not receive the last input, and
+  XInput is not input.** With a game in front, the Guide menu and the Power Wheel were shown
+  (topmost) but never became foreground, so `launcherFg` was false and the pad went nowhere until a
+  mouse click. `TakeForeground` joins the foreground window's input queue for the call
+  (`AttachThreadInput`), and while `_overlayActive` the pad service treats the launcher as in front
+  and the game as not focused regardless, so a refused foreground can no longer freeze a menu.
+- **A session used to wait a flat 15 s after every exit** for a successor process from the install
+  dir. Now: anything of the game still running at that instant carries the session on (launchers
+  hand over before they exit); a close Consolify asked for waits for nothing (`_closeRequested`);
+  a process that lived under 90 s (a pre-launcher) keeps the 15 s window; anything longer gets 1 s,
+  for a game that restarts itself. The poll is every 250 ms, not 1.5 s.

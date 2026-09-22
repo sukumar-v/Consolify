@@ -71,6 +71,14 @@ public class GamepadService : IDisposable
     /// Polled from the input thread, so it must not touch the UI tree.
     /// </summary>
     public Func<bool>? KeyboardArmed;
+    /// <summary>
+    /// Buttons the launcher page has asked to receive itself (by UI name, e.g. "View"), set from
+    /// the page's claimButtons message. Today that is View on the library, for search: when the
+    /// keyboard toggle is bound to the same button, the page wins there and the toggle keeps the
+    /// button everywhere else. Only honoured while the launcher is in front and the keyboard is
+    /// not driving -- with the keyboard up, the toggle must always be able to close it.
+    /// </summary>
+    public volatile string[] UiClaimedButtons = Array.Empty<string>();
 
     public bool Connected { get; private set; }
 
@@ -343,13 +351,22 @@ public class GamepadService : IDisposable
             // every button there belongs to the game. Closing a keyboard that is already up is the
             // exception and is always allowed, or an opted-out player could strand one on screen.
             ushort toggleMask = ButtonMask(s.KeyboardToggleButton);
-            bool toggleAllowed = !gameFocused || s.KeyboardInGame || KeyboardOwnsPad;
+            ushort claimedMask = 0;
+            foreach (var claimed in UiClaimedButtons) claimedMask |= ButtonMask(claimed);
+            // The page wants this button for itself (View for search, on the library). Leave it
+            // unspent here and let the UI loop below deliver it as an ordinary press.
+            bool toggleClaimedByUi = launcherFg && !keyboardDriving && (claimedMask & toggleMask) != 0;
+            bool toggleAllowed = (!gameFocused || s.KeyboardInGame || KeyboardOwnsPad) && !toggleClaimedByUi;
             bool holdToToggle = string.Equals(s.KeyboardToggleMode, "Hold", StringComparison.OrdinalIgnoreCase);
 
             if ((pressed & toggleMask) != 0)
             {
                 toggleDownAt = now;
                 toggleFired = false;
+                // The page took this press (see UiClaimedButtons). Count it as spent, or once the
+                // page withdraws the claim -- search is open by then -- a Hold would still fire the
+                // toggle on this same press, and the release would arrive as a second tap.
+                if (toggleClaimedByUi) toggleFired = true;
                 if (!holdToToggle && toggleAllowed)
                 {
                     // Marking it fired is what stops the same press also reaching the UI below:
@@ -405,7 +422,7 @@ public class GamepadService : IDisposable
                 {
                     // In Hold mode the toggle button still does its UI job on a tap (Start taps
                     // open the quick menu). In Press mode the press above consumed it.
-                    if (mask == toggleMask)
+                    if (mask == toggleMask && !toggleClaimedByUi)
                     {
                         if (toggleReleasedAsTap) UiEvent?.Invoke(name);
                     }

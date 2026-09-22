@@ -84,6 +84,15 @@ npx wrangler secret put IGDB_CLIENT_SECRET --config proxy/wrangler.toml
 npx wrangler secret put SGDB_KEY --config proxy/wrangler.toml
 ```
 
+Optionally, a Steam Web API key. It is what lets the launcher list the games a Steam account owns
+but has not installed (Settings → Library → *Show games you own but haven't installed*), and it is
+free from https://steamcommunity.com/dev/apikey — any domain name will do. Without it the route
+answers 501 and the launcher tells the user to paste a key of their own into Settings instead.
+
+```bash
+npx wrangler secret put STEAM_API_KEY --config proxy/wrangler.toml
+```
+
 Check it builds without uploading anything:
 
 ```bash
@@ -127,10 +136,17 @@ set with `npx wrangler secret list --config proxy/wrangler.toml`.
     GET /v1/facts?title=<title>   → { name, summary, developer, publisher, genres[],
                                       released, criticScore, cover, artwork }
     GET /v1/art?title=<title>     → { name, portrait, tile, hero, logo }
+    GET /v1/owned?steamid=<id64>  → { response: { game_count, games: [ { appid, name,
+                                      playtime_forever, rtime_last_played } ] } }
     GET /v1/health                → { ok: true }
 
 `404` means "no confident answer", which is a normal outcome rather than a failure. The launcher
 treats a 404, a 429 and a dead connection identically: it keeps whatever art it already had.
+
+`/v1/owned` is Steam's own `GetOwnedGames` passed through, trimmed to four fields, so the launcher
+parses it and a direct call made with the user's own key identically. `403` is a profile whose game
+details are private (Steam answers those with no games at all), `501` means `STEAM_API_KEY` is not
+set. It is never cached: it is one person's data and it changes whenever they buy something.
 
 Every response carries the matched `name`, and **the launcher re-checks it against its own strict
 title rule before accepting anything**. The proxy being loose, wrong or compromised cannot put the
@@ -148,3 +164,6 @@ wrong game's art on a tile.
   unaffected because they never touch this.
 - **Put a contact address in the worker's User-Agent** if you publish widely, so an upstream that
   is unhappy with your traffic can reach you before it revokes the key.
+- **`/v1/owned` is the one route that sees something identifying.** A 64-bit SteamID is a public
+  identifier, but it is the user's, which is why the launcher only sends it when they turn the
+  Steam library on, and why this route stores nothing and caches nothing.

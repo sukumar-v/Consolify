@@ -25,6 +25,7 @@ id = "d7caac270d6543ebb25ca428d26075f6"
 #   npx wrangler secret put IGDB_CLIENT_ID
 #   npx wrangler secret put IGDB_CLIENT_SECRET
 #   npx wrangler secret put SGDB_KEY
+#   npx wrangler secret put STEAM_API_KEY     (optional: enables /v1/owned, the Steam library import)
 
 [observability]
 enabled = true

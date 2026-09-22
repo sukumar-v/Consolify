@@ -8,7 +8,9 @@ namespace Consolify.Services;
 
 /// <summary>
 /// Scans Steam (appmanifest ACF files), Epic (launcher .item manifests) and GOG (registry)
-/// for installed games. Manual entries are managed separately by LibraryStore.
+/// for installed games. Manual entries are managed separately by LibraryStore, and the games a
+/// Steam account owns without having installed come from SteamAccountService and are turned into
+/// entries by <see cref="OwnedSteamGames"/>.
 /// </summary>
 public class LibraryScanner
 {
@@ -73,11 +75,15 @@ public class LibraryScanner
 
                     // PackageFullName -> PackageFamilyName is "<name>_<publisherId>"
                     string? launchUri = null;
+                    string? pfn = null;
                     if (packages.TryGetValue(identity, out var fullName))
                     {
                         var parts = fullName.Split('_');
                         if (parts.Length >= 2)
-                            launchUri = $"shell:AppsFolder\\{parts[0]}_{parts[^1]}!{appId}";
+                        {
+                            pfn = $"{parts[0]}_{parts[^1]}";
+                            launchUri = $"shell:AppsFolder\\{pfn}!{appId}";
+                        }
                     }
 
                     var exePath = exeName is not null ? Path.Combine(content, exeName) : null;
@@ -95,6 +101,7 @@ public class LibraryScanner
                         InstallDir = content,
                         SizeBytes = size,
                         Installed = true,
+                        PackageFamilyName = pfn,
                         CoverFile = ImportXboxArt(content, visuals, identity)
                     });
                 }
@@ -155,27 +162,39 @@ public class LibraryScanner
 
     // ---------- Steam ----------
 
-    public List<Game> ScanSteam()
+    /// <summary>
+    /// Every steamapps folder Steam knows about: the install's own, plus each extra library
+    /// folder listed in libraryfolders.vdf. Shared with the manifest watcher in UiBridge, so the
+    /// folders it watches are exactly the folders the scan reads.
+    /// </summary>
+    public static List<string> SteamLibraryRoots()
     {
-        var games = new List<Game>();
-        var steamPath = (Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string)
-                        ?.Replace('/', '\\');
-        if (steamPath is null || !Directory.Exists(steamPath)) return games;
+        var roots = new List<string>();
+        var steamPath = SteamAccountService.SteamPath();
+        if (steamPath is null) return roots;
 
-        // All library folders (libraryfolders.vdf lists additional drives)
-        var libraryRoots = new List<string> { Path.Combine(steamPath, "steamapps") };
-        var vdf = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
+        var main = Path.Combine(steamPath, "steamapps");
+        if (Directory.Exists(main)) roots.Add(main);
+        var vdf = Path.Combine(main, "libraryfolders.vdf");
         if (File.Exists(vdf))
         {
             foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
             {
                 var p = Path.Combine(m.Groups[1].Value.Replace(@"\\", @"\"), "steamapps");
-                if (Directory.Exists(p) && !libraryRoots.Contains(p, StringComparer.OrdinalIgnoreCase))
-                    libraryRoots.Add(p);
+                if (Directory.Exists(p) && !roots.Contains(p, StringComparer.OrdinalIgnoreCase))
+                    roots.Add(p);
             }
         }
+        return roots;
+    }
 
-        foreach (var root in libraryRoots)
+    public List<Game> ScanSteam()
+    {
+        var games = new List<Game>();
+        var steamPath = SteamAccountService.SteamPath();
+        if (steamPath is null) return games;
+
+        foreach (var root in SteamLibraryRoots())
         {
             foreach (var acf in Directory.EnumerateFiles(root, "appmanifest_*.acf"))
             {
@@ -194,6 +213,13 @@ public class LibraryScanner
                 if (long.TryParse(Get("LastPlayed"), out var lp) && lp > 0)
                     lastPlayed = DateTimeOffset.FromUnixTimeSeconds(lp).LocalDateTime;
 
+                // StateFlags bit 4 is "fully installed". A download Steam has only just started
+                // already has a manifest and a folder, so the folder alone showed it as installed
+                // for the whole download -- a tile you could press A on and watch nothing happen.
+                // A manifest with no flags at all is taken at its folder's word.
+                int.TryParse(Get("StateFlags"), out var flags);
+                var installed = Directory.Exists(installDir) && (flags == 0 || (flags & 4) != 0);
+
                 var art = ImportSteamArt(steamPath, appId);
                 games.Add(new Game
                 {
@@ -204,7 +230,7 @@ public class LibraryScanner
                     InstallDir = installDir,
                     SizeBytes = size,
                     LastPlayed = lastPlayed,
-                    Installed = Directory.Exists(installDir),
+                    Installed = installed,
                     CoverFile = art.Cover,
                     BannerFile = art.Banner,
                     HeroFile = art.Hero,
@@ -213,6 +239,75 @@ public class LibraryScanner
             }
         }
         return games;
+    }
+
+    /// <summary>
+    /// Library entries for the games an account owns but has not installed. Anything the manifest
+    /// scan already found is skipped -- that entry knows the install folder and the size, and this
+    /// one knows neither -- so the two lists merge by plain concatenation. Art is whatever the
+    /// Steam client has cached locally; MetadataService fetches the rest by app id exactly as it
+    /// does for an installed game, so an uninstalled tile ends up looking like any other.
+    /// </summary>
+    public List<Game> OwnedSteamGames(IEnumerable<OwnedGame> owned, IEnumerable<Game> alreadyFound)
+    {
+        var games = new List<Game>();
+        var have = alreadyFound.Select(g => g.Id).ToHashSet(StringComparer.Ordinal);
+        var steamPath = SteamAccountService.SteamPath();
+        foreach (var o in owned)
+        {
+            var id = $"steam:{o.AppId}";
+            if (!have.Add(id)) continue;
+            if (SteamJunkNames.Any(j => o.Name.Contains(j, StringComparison.OrdinalIgnoreCase))) continue;
+
+            var art = steamPath is null ? default : ImportSteamArt(steamPath, o.AppId);
+            games.Add(new Game
+            {
+                Id = id,
+                Title = o.Name,
+                Platform = "Steam",
+                LaunchUri = $"steam://rungameid/{o.AppId}",
+                InstallUri = $"steam://install/{o.AppId}",
+                LastPlayed = o.LastPlayed,
+                Installed = false,
+                CoverFile = art.Cover,
+                BannerFile = art.Banner,
+                HeroFile = art.Hero,
+                LogoFile = art.Logo
+            });
+        }
+        return games;
+    }
+
+    /// <summary>
+    /// The owned entries that are not already in the library as something installed. Three things
+    /// make two entries the same game: the id (Epic's app name and GOG's product id are the same
+    /// on disk and in Galaxy), the package family name (an installed Xbox game against a
+    /// catalogue entry), and failing both, an exact title on the same platform -- Galaxy's Xbox
+    /// entries carry neither of the first two. The installed entry always wins: it is the one
+    /// that can be launched.
+    ///
+    /// Owned entries are de-duplicated against each other by id and by package family name --
+    /// the Xbox title history and the Game Pass catalogue list the same game under different ids
+    /// -- but never by title. Two owned games with the same title are a real thing (Steam sells
+    /// two named exactly "DOOM"), and dropping one by title would lose a game the account paid for.
+    /// </summary>
+    public static List<Game> NotAlreadyFound(IEnumerable<Game> found, IEnumerable<Game> owned)
+    {
+        var have = found.ToList();
+        var ids = have.Select(g => g.Id).ToHashSet(StringComparer.Ordinal);
+        var pfns = have.Where(g => g.PackageFamilyName is not null)
+            .Select(g => g.PackageFamilyName!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var titles = have.Select(g => (g.Platform, TitleMatch.Normalise(g.Title))).ToHashSet();
+
+        var fresh = new List<Game>();
+        foreach (var o in owned)
+        {
+            if (!ids.Add(o.Id)) continue;
+            if (o.PackageFamilyName is not null && !pfns.Add(o.PackageFamilyName)) continue;
+            if (titles.Contains((o.Platform, TitleMatch.Normalise(o.Title)))) continue;
+            fresh.Add(o);
+        }
+        return fresh;
     }
 
     /// <summary>

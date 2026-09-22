@@ -30,6 +30,17 @@ public class UiBridge
     private readonly WindowService _windows;
     private readonly ThemeService _themes;
     private readonly MetadataService _metadata = new();
+    private readonly SteamAccountService _steam = new();
+    private readonly GamePassCatalogService _gamePass = new();
+    /// <summary>The stores one signs in to, keyed as the page names them. Filled in the
+    /// constructor because Xbox reads a setting.</summary>
+    private readonly Dictionary<string, IStoreAccount> _accounts = new();
+    private bool _signingIn;
+    private System.Threading.Timer? _installPoll;
+    private string? _pendingInstall;
+    private DateTime _pollUntil;
+    private readonly List<FileSystemWatcher> _manifestWatchers = new();
+    private System.Threading.Timer? _manifestTimer;
     private bool _scanning;
     private bool _enriching;
 
@@ -46,6 +57,14 @@ public class UiBridge
         _keyboard = keyboard;
         _windows = windows;
         _themes = themes;
+        foreach (var account in new IStoreAccount[]
+                 {
+                     new EpicAccountClient(),
+                     new GogAccountClient(),
+                     new XboxAccountClient(() => _settings.Settings.XboxClientId),
+                 })
+            _accounts[account.Store] = account;
+        StartInstallWatcher();
     }
 
     public void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -100,8 +119,59 @@ public class UiBridge
             }
 
             case "rescan":
-                StartScan();
+                StartScan(force: true);
                 break;
+
+            case "storeSignIn":
+                if (msg["store"]?.GetValue<string>() is { } signIn && _accounts.TryGetValue(signIn, out var accountIn))
+                    _ = SignInAsync(accountIn);
+                break;
+
+            case "storeSignOut":
+                if (msg["store"]?.GetValue<string>() is { } signOut && _accounts.TryGetValue(signOut, out var accountOut))
+                {
+                    accountOut.SignOut();
+                    Push(new { type = "toast", message = $"Signed out of {accountOut.DisplayName}" });
+                    PushState();
+                    // The next scan is what takes the store's games out of the library.
+                    StartScan(force: true);
+                }
+                break;
+
+            // The store's own install flow: Steam and Galaxy put up a dialog with the size and the
+            // drive, Epic's launcher and the Microsoft Store open the game's page with an Install
+            // button. The manifest watcher or the poll below turns the tile playable afterwards.
+            case "install":
+            {
+                var id = msg["id"]?.GetValue<string>();
+                var game = id is null ? null : _library.Find(id);
+                if (game is null || game.Installed) break;
+                // The URI was written by whichever service listed the game, never by the page --
+                // the page only names the game. The scheme check keeps a hand-edited library.json
+                // from turning this into "run anything".
+                if (game.InstallUri is not { } uri
+                    || !InstallSchemes.Any(s => uri.StartsWith(s, StringComparison.OrdinalIgnoreCase)))
+                {
+                    Push(new { type = "toast", message = $"{game.Title} has to be installed from {game.Platform}" });
+                    break;
+                }
+                try
+                {
+                    // The launcher is topmost on the TV, so the store's window would open behind
+                    // it and look like nothing happened. Step aside the way a launch does; the
+                    // minimize combo brings the launcher back.
+                    _window.Park();
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+                    Log.Info($"Install requested for {game.Title} ({uri})");
+                    BeginInstallPolling(game.Id);
+                }
+                catch (Exception ex)
+                {
+                    _window.Unpark();
+                    Push(new { type = "toast", message = $"Could not ask {game.Platform} to install: {ex.Message}" });
+                }
+                break;
+            }
 
             // Credentials can be added long after a game was first looked up and written off, and
             // a title that matched nothing today may match tomorrow. Clearing the timestamps is
@@ -159,8 +229,16 @@ public class UiBridge
                 if (incoming is null) break;
                 var displayChanged = incoming.TvDeviceName != _settings.Settings.TvDeviceName;
                 var startupChanged = incoming.LaunchOnStartup != StartupService.IsRegistered();
+                // Flipping the Steam library on should show the games now, not on the next start,
+                // and flipping it off should take them away just as promptly. A new key is a new
+                // route to the same answer, so it re-asks too.
+                var cur = _settings.Settings;
+                var storesChanged = incoming.SteamShowOwned != cur.SteamShowOwned
+                                    || (incoming.SteamApiKey ?? "").Trim() != cur.SteamApiKey
+                                    || incoming.GamePassCatalog != cur.GamePassCatalog;
                 CopySettings(incoming);
                 _settings.Save();
+                if (storesChanged) StartScan(force: true);
                 if (startupChanged)
                 {
                     try { StartupService.SetRegistered(incoming.LaunchOnStartup); }
@@ -293,6 +371,21 @@ public class UiBridge
                 _keyboard.Toggle();
                 break;
 
+            // Buttons the page wants delivered to it rather than spent on something else first --
+            // View on the library, where it opens search even when it is also the keyboard toggle.
+            case "claimButtons":
+                _window.SetUiClaimedButtons(msg["buttons"]?.AsArray()
+                    .Select(n => n?.GetValue<string>()).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!)
+                    .ToArray() ?? Array.Empty<string>());
+                break;
+
+            // Keyboard focus into the page, for a text field about to be typed into. Without it the
+            // launcher has no focused element at all and keystrokes -- the on-screen keyboard's
+            // included -- go nowhere.
+            case "focusPage":
+                _window.FocusPage();
+                break;
+
             case "showKeyboard":
                 _keyboard.Show();
                 break;
@@ -310,6 +403,37 @@ public class UiBridge
                 _library.Save();
                 PushState();
                 Push(new { type = "toast", message = game.Hidden ? $"{game.Title} hidden" : $"{game.Title} restored to the library" });
+                break;
+            }
+
+            // A game in several stores is hidden as a whole: the page sends every copy, so hiding
+            // the Steam one does not just bring the Xbox one out from behind it.
+            case "setHidden":
+            {
+                var hide = msg["hidden"]?.GetValue<bool>() ?? true;
+                var ids = msg["ids"]?.AsArray().Select(n => n?.GetValue<string>()).Where(x => x is not null).ToList() ?? new();
+                var changed = ids.Select(i => _library.Find(i!)).Where(x => x is not null).ToList();
+                if (changed.Count == 0) break;
+                foreach (var x in changed) x!.Hidden = hide;
+                _library.Save();
+                PushState();
+                var name = changed[0]!.Title;
+                Push(new { type = "toast", message = hide ? $"{name} hidden" : $"{name} restored to the library" });
+                break;
+            }
+
+            // Which store a game in several of them launches from. One flag across the copies,
+            // so the others are cleared in the same save.
+            case "preferEdition":
+            {
+                var id = msg["id"]?.GetValue<string>();
+                var chosen = id is null ? null : _library.Find(id);
+                if (chosen is null) break;
+                foreach (var sib in msg["siblings"]?.AsArray() ?? new JsonArray())
+                    if (sib?.GetValue<string>() is { } sibId && _library.Find(sibId) is { } other) other.PreferredEdition = false;
+                chosen.PreferredEdition = true;
+                _library.Save();
+                PushState();
                 break;
             }
 
@@ -408,6 +532,10 @@ public class UiBridge
         t.IgdbClientSecret = s.IgdbClientSecret.Trim();
         t.SteamGridDbKey = s.SteamGridDbKey.Trim();
         t.MetadataEndpoint = s.MetadataEndpoint.Trim();
+        t.SteamShowOwned = s.SteamShowOwned;
+        t.SteamApiKey = (s.SteamApiKey ?? "").Trim();
+        t.GamePassCatalog = s.GamePassCatalog;
+        t.XboxClientId = (s.XboxClientId ?? "").Trim();
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
@@ -467,30 +595,173 @@ public class UiBridge
     /// through another program's message loop.</summary>
     private const int MaxThumbnails = 16;
 
-    private void StartScan()
+    /// <summary>
+    /// <paramref name="force"/> re-asks Steam for the account's library even when the last answer
+    /// is recent, for a rescan the user asked for by hand. <paramref name="quiet"/> is the manifest
+    /// watcher's mode: no spinner, and the UI is only repainted when a game's installed state
+    /// actually changed, because a download rewrites its manifest every few seconds and a full
+    /// repaint each time would throw the highlight around under somebody browsing.
+    /// </summary>
+    private void StartScan(bool force = false, bool quiet = false)
     {
-        if (_scanning) return;
+        if (_scanning)
+        {
+            // A manifest that changed while a scan was already reading the folder may have been
+            // read before or after the change; asking again once this one is done settles it.
+            if (quiet) ScheduleQuietScan();
+            return;
+        }
         _scanning = true;
-        Push(new { type = "scanning", busy = true });
+        if (!quiet) Push(new { type = "scanning", busy = true });
+        var settings = _settings.Settings;
         Task.Run(async () =>
         {
+            var before = InstallSignature();
             try
             {
                 var found = _scanner.ScanAll();
+                // What the accounts own but the disk does not have. Each source is independent
+                // and each is optional; NotAlreadyFound keeps an installed game from appearing
+                // a second time as an owned one.
+                var owned = new List<Game>();
+                if (settings.SteamShowOwned)
+                    owned.AddRange(_scanner.OwnedSteamGames(await _steam.GetOwnedAsync(settings, force), found));
+                foreach (var account in _accounts.Values)
+                    if (account.Status.SignedIn)
+                        owned.AddRange(await account.GetOwnedAsync(force));
+                if (settings.GamePassCatalog)
+                    owned.AddRange(await _gamePass.GetAsync(force));
+                found.AddRange(LibraryScanner.NotAlreadyFound(found, owned));
                 _library.MergeScanned(found);
             }
+            catch (Exception ex) { Log.Info($"Scan failed: {ex.Message}"); }
             finally
             {
                 _scanning = false;
+                var changed = !quiet || InstallSignature() != before;
                 _ = _window.Dispatcher.BeginInvoke(() =>
                 {
-                    Push(new { type = "scanning", busy = false });
-                    PushState();
+                    if (!quiet) Push(new { type = "scanning", busy = false });
+                    if (changed) PushState();
                 });
             }
 
             await EnrichMetadata();
         });
+    }
+
+    /// <summary>Which games exist and which are on disk: the two things a manifest change can alter,
+    /// and the only two a quiet scan repaints for.</summary>
+    private string InstallSignature() =>
+        string.Join("\n", _library.Games.Select(g => g.Installed ? g.Id + "+" : g.Id)
+            .OrderBy(x => x, StringComparer.Ordinal));
+
+    /// <summary>
+    /// A Steam install started from here -- or from the Steam client, or from a phone -- shows up
+    /// as an appmanifest arriving and, some minutes later, its StateFlags gaining the "fully
+    /// installed" bit. Watching for that is what lets a tile turn from grey to playable while you
+    /// are looking at it rather than on the next start. Debounced, because a download rewrites
+    /// its manifest every few seconds; and the scan it triggers is the quiet kind.
+    /// </summary>
+    private void StartInstallWatcher()
+    {
+        _manifestTimer = new System.Threading.Timer(
+            _ => _window.Dispatcher.BeginInvoke(() => StartScan(quiet: true)),
+            null, Timeout.Infinite, Timeout.Infinite);
+
+        foreach (var root in LibraryScanner.SteamLibraryRoots())
+        {
+            try
+            {
+                var w = new FileSystemWatcher(root, "appmanifest_*.acf")
+                {
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    IncludeSubdirectories = false,
+                };
+                w.Created += (_, _) => ScheduleQuietScan();
+                w.Changed += (_, _) => ScheduleQuietScan();
+                w.Deleted += (_, _) => ScheduleQuietScan();
+                w.Renamed += (_, _) => ScheduleQuietScan();
+                w.Error += (_, e) => Log.Info($"Manifest watcher on {root}: {e.GetException().Message}");
+                w.EnableRaisingEvents = true;
+                _manifestWatchers.Add(w);
+            }
+            catch (Exception ex) { Log.Info($"Cannot watch {root} for installs: {ex.Message}"); }
+        }
+    }
+
+    private void ScheduleQuietScan() =>
+        _manifestTimer?.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+
+    /// <summary>The only things an Install may start. Each is a store's own registered scheme, and
+    /// each opens that store's client rather than running a file.</summary>
+    private static readonly string[] InstallSchemes =
+    {
+        "steam://install/", "com.epicgames.launcher://apps/", "goggalaxy://openGameView/", "ms-windows-store://pdp/",
+        // GOG without Galaxy: the game's own page on gog.com, where the installer is.
+        "https://www.gog.com/",
+    };
+
+    /// <summary>
+    /// The store's own sign-in page, in a window over the launcher. Always-on-top is dropped
+    /// around it the way it is around a file dialog, or the window would open behind the
+    /// launcher and look like nothing happened; and one sign-in at a time, because two windows
+    /// fighting over the foreground is not something a gamepad can sort out.
+    /// </summary>
+    private async Task SignInAsync(IStoreAccount account)
+    {
+        if (_signingIn) return;
+        _signingIn = true;
+        _window.BeginModalDialog();
+        var ok = false;
+        try { ok = await account.SignInAsync(_window); }
+        catch (Exception ex) { Log.Info($"{account.Store}: sign-in failed ({ex})"); }
+        finally
+        {
+            _window.EndModalDialog();
+            _signingIn = false;
+        }
+
+        PushState();
+        if (ok)
+        {
+            var who = account.Status.User is { Length: > 0 } u ? $" as {u}" : "";
+            Push(new { type = "toast", message = $"Signed in to {account.DisplayName}{who}" });
+            StartScan(force: true);
+        }
+        else
+        {
+            Push(new { type = "toast", message = account.Status.Error ?? $"{account.DisplayName} sign-in cancelled" });
+        }
+    }
+
+    /// <summary>
+    /// Only Steam writes a manifest the watcher can see. Epic, GOG and the Microsoft Store install
+    /// wherever the user pointed them, so after asking one of them to install, the library is
+    /// re-read once a minute until the game is on disk or three hours have passed -- quietly, so
+    /// the tile simply turns playable.
+    /// </summary>
+    private void BeginInstallPolling(string id)
+    {
+        _pendingInstall = id;
+        _pollUntil = DateTime.UtcNow.AddHours(3);
+        _installPoll ??= new System.Threading.Timer(
+            _ => _window.Dispatcher.BeginInvoke(PollInstall), null, Timeout.Infinite, Timeout.Infinite);
+        _installPoll.Change(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    private void PollInstall()
+    {
+        var done = _pendingInstall is null
+                   || DateTime.UtcNow > _pollUntil
+                   || _library.Find(_pendingInstall)?.Installed == true;
+        if (done)
+        {
+            _installPoll?.Change(Timeout.Infinite, Timeout.Infinite);
+            _pendingInstall = null;
+            return;
+        }
+        StartScan(quiet: true);
     }
 
     /// <summary>
@@ -679,7 +950,15 @@ public class UiBridge
             themes = _themes.List(),
             gameRunning = _launcher.GameRunning,
             runningGameId = _launcher.RunningGameId,
-            scanning = _scanning
+            scanning = _scanning,
+            steamAccount = _steam.Status,
+            stores = new
+            {
+                epic = _accounts["epic"].Status,
+                gog = _accounts["gog"].Status,
+                xbox = _accounts["xbox"].Status,
+                gamePass = _gamePass.Status,
+            }
         });
     }
 
