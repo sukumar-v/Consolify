@@ -793,6 +793,12 @@ function bannerUrl(g) { return artUrl(g.bannerFile) || coverUrl(g); }
 /* The wide backdrop. Falls the other way -- any art beats a flat colour behind the whole screen. */
 function heroUrl(g) { return artUrl(g.heroFile) || artUrl(g.bannerFile) || coverUrl(g); }
 
+/* What goes behind a whole screen. IGDB's artwork is 1920x1080, which is the shape of the screen
+   it is going on, so it fills one with nothing cropped and nothing scaled up -- the only source we
+   have that can. Steam publishes no usable 16:9 art at all, so its games fall back to the 3.1:1
+   hero, which is banded at its own aspect over a blurred bed of itself instead. */
+function backdropUrl(g) { return artUrl(g.backdropFile) || heroUrl(g); }
+
 function logoUrl(g) { return artUrl(g.logoFile); }
 
 function hashHue(str) {
@@ -1056,14 +1062,21 @@ function setBackdrop(game) {
     const h = hashHue(game.title);
     back.style.backgroundImage = `linear-gradient(150deg, hsl(${h},18%,16%), hsl(${(h + 40) % 360},22%,7%))`;
   };
-  const show = () => {
+  const wrap = document.getElementById("backdrop");
+  const show = (image) => {
+    // The bed is one shared layer rather than one per crossfade slot: it is blurred past
+    // recognition, so swapping it outright is invisible where crossfading two of them is just
+    // two more full-screen filters for the compositor to run.
+    if (image) wrap.style.setProperty("--bd-image", `url('${image}')`);
+    else wrap.style.removeProperty("--bd-image");
+    wrap.classList.toggle("has-art", !!image);
     back.classList.add("visible");
     front.classList.remove("visible");
     bdFront = backId;
   };
 
-  const url = game && heroUrl(game);
-  if (!url) { flat(); show(); return; }
+  const url = game && backdropUrl(game);
+  if (!url) { flat(); show(null); return; }
 
   // Loaded rather than assigned, because the shape of the picture decides the height of the
   // element a theme hangs it in -- see setArtAspect. Waiting for the image also means the old
@@ -1073,7 +1086,7 @@ function setBackdrop(game) {
     if (bdCurrentKey !== key) return;
     if (src) { back.style.backgroundImage = `url('${src}')`; setArtAspect(back, w, h); }
     else flat();
-    show();
+    show(src);
   });
 }
 
@@ -1133,6 +1146,7 @@ function gameView(g) {
     installed: g.installed, favorite: g.favorite, hidden: g.hidden,
     cover: coverUrl(g) || "", banner: bannerUrl(g) || "",
     hero: heroUrl(g) || "", logo: logoUrl(g) || "",
+    backdrop: backdropUrl(g) || "",
     playtimeMinutes: g.playtimeMinutes || 0, sizeBytes: g.sizeBytes || 0,
     playtime: fmtPlaytime(g.playtimeMinutes),
     lastPlayed: fmtLastPlayed(g.lastPlayed),
@@ -1149,6 +1163,7 @@ function gameView(g) {
     releaseDate: g.releaseDate || "",
     year: releaseYear(g.releaseDate) || "",
     score: typeof g.criticScore === "number" ? String(g.criticScore) : "",
+    pegi: typeof g.pegiRating === "number" ? String(g.pegiRating) : "",
   };
 }
 
@@ -1641,27 +1656,47 @@ function renderDetailStats(g) {
     `<div class="stat-value">${esc(s.value)}</div></div>`).join("");
 }
 
+/* PEGI's own bands: 3 and 7 green, 12 and 16 amber, 18 red. */
+function pegiBand(age) { return age >= 18 ? "red" : age >= 12 ? "amber" : "green"; }
+
 /*
- * The critic score, as a badge rather than as a coloured number in the middle of the facts line.
+ * What other people made of the game: the critic score, and the age it is rated for.
  *
- * A bare "82" next to the developer's name is a number with no unit: it could be a rank, a count
- * or a percentage. Given a panel, a scale and the name of whoever gave it, it reads at a glance
- * from across a room -- which is the whole job.
+ * Both are given a panel rather than a number in the middle of the facts line. A bare "82" next
+ * to the developer's name is a number with no unit -- it could be a rank, a count or a percentage
+ * -- and a bare "16" is worse, because it looks like one of those too. With a scale and the name
+ * of whoever said it, each reads at a glance from across a room, which is the whole job.
  *
- * The source is named rather than assumed. Steam's appdetails carries a genuine Metacritic score
- * and says so; IGDB's aggregated_rating is its own average of critics and is NOT Metacritic, so
- * labelling every score with Metacritic's name would be wrong about half the time.
+ * The score's source is named, never assumed. Steam's appdetails carries a genuine Metacritic
+ * score and says so; IGDB's aggregated_rating is its own average of critics and is NOT
+ * Metacritic, so printing Metacritic's name on every score would be wrong about half the time.
  */
-function renderDetailScore(g) {
-  const el = $("detailScore");
-  if (typeof g.criticScore !== "number") { el.hidden = true; el.innerHTML = ""; return; }
-  el.hidden = false;
-  el.dataset.band = scoreBand(g.criticScore);
-  const source = g.criticSource || "Critic score";
-  el.innerHTML =
-    `<div class="score-panel">${esc(String(g.criticScore))}</div>` +
-    `<div class="score-side"><div class="score-source mono">${esc(source.toUpperCase())}</div>` +
-    `<div class="score-scale mono">OUT OF 100</div></div>`;
+function renderDetailRatings(g) {
+  const el = $("detailRatings");
+  const parts = [];
+
+  if (typeof g.criticScore === "number") {
+    const source = g.criticSource || "Critic score";
+    parts.push(
+      `<div class="rating-score" data-band="${scoreBand(g.criticScore)}">` +
+      `<div class="score-panel">${esc(String(g.criticScore))}</div>` +
+      `<div class="rating-side"><div class="rating-name mono">${esc(source.toUpperCase())}</div>` +
+      `<div class="rating-sub mono">OUT OF 100</div></div></div>`);
+  }
+
+  if (typeof g.pegiRating === "number") {
+    const age = g.pegiRating;
+    parts.push(
+      `<div class="rating-pegi">` +
+      `<div class="pegi" data-band="${pegiBand(age)}" role="img" aria-label="PEGI ${age}">` +
+      `<div class="pegi-age">${esc(String(age))}</div><div class="pegi-word">PEGI</div></div>` +
+      `<div class="rating-side"><div class="rating-name mono">AGE RATING</div>` +
+      `<div class="rating-sub mono">${age} AND OVER</div></div></div>`);
+  }
+
+  // Empty rather than a row of "unrated" placeholders: most indies carry neither, and saying so
+  // twice on every one of them is what made this page read like a form.
+  el.innerHTML = parts.join("");
 }
 
 /*
@@ -1746,7 +1781,7 @@ function renderDetail() {
   }
 
   renderDetailFacts(g);
-  renderDetailScore(g);
+  renderDetailRatings(g);
   renderDetailPlatform(g);
   $("detailDesc").textContent = g.description || "";
   renderDetailStats(g);
@@ -1759,7 +1794,7 @@ function renderDetail() {
   art.style.background = "";
   // "cover" on purpose: the box is cut to this picture's own aspect (see --art-aspect and
   // .detail-art), so there is nothing left for cover to crop, and scenery must never letterbox.
-  applyArt(g, art, heroUrl(g), "cover");
+  applyArt(g, art, backdropUrl(g), "cover");
 
   document.querySelectorAll("#detailActions .pill-btn").forEach(el => {
     el.onmouseenter = () => { if (hoverEnabled()) { setFocusEl(el); paintNav(); } };
@@ -1814,7 +1849,7 @@ function allSettingsRows() {
 
   const rows = [];
   rows.push({ section: "APPEARANCE", cat: "general" });
-  const themes = S.themes && S.themes.length ? S.themes : [{ id: "", name: "Consolify (default)" }];
+  const themes = S.themes && S.themes.length ? S.themes : [{ id: "", name: "Classic" }];
   const theme = themes.find(t => t.id === (s.theme || "")) || themes[0];
   rows.push(cycleRow("Theme", themes.map(t => t.id), () => (s.theme || ""), v => set(() => s.theme = v),
     theme && theme.error ? null
@@ -2113,8 +2148,9 @@ const KEYBOARD_APP_LABELS = {
 
 /* ---- settings categories ----
    One screen of every setting had become unreadable. The rows are unchanged; they are just
-   filtered to the active category, and X cycles it. LB/RB are left alone because they already
-   move between Library, Collections and Settings -- reusing them here would trap you in Settings. */
+   filtered to the active category, reached with the sidebar. The shoulders are deliberately not
+   bound: they used to move between Library, Collections and Settings, and with one screen left
+   there is nothing for them to do -- so the legend does not offer them either. */
 const SETTINGS_TABS = [
   { id: "general",  label: "General" },
   { id: "input",    label: "Controller" },
@@ -2192,15 +2228,15 @@ function renderSettings() {
   // The legend changes with the pane: on the categories B leaves Settings, inside the options it
   // only steps back to the categories, and saying so is cheaper than letting people find out.
   const foot = $("settingsFoot");
+  // No LB/RB entry: there is one screen left, so the shoulders switch between nothing. A legend
+  // that names a button which does not respond is worse than a shorter legend.
   if (foot) foot.innerHTML = settingsPane === "nav"
     ? `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>` +
       `<div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>` +
-      `<div class="legend-item"><div class="dpad-badge mono">▴ ▾</div><span>Category</span></div>` +
-      `<div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Screen</span></div>`
+      `<div class="legend-item"><div class="dpad-badge mono">▴ ▾</div><span>Category</span></div>`
     : `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>` +
       `<div class="legend-item"><div class="btn-badge">B</div><span>Categories</span></div>` +
-      `<div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>` +
-      `<div class="legend-item"><div class="btn-pill mono">LB · RB</div><span>Screen</span></div>`;
+      `<div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>`;
   const rows = settingsRows();
   const scroll = $("settingsScroll");
   scroll.innerHTML = "";

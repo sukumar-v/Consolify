@@ -116,7 +116,7 @@ Stop the scrolled grid from clipping through the All games header
   or picking rules change, or the old answers are served for another 30 days.
 - Tile art is never cover-cropped. It has the game's name burnt into it, close to the
   edges: a 2.14:1 header.jpg in a 16:9 box lost 18% of its width and REANIMAL lost the
-  end of its own name. Marquee's tile is cut to 1.75:1 (Steam's capsule exactly) and uses
+  end of its own name. Polish's tile is cut to 1.75:1 (Steam's capsule exactly) and uses
   `contain`; the default theme decides per image in `artFit`, and only for landscape
   boxes — portrait box art is drawn to be cropped and still is.
 - The hero is fetched at 2x (`library_hero_2x.jpg`, 3840x1240) where it exists. `.bd` is
@@ -143,7 +143,7 @@ Stop the scrolled grid from clipping through the All games header
 
 - A bundled theme is installed once and then kept up to date by the `version` in its theme.json
   (`ThemeService.SyncBuiltIn`). It used to skip any folder that already existed, which froze a
-  bundled theme at whatever shipped the day it was first installed -- every later fix to Marquee
+  bundled theme at whatever shipped the day it was first installed -- every later fix to Polish
   landed in the app and was never seen, because the copy being loaded was the old one in
   %APPDATA%. Bump the version whenever a bundled theme changes or nobody gets the change. The
   folder is copied to `theme-backups` first, so an edited theme is recoverable rather than gone.
@@ -203,33 +203,52 @@ Stop the scrolled grid from clipping through the All games header
   handles on every list) and falls back to the window's icon, flagged as `IsIcon` so the UI
   draws it inside the box rather than cover-cropping a 32px square into a smear. Alt+Tab shows
   a real picture because DWM keeps the last composed frame; there is no public way to read that.
-- Rounded corners clip whatever is under them. At tile size a 16px radius reaches ~36 pixels into
-  the source, enough to take the tip off a logo that runs to the edge, so tile art is inset clear
-  of the arc: Marquee's `.tv-img` by 6px, the default theme's landscape tiles with `padding` plus
-  `background-origin: content-box`. The placeholder still fills the tile because
-  `paintPlaceholder` sets the `background` shorthand, which resets `background-origin`.
+- Tile art is flush to the tile; only the corners are rounded. Insetting it to keep its corners
+  clear of the radius did stop the clipping and left a surface-coloured mat round every tile, so
+  each read as a picture pasted onto a rounded card. A radius only ever takes the four corners --
+  the sides were being lost to a crop, and the fix for that is the box being the shape of the
+  picture, not a border around it.
 - `applyArt` takes an optional `fit`. Scenery must always `cover` — a full-bleed backdrop has no
   edges of its own to protect, and `artFit` letterboxed the detail page's 3:1 hero inside its
   16:9 box, which is where the black bars came from. Only tiles are worth fitting.
 - Full-width art is cut to the art, not to a number. `applyArt` measures what loaded and writes
-  `--art-aspect` on the element; the detail hero and Marquee's backdrop are `aspect-ratio:
+  `--art-aspect` on the element; the detail hero and Polish's backdrop are `aspect-ratio:
   var(--art-aspect, 3.1)` with `max-height: 100%`. A fixed height only ever suited one source:
   62% of a 16:9 stage is 2.87:1, so Steam's 3.1:1 hero lost the sides and IGDB's 16:9 artwork lost
-  42% of its height. Steam has no good 16:9 backdrop to swap in either -- `page_bg_generated_v6b`
-  is 16:9 but 28-63 KB of auto-generated blur.
+  42% of its height.
+- The rest of the screen is the same picture, blurred and scaled past the edges --
+  `#backdrop::before`, fed by `--bd-image`, which `setBackdrop` writes alongside the art. It is
+  the trick tvOS and Plex both use, and it is the only way to have the art fill a screen and stay
+  sharp: a 3.1:1 hero stretched over 16:9 shows the middle 57% of itself and nothing else. The
+  bed is blurred, so its resolution never matters. Polish's bottom scrim had to come off full
+  opacity to let it through -- it was written when there was nothing behind it to show.
+- `BackdropFile` is 16:9 key art and is what `backdropUrl` prefers for anything filling a whole
+  screen, falling back to the 3.1:1 hero. Only IGDB publishes art of that shape; Steam's
+  `page_bg_generated_v6b` is 16:9 but 28-63 KB of auto-generated blur. IGDB's artwork used to be
+  written into the Hero slot, which is what made a backdrop's shape unpredictable -- the same slot
+  held 3.1:1 for Steam games and 16:9 for everything else.
 - `artFit` must measure the CONTENT box, not `clientWidth/clientHeight`. `background-origin:
   content-box` -- what holds tile art clear of the rounded corners -- makes `cover` size against
   the content box, so measuring the padding box read the continue row as 1.79:1 when it was 1.86:1;
   a 1.75:1 capsule then looked like a perfect fit and lost a strip off each side. That was the
   "the sides are cut off, not just the corners" report, and rounding was not the cause of it.
-- Every landscape box is cut to 1.75:1 at the content box, which is Steam's capsule exactly:
-  `.cont-art` 300x176 less 5px padding, `.playing-art` 360 wide against the card's 210, Marquee's
-  tile 270x160 less its 6px inset. The grid tile is 174x261, which is 2:3 -- box art's own shape --
-  and nine of them plus eight 24px gaps is the same 1760 run eight 199px ones made. `GRID_COLS`
-  and `.grid-item` have to move together.
+- Every landscape box is 1.75:1, which is Steam's capsule exactly: `.cont-art` 300x172,
+  `.playing-art` 366 wide against the card's 210, Polish's tile `--tile-w / 1.745`. The grid tile
+  is 174x261, which is 2:3 -- box art's own shape -- and nine of them plus eight 24px gaps is the
+  same 1760 run eight 199px ones made. `GRID_COLS` and `.grid-item` have to move together.
 - The critic score is labelled with `criticSource`, never with "Metacritic" by default. Steam's
   appdetails carries a real Metacritic score and says so; IGDB's `aggregated_rating` is its own
   average and is not Metacritic, so a fixed label would be wrong about half the time.
+- The score and the PEGI age sit together above the stats hairline, each a panel with a caption.
+  A bare "82" is a number with no unit -- it could be a rank or a percentage -- and a bare "16"
+  reads like one too.
+- IGDB moved age ratings from numeric enums (`category`/`rating`) to references
+  (`organization`/`rating_category`), and APIcalypse fails the WHOLE query with a 400 for one
+  unknown field -- so guessing wrong costs the description and the score as well as the rating.
+  Both the worker and `IgdbClient` try the shapes in order, step down only on a 400, and remember
+  what worked. The last shape asks for no age fields at all, so there is always a query that runs.
+- A game carries ratings from several boards at once and their enums overlap: ESRB's rating 4 and
+  PEGI's rating 4 are different things. Identify the board before reading the number.
 - Only an ISO release date is reformatted, and its three numbers are read out of the string rather
   than through `Date`. Parsing "2024-02-02T00:00:00Z" reads UTC and printing reads back local, so
   west of Greenwich every release came out a day early. Steam's own "2 Feb, 2024", "Q1 2024" and

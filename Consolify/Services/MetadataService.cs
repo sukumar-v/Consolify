@@ -50,7 +50,7 @@ public class MetadataService
     }
 
     /// <summary>Which picture a file is, independent of what it ends up called on disk.</summary>
-    private enum Slot { Cover, Tile, Hero, Logo }
+    private enum Slot { Cover, Tile, Hero, Backdrop, Logo }
 
     /// <summary>
     /// Steam serves these straight off its CDN, unauthenticated, for any app id. The sizes are the
@@ -363,6 +363,7 @@ public class MetadataService
                 if (hit.Genres.Count > 0) g.Genres = hit.Genres;
                 g.ReleaseDate = hit.Released?.ToString("MMM d, yyyy");
                 g.CriticScore = hit.CriticScore;
+                g.PegiRating = hit.PegiRating;
                 // Named for what it is. IGDB aggregates external reviews itself, so calling this
                 // Metacritic would put one publication's name on another's number.
                 g.CriticSource = hit.CriticScore is null ? null : "IGDB critics";
@@ -370,14 +371,20 @@ public class MetadataService
                 any = true;
                 gotFacts = true;
 
-                // IGDB's art is the weakest of the three: its covers are portrait box art and its
-                // artworks are wide key art, neither shaped like a tile. Written first so
-                // SteamGridDB below, and Steam after that, can both improve on it.
+                // IGDB's covers are portrait box art and are the weakest of the three, so they go
+                // in first and SteamGridDB below -- then Steam after that -- can improve on them.
                 if (hit.CoverUrl is { } cover) any |= await StoreRemoteAsync(g, Slot.Cover, cover, filled, ct);
                 if (hit.ArtworkUrl is { } wide)
                 {
+                    // 1920x1080, and the only art of that shape anything gives us. That makes it
+                    // the one picture that can fill a screen without being cropped or banded, so
+                    // it gets a slot of its own rather than being squeezed into the 3.1:1 hero --
+                    // which is what made a backdrop's shape unpredictable in the first place.
+                    any |= await StoreRemoteAsync(g, Slot.Backdrop, wide, filled, ct);
+                    // Still offered as the tile of last resort: a wide picture cropped to a tile
+                    // beats a portrait cover letterboxed into one, and both SteamGridDB and Steam
+                    // overwrite this if they have anything better shaped.
                     any |= await StoreRemoteAsync(g, Slot.Tile, wide, filled, ct);
-                    any |= await StoreRemoteAsync(g, Slot.Hero, wide, filled, ct);
                 }
             }
         }
@@ -420,6 +427,7 @@ public class MetadataService
     {
         Slot.Tile => "_hdtile" + extension,
         Slot.Hero => "_hdhero" + extension,
+        Slot.Backdrop => "_hdbg" + extension,
         Slot.Logo => "_hdlogo" + extension,
         _ => "_hd" + extension,
     };
@@ -445,6 +453,7 @@ public class MetadataService
                 g.CoverFile = name; return true;
             case Slot.Tile when g.BannerFile != name: g.BannerFile = name; return true;
             case Slot.Hero when g.HeroFile != name: g.HeroFile = name; return true;
+            case Slot.Backdrop when g.BackdropFile != name: g.BackdropFile = name; return true;
             case Slot.Logo when g.LogoFile != name: g.LogoFile = name; return true;
             default: return false;
         }

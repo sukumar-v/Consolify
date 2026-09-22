@@ -62,7 +62,7 @@ public class ThemeService : IDisposable
     {
         var list = new List<ThemeInfo>
         {
-            new() { Id = "", Name = "Consolify (default)" },
+            new() { Id = "", Name = "Classic" },
         };
 
         try
@@ -131,6 +131,15 @@ public class ThemeService : IDisposable
     /// so a theme someone has been editing is recoverable rather than gone. Delete a folder to get
     /// the shipped version back cleanly.
     /// </summary>
+    /// <summary>
+    /// Bundled themes that have been renamed, old id to new. The installed copy of the old one is
+    /// moved out of the themes folder on the next start, or it would sit there forever as a second
+    /// theme with the same layout and an old bug list -- and settings.json is rewritten to point at
+    /// the new id, so a user on the old one simply keeps their theme under its new name.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> Renamed =
+        new Dictionary<string, string> { ["marquee"] = "polish" };
+
     public static void SyncBuiltIn()
     {
         try
@@ -138,6 +147,17 @@ public class ThemeService : IDisposable
             var src = Path.Combine(AppContext.BaseDirectory, "themes");
             if (!Directory.Exists(src)) return;
             Directory.CreateDirectory(Paths.ThemesDir);
+
+            foreach (var (oldId, newId) in Renamed)
+            {
+                var stale = Path.Combine(Paths.ThemesDir, oldId);
+                if (!Directory.Exists(stale)) continue;
+                var moved = BackUp(stale, oldId, VersionOf(stale));
+                try { Directory.Delete(stale, recursive: true); }
+                catch (Exception ex) { Log.Info($"Could not remove the retired theme '{oldId}': {ex.Message}"); }
+                Log.Info($"Retired the bundled theme '{oldId}', now '{newId}'"
+                         + (moved is null ? "" : $"; the old copy is in {moved}"));
+            }
 
             foreach (var dir in Directory.GetDirectories(src))
             {

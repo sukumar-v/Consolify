@@ -1,5 +1,5 @@
 /* ============================================================================
-   Marquee — a tvOS-shaped library
+   Polish — a tvOS-shaped library
    ============================================================================
 
    THE IDEA. The library has two states and slides between them:
@@ -24,8 +24,8 @@
    pixels and they are allowed to add up:
 
      chrome  96 + view 912 + legend 72                        = 1080
-     hero 640 + dock 236 + peek 36                            =  912
-     dock 236 + shelf 676                                     =  912
+     hero 640 + dock 232 + peek 40                            =  912
+     dock 232 + shelf 680                                     =  912
 
    Only --view-h, --dock-h and --peek are set; the hero is what is left over. That
    is what lets "Hide the button hints" work as one line: the view grows by the
@@ -36,15 +36,14 @@
 
 .tv {
   --tile-w: 270px;
-  /* Sized so the INSET box is 1.75:1 -- Steam capsule_616x353 exactly, rather than a rounded
-     16:9. The art sits 6px in to clear the rounded corners, so the shape that has to match is
-     270-12 by 160-12, which is 258x148. Cut to the dominant asset like this, most tiles fill
-     their box edge to edge with nothing trimmed and no mat showing. */
-  --art-h: 160px;
+  /* 1.75:1, which is Steam capsule_616x353 exactly rather than a rounded 16:9. Written as the
+     division so the two can never drift apart: the whole point is that the box is the shape of
+     the picture, so the picture fills it corner to corner with nothing trimmed and no mat. */
+  --art-h: calc(var(--tile-w) / 1.745);
   --name-h: 26px;
   --gap: 28px;
-  --dock-h: 236px;    /* 22 + 160 art + 6 + 26 name + 22 */
-  --peek: 36px;       /* how much of the grid shows under the dock at rest */
+  --dock-h: 232px;    /* 22 + 155 art + 6 + 26 name + 22, rounded up */
+  --peek: 40px;       /* how much of the grid shows under the dock at rest */
   --view-h: 912px;    /* 1080 less the chrome and the legend */
   --hero-h: calc(var(--view-h) - var(--dock-h) - var(--peek));
   --gutter: 80px;
@@ -81,6 +80,25 @@ body.no-legend .tv-foot { display: none; }
    3.1:1 hero, so IGDB's 16:9 artwork lost 42% of its height to the same mistake
    from the other direction. 3.1 is the fallback because most of these are Steam's. */
 
+/* The screen is filled with the art twice over: once blurred and scaled past the edges, which
+   is the bed, and once sharp at its own aspect on top. It is the trick tvOS and Plex both use,
+   and it is the only way to have both -- a 3.1:1 hero stretched to cover a 16:9 screen shows the
+   middle 57% of it and nothing else, which is what "zoomed in" was. The bed is blurred, so its
+   resolution does not matter; the part you actually look at is never scaled up.
+
+   --bd-image is written by setBackdrop alongside the art itself. */
+body:has(#screen-library.active) #backdrop::before {
+  content: "";
+  position: absolute; inset: -8%;
+  background-image: var(--bd-image, none);
+  background-size: cover; background-position: center;
+  filter: blur(64px) saturate(1.5) brightness(0.62);
+  opacity: 0; transition: opacity 320ms linear;
+}
+body:has(#screen-library.active) #backdrop.has-art::before { opacity: 1; }
+/* Browsing, the bed is all that is left of the art, so it comes up as the sharp layer goes. */
+body:has(#screen-library.active[data-focus-region="grid"]) #backdrop.has-art::before { opacity: 0.85; }
+
 body:has(#screen-library.active) .bd {
   top: 0; left: 0; right: 0; bottom: auto;
   height: auto;
@@ -112,10 +130,13 @@ body:has(#screen-library.active) #backdrop::after {
   content: "";
   position: absolute; inset: 0; pointer-events: none;
   transition: background 380ms var(--ease);
+  /* The bottom used to go fully opaque, because there was nothing behind it. There is now --
+     the blurred bed reaches the whole screen -- so it only has to carry the dock and the title,
+     not hide an empty half. */
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 68%, transparent) 0, transparent 20%),
-    linear-gradient(0deg, var(--bg) 0, color-mix(in srgb, var(--bg) 78%, transparent) 26%, transparent 58%),
-    linear-gradient(90deg, color-mix(in srgb, var(--bg) 70%, transparent) 0, transparent 44%);
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 62%, transparent) 0, transparent 20%),
+    linear-gradient(0deg, color-mix(in srgb, var(--bg) 84%, transparent) 0, color-mix(in srgb, var(--bg) 52%, transparent) 30%, transparent 62%),
+    linear-gradient(90deg, color-mix(in srgb, var(--bg) 66%, transparent) 0, transparent 44%);
 }
 body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   background: linear-gradient(180deg,
@@ -305,13 +326,12 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
    of its own name. Those now sit in the box whole, with a little of the tile showing above and
    below, which is the cheaper of the two prices. */
 .tv-img {
-  /* Inset, not flush.
-     A rounded corner clips whatever sits under it, and at this size a 16px radius reaches about
-     36 pixels into the source image -- enough to take the tip off a logo that runs to the edge.
-     Sitting the art 6px in puts its corners inside the arc: the corner of the box is 16px from
-     the centre of the radius, and a point 6px in is 14.1px from it, so nothing is cut. What is
-     left is a thin surface-coloured mat, which reads as a frame rather than as damage. */
-  position: absolute; inset: 6px;
+  /* Flush. An earlier version sat the art 6px in to keep its corners clear of the radius, which
+     did stop the clipping -- and left a surface-coloured mat round every tile, so each one read
+     as a picture pasted onto a rounded card rather than as a tile. Rounding only ever takes the
+     four corners, which is what a corner radius is for; the sides were being lost to a crop, and
+     that is fixed by the box above being the shape of the picture. */
+  position: absolute; inset: 0;
   background-size: contain; background-position: center; background-repeat: no-repeat;
 }
 .tv-initials {

@@ -1,8 +1,8 @@
 {
-  "name": "Marquee",
+  "name": "Polish",
   "author": "Consolify",
-  "version": "2.1",
-  "description": "tvOS-shaped: full-bleed art, recents on a dock, grid on the way down",
+  "version": "3.0",
+  "description": "Full-bleed art, recents on a dock, the grid on the way down",
   "tokens": {
     "--bg": "#05070B",
     "--bg-deep": "#010204",

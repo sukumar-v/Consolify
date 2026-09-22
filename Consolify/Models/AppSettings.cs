@@ -9,9 +9,9 @@ public class AppSettings
     /// </summary>
     public string AccentColor { get; set; } = "#F0A253";
     /// <summary>Folder name under %APPDATA%\Consolify\themes, or "" for the built-in look.
-    /// A theme that has been deleted falls back to the default rather than failing. Marquee ships
-    /// with the app, so a fresh install opens on it rather than on the plain built-in look.</summary>
-    public string Theme { get; set; } = "marquee";
+    /// A theme that has been deleted falls back to the built-in look rather than failing. Polish
+    /// ships with the app, so a fresh install opens on it rather than on Classic.</summary>
+    public string Theme { get; set; } = "polish";
     /// <summary>Hide the button-hint bar along the bottom of every screen. Off by default: it is
     /// the only thing telling a new player what A and Y do, so it is opt-out, not opt-in.</summary>
     public bool HideLegend { get; set; }

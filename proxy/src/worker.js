@@ -24,7 +24,7 @@
 const CACHE_TTL = 60 * 60 * 24 * 30;   // 30 days. Game facts do not change; art rarely does.
 const MISS_TTL = 60 * 60 * 24 * 3;     // Remember "no match" too, but re-check sooner: a game may
                                        // be added to a database after we first ask for it.
-const SCHEMA = "v3";                   // bump when a fetcher changes shape or its picking
+const SCHEMA = "v4";                   // bump when a fetcher changes shape or its picking
                                        // rules; it is part of every cache key, so stale answers retire
 const RATE_LIMIT = 240;                // requests per IP per window
 const RATE_WINDOW = 60;                // seconds
@@ -112,11 +112,33 @@ function normalise(title) {
 
 /* ------------------------------------------------------------------- IGDB */
 
-const IGDB_FIELDS =
-  "fields name, summary, first_release_date, aggregated_rating, category, " +
+const BASE_FIELDS =
+  "name, summary, first_release_date, aggregated_rating, category, " +
   "follows, total_rating_count, version_parent, " +
   "genres.name, cover.image_id, artworks.image_id, " +
-  "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; ";
+  "involved_companies.developer, involved_companies.publisher, involved_companies.company.name";
+
+/*
+ * Age ratings, in the shapes IGDB has used, newest first.
+ *
+ * They moved this from a pair of numeric enums (category/rating) to references
+ * (organization/rating_category), and a shipped worker cannot know which is live -- APIcalypse
+ * fails the WHOLE query with a 400 for one unknown field, so guessing wrong would cost every
+ * game's description and score, not just its rating. So the shapes are tried in order, a 400
+ * steps down to the next, and the one that worked is remembered for the life of the isolate.
+ * The last entry asks for no age fields at all and therefore always works.
+ *
+ * The modern shape is asked for by name rather than by id: "PEGI" and "Sixteen" survive IGDB
+ * renumbering its enums, where a 2 and a 4 do not.
+ */
+const AGE_SHAPES = [
+  ", age_ratings.organization.name, age_ratings.rating_category.rating",
+  ", age_ratings.category, age_ratings.rating",
+  "",
+];
+let ageShape = 0;
+
+const fieldsFor = (i) => `fields ${BASE_FIELDS}${AGE_SHAPES[i]}; `;
 
 async function igdbFacts(env, title, appid) {
   const token = await igdbToken(env);
@@ -126,16 +148,15 @@ async function igdbFacts(env, title, appid) {
   // Steam, so this is an exact lookup with no title involved -- the same guarantee the launcher
   // gets from Steam itself, which is what makes it safe to ask this service first.
   if (appid) {
-    const byId = await igdbQuery(env, token,
-      `where external_games.category = 1 & external_games.uid = "${appid}"; ${IGDB_FIELDS} limit 5;`);
+    const byId = await igdbGames(env, token,
+      `where external_games.category = 1 & external_games.uid = "${appid}";`, 5);
     const main = (byId || []).filter(g => g.version_parent === undefined);
     if (main.length) return shape(main.sort(popularityFirst)[0]);
   }
 
   if (!title) return null;
 
-  const all = await igdbQuery(env, token,
-    `search "${title.replace(/"/g, " ")}"; ${IGDB_FIELDS} limit 20;`);
+  const all = await igdbGames(env, token, `search "${title.replace(/"/g, " ")}";`, 20);
   if (!all) return null;
 
   // category 0 is a main game. The rest are DLC, bundles, ports and episodes, which share their
@@ -147,8 +168,30 @@ async function igdbFacts(env, title, appid) {
   return hit ? shape(hit) : null;
 }
 
+/**
+ * One /games query, retried down the age-rating shapes when IGDB rejects a field name.
+ *
+ * Only a 400 steps down: that is the code for "I do not know that field", and it is the only
+ * failure another shape can fix. Anything else is a real upstream problem and is thrown, so it
+ * shows up as a 502 rather than being quietly downgraded into a game with no rating.
+ */
+async function igdbGames(env, token, clause, limit) {
+  for (let i = ageShape; i < AGE_SHAPES.length; i++) {
+    const res = await igdbQuery(env, token, `${clause} ${fieldsFor(i)} limit ${limit};`);
+    if (res.ok) {
+      if (i !== ageShape) {
+        console.log(`igdb: age-rating fields fell back to shape ${i}`);
+        ageShape = i;
+      }
+      return res.json();
+    }
+    if (res.status !== 400) throw new Error(`igdb ${res.status}`);
+  }
+  throw new Error("igdb 400");
+}
+
 async function igdbQuery(env, token, body) {
-  const res = await fetch("https://api.igdb.com/v4/games", {
+  return fetch("https://api.igdb.com/v4/games", {
     method: "POST",
     headers: {
       "Client-ID": env.IGDB_CLIENT_ID,
@@ -157,8 +200,6 @@ async function igdbQuery(env, token, body) {
     },
     body,
   });
-  if (!res.ok) throw new Error(`igdb ${res.status}`);
-  return res.json();
 }
 
 function shape(hit) {
@@ -179,10 +220,39 @@ function shape(hit) {
       : null,
     criticScore: typeof hit.aggregated_rating === "number"
       ? Math.round(hit.aggregated_rating) : null,
+    pegi: pegiOf(hit),
     cover: hit.cover && hit.cover.image_id ? igdbImage(hit.cover.image_id, "cover_big_2x") : null,
     artwork: hit.artworks && hit.artworks.length && hit.artworks[0].image_id
       ? igdbImage(hit.artworks[0].image_id, "1080p") : null,
   };
+}
+
+/*
+ * The PEGI age, 3/7/12/16/18, or null. A game can carry a rating from half a dozen boards -- ESRB,
+ * CERO, USK, ACB -- so the board has to be identified before the number means anything; an ESRB
+ * "M" and a PEGI "16" sit in the same list.
+ *
+ * Both field shapes are read, because which one arrived depends on which AGE_SHAPES variant IGDB
+ * accepted. The legacy enums are the documented v4 ones: category 2 is PEGI, and ratings 1 to 5
+ * are Three, Seven, Twelve, Sixteen and Eighteen in order.
+ */
+const PEGI_NAMES = { three: 3, seven: 7, twelve: 12, sixteen: 16, eighteen: 18 };
+const PEGI_LEGACY = { 1: 3, 2: 7, 3: 12, 4: 16, 5: 18 };
+
+function pegiOf(hit) {
+  for (const r of hit.age_ratings || []) {
+    const org = r.organization && r.organization.name;
+    if (org) {
+      if (!/pegi/i.test(org)) continue;
+      const name = r.rating_category && r.rating_category.rating;
+      const age = PEGI_NAMES[String(name || "").toLowerCase()];
+      if (age) return age;
+    } else if (r.category === 2) {
+      const age = PEGI_LEGACY[r.rating];
+      if (age) return age;
+    }
+  }
+  return null;
 }
 
 const igdbImage = (id, size) => `https://images.igdb.com/igdb/image/upload/t_${size}/${id}.jpg`;

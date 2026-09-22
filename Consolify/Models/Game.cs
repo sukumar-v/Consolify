@@ -15,6 +15,10 @@ public class Game
     /// subject off-centre with empty space either side, so centre-cropping one into a tile shows a
     /// slice of background rather than the game.</summary>
     public string? HeroFile { get; set; }
+    /// <summary>16:9 key art, for anything that fills a whole screen. The hero is 3.1:1 and a
+    /// screen is not, so one of the two has to be cropped or banded; this is the one that
+    /// needs neither. Only IGDB publishes art of this shape.</summary>
+    public string? BackdropFile { get; set; }
     /// <summary>Transparent wordmark, for a theme that wants the title as art rather than text.</summary>
     public string? LogoFile { get; set; }
     public long SizeBytes { get; set; }
@@ -46,6 +50,9 @@ public class Game
     /// <summary>Where the score came from, so the UI can attribute it rather than implying we
     /// computed it.</summary>
     public string? CriticSource { get; set; }
+    /// <summary>PEGI age, one of 3, 7, 12, 16, 18, or null. Only IGDB carries this -- Steam's own
+    /// ratings block is per-storefront-region and is missing more often than not.</summary>
+    public int? PegiRating { get; set; }
     /// <summary>"full", "partial" or null. Worth surfacing in a couch launcher above almost
     /// anything else: it answers "can I actually play this from the sofa".</summary>
     public string? ControllerSupport { get; set; }

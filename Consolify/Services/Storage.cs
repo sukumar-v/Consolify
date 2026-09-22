@@ -136,6 +136,16 @@ public class SettingsStore
             // put anything but a hex colour there. Checked on the way in as well as on save,
             // because a file edited by hand never passes through the save path at all.
             if (!IsHexColor(Settings.AccentColor)) Settings.AccentColor = new AppSettings().AccentColor;
+
+            // A bundled theme that has been renamed keeps the user on it. Without this the id in
+            // settings.json matches nothing, and someone who chose a theme is silently moved back
+            // to the built-in look for no reason they can see.
+            if (Settings.Theme is { Length: > 0 } theme
+                && ThemeService.Renamed.TryGetValue(theme, out var renamed))
+            {
+                Settings.Theme = renamed;
+                Log.Info($"Theme '{theme}' is now '{renamed}'");
+            }
         }
         catch (Exception ex)
         {

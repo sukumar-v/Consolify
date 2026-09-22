@@ -16,6 +16,8 @@ public class IgdbGame
     /// <summary>IGDB's aggregate of external critic scores, 0-100. Not Metacritic, and must not
     /// be labelled as such.</summary>
     public int? CriticScore { get; init; }
+    /// <summary>PEGI age -- 3, 7, 12, 16 or 18 -- or null when the game carries no PEGI rating.</summary>
+    public int? PegiRating { get; init; }
     /// <summary>Finished URLs rather than IGDB image ids, so a proxy that has already resolved
     /// them and a direct call can hand back the same object.</summary>
     public string? CoverUrl { get; init; }
@@ -83,31 +85,9 @@ public class IgdbClient : IFactsProvider
         // APIcalypse. The quotes around the search term are part of the syntax, so a title
         // containing one has to lose it or the whole query is rejected.
         var term = title.Replace("\"", " ").Trim();
-        var body =
-            $"search \"{term}\"; " +
-            "fields name, summary, first_release_date, aggregated_rating, category, " +
-            "follows, total_rating_count, version_parent, " +
-            "genres.name, cover.image_id, artworks.image_id, " +
-            "involved_companies.developer, involved_companies.publisher, involved_companies.company.name; " +
-            "limit 20;";
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.igdb.com/v4/games")
-        {
-            Content = new StringContent(body, Encoding.UTF8, "text/plain")
-        };
-        req.Headers.Add("Client-ID", _clientId);
-        req.Headers.Add("Authorization", $"Bearer {_token}");
-
-        await ThrottleAsync(ct);
-        using var res = await _http.SendAsync(req, ct);
-        if (!res.IsSuccessStatusCode)
-        {
-            Log.Info($"IGDB: search for '{title}' returned {(int)res.StatusCode}");
-            return null;
-        }
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
-        if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+        using var doc = await SearchAsync(term, title, ct);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array) return null;
 
         // category 0 is a main game; the rest are DLC, bundles, episodes and ports, which share
         // their parent's title and would otherwise win the match on a coin toss. version_parent
@@ -132,6 +112,105 @@ public class IgdbClient : IFactsProvider
         }
 
         return Parse(hit);
+    }
+
+    private const string BaseFields =
+        "name, summary, first_release_date, aggregated_rating, category, " +
+        "follows, total_rating_count, version_parent, " +
+        "genres.name, cover.image_id, artworks.image_id, " +
+        "involved_companies.developer, involved_companies.publisher, involved_companies.company.name";
+
+    /// <summary>
+    /// Age-rating fields, in the shapes IGDB has used, newest first.
+    ///
+    /// IGDB moved these from numeric enums (category/rating) to references
+    /// (organization/rating_category), and APIcalypse fails the WHOLE query with a 400 for one
+    /// unknown field -- so guessing wrong would cost the description and the score too, not just
+    /// the rating. The shapes are tried in order, a 400 steps down, and the one that worked is
+    /// kept for the life of this client. The last asks for no age fields and always works.
+    /// </summary>
+    private static readonly string[] AgeShapes =
+    {
+        ", age_ratings.organization.name, age_ratings.rating_category.rating",
+        ", age_ratings.category, age_ratings.rating",
+        "",
+    };
+    private static int _ageShape;
+
+    /// <summary>One search, retried down the age-rating shapes when IGDB rejects a field name.</summary>
+    private async Task<JsonDocument?> SearchAsync(string term, string title, CancellationToken ct)
+    {
+        for (var i = _ageShape; i < AgeShapes.Length; i++)
+        {
+            var body = $"search \"{term}\"; fields {BaseFields}{AgeShapes[i]}; limit 20;";
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.igdb.com/v4/games")
+            {
+                Content = new StringContent(body, Encoding.UTF8, "text/plain")
+            };
+            req.Headers.Add("Client-ID", _clientId);
+            req.Headers.Add("Authorization", $"Bearer {_token}");
+
+            await ThrottleAsync(ct);
+            using var res = await _http.SendAsync(req, ct);
+            if (res.IsSuccessStatusCode)
+            {
+                if (i != _ageShape)
+                {
+                    Log.Info($"IGDB: age-rating fields fell back to shape {i}");
+                    _ageShape = i;
+                }
+                return JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
+            }
+
+            // 400 is "I do not know that field", the one failure another shape can fix.
+            if (res.StatusCode != System.Net.HttpStatusCode.BadRequest)
+            {
+                Log.Info($"IGDB: search for '{title}' returned {(int)res.StatusCode}");
+                return null;
+            }
+        }
+        Log.Info($"IGDB: search for '{title}' was rejected in every field shape");
+        return null;
+    }
+
+    /// <summary>
+    /// The PEGI age -- 3, 7, 12, 16 or 18 -- or null. A game can carry ratings from half a dozen
+    /// boards, so the board has to be identified before the number means anything: an ESRB "M" and
+    /// a PEGI "16" sit in the same list, and their enums overlap.
+    /// </summary>
+    private static int? Pegi(JsonElement e)
+    {
+        if (!e.TryGetProperty("age_ratings", out var ratings) || ratings.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var r in ratings.EnumerateArray())
+        {
+            // Modern: named, so it survives IGDB renumbering its enums.
+            var org = r.TryGetProperty("organization", out var o) && o.TryGetProperty("name", out var on)
+                ? on.GetString() : null;
+            if (org is not null)
+            {
+                if (!org.Contains("PEGI", StringComparison.OrdinalIgnoreCase)) continue;
+                var name = r.TryGetProperty("rating_category", out var rc) && rc.TryGetProperty("rating", out var rn)
+                    ? rn.GetString() : null;
+                var age = name?.ToLowerInvariant() switch
+                {
+                    "three" => 3, "seven" => 7, "twelve" => 12, "sixteen" => 16, "eighteen" => 18,
+                    _ => (int?)null,
+                };
+                if (age is not null) return age;
+            }
+            // Legacy: category 2 is PEGI, and ratings 1..5 are Three, Seven, Twelve, Sixteen, Eighteen.
+            else if (JsonNum.Int(r, "category") == 2)
+            {
+                var age = JsonNum.Int(r, "rating") switch
+                {
+                    1 => 3, 2 => 7, 3 => 12, 4 => 16, 5 => 18, _ => (int?)null,
+                };
+                if (age is not null) return age;
+            }
+        }
+        return null;
     }
 
     /// <summary>How well known an entry is, used only to break an exact-title tie. Follows are the
@@ -196,6 +275,7 @@ public class IgdbClient : IFactsProvider
             Genres = genres,
             Released = released,
             CriticScore = score,
+            PegiRating = Pegi(e),
             CoverUrl = Image("cover") is { } c ? ImageUrl(c, "cover_big_2x") : null,
             ArtworkUrl = firstArtwork is { } a ? ImageUrl(a, "1080p") : null,
         };

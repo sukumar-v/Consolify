@@ -114,12 +114,14 @@
           <p id="detailDesc"></p>
         </div>
 
-        <div class="detail-stats" id="detailStats"></div>
-
-        <!-- The critic score, parked in the corner the eye reaches last. It is the one number
-             on this page that is somebody else's opinion rather than a fact about the file, so
-             it is given its own panel and told to say who said it. -->
-        <div class="detail-score" id="detailScore" hidden></div>
+        <!-- Ratings above the hairline, the numbers we know about it below. Both are facts you
+             would check before starting something, so they read as one block -- and what somebody
+             else thought of the game sits with the rest of the evidence rather than off on its
+             own in a corner. -->
+        <div class="detail-numbers">
+          <div class="detail-ratings" id="detailRatings"></div>
+          <div class="detail-stats" id="detailStats"></div>
+        </div>
 
         <div class="detail-actions" id="detailActions">
           <div class="pill-btn pill-primary" data-act="play" data-focusable data-focus-key="detail:play">

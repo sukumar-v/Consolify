@@ -148,17 +148,12 @@ html, body {
 }
 .cont-item.focused { transform: scale(1.05); z-index: 3; }
 .cont-art {
-  /* 290x166 inside the padding, which is 1.75:1 -- Steam's capsule_616x353 exactly. Cutting the
-     box to the dominant asset is what lets it fill edge to edge with nothing cropped; at 300x168
-     the content box was 1.86:1 and cover shaved 3% off each side, taking the end of a logo with
-     it. Anything of another shape is fitted rather than cropped -- see artFit. */
-  position: relative; width: 300px; height: 176px; border-radius: 14px;
+  /* 300x172, which is 1.75:1 -- Steam's capsule_616x353 exactly. The box being the shape of the
+     picture is what lets the art run corner to corner with nothing cropped and no mat around it;
+     anything of another shape is fitted rather than cropped, see artFit. */
+  position: relative; width: 300px; height: 172px; border-radius: 14px;
   overflow: hidden; background-color: var(--surface);
   background-size: cover; background-position: center;
-  /* Keeps the art clear of the rounded corners, which would otherwise clip a logo that runs to
-     the edge. The placeholder still fills the tile: it is set through the `background`
-     shorthand, which resets background-origin to padding-box. */
-  padding: 5px; background-origin: content-box;
   transition: opacity 200ms linear;
 }
 .zone-dim .cont-art { opacity: 0.55; }
@@ -238,30 +233,54 @@ html, body {
 .detail-platform:empty { display: none; }
 .detail-platform svg { width: 30px; height: 30px; }
 
-/* Bottom right, above the buttons: the last thing read on the page rather than something in the
-   way of the title. Laid out as a panel and a caption so the number is never alone -- a bare 82
-   could be a rank or a percentage, and this page is read from across a room. */
-.detail-score {
-  position: absolute; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 18px;
+/* Ratings sit directly above the stats hairline, so what other people thought of the game reads
+   as part of the same block of evidence as how long you have played it. Each is a panel and a
+   caption: the number is never left on its own to be mistaken for a rank or a percentage. */
+.detail-numbers { display: flex; flex-direction: column; gap: 26px; }
+.detail-ratings { display: flex; align-items: center; gap: 34px; }
+.detail-ratings:empty { display: none; }
+.rating-score, .rating-pegi { display: flex; align-items: center; gap: 15px; }
+.rating-side { display: flex; flex-direction: column; gap: 5px; }
+.rating-name { font-size: 14px; letter-spacing: 0.14em; }
+.rating-sub {
+  font-size: 13px; letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--ink) 40%, transparent);
 }
+
 .score-panel {
   display: flex; align-items: center; justify-content: center;
-  width: 92px; height: 92px; border-radius: 16px;
-  font-size: 46px; font-weight: 700; letter-spacing: -0.02em;
+  width: 58px; height: 58px; border-radius: 11px;
+  font-size: 29px; font-weight: 700; letter-spacing: -0.02em;
   color: var(--bg-deep);
 }
 /* Metacritic's own bands, because the colour is only shorthand if it is the one people already
    know from the site. */
-.detail-score[data-band="good"]  .score-panel { background: #66cc33; }
-.detail-score[data-band="mixed"] .score-panel { background: #ffcc33; }
-.detail-score[data-band="poor"]  .score-panel { background: #ff6666; }
-.score-side { display: flex; flex-direction: column; gap: 6px; }
-.score-source { font-size: 16px; letter-spacing: 0.14em; }
-.score-scale {
-  font-size: 14px; letter-spacing: 0.14em;
-  color: color-mix(in srgb, var(--ink) 40%, transparent);
+.rating-score[data-band="good"]  .score-panel { background: #66cc33; }
+.rating-score[data-band="mixed"] .score-panel { background: #ffcc33; }
+.rating-score[data-band="poor"]  .score-panel { background: #ff6666; }
+
+/* PEGI's mark is a black tablet with the age over the word, banded by colour -- 3 and 7 green,
+   12 and 16 amber, 18 red. Drawn here in the page's own materials rather than shipped as their
+   artwork: it has to sit beside the score at the same weight, and it has to recolour with the
+   theme's background. The band colour is the half people actually read from a sofa. */
+.pegi {
+  display: flex; flex-direction: column; align-items: stretch;
+  width: 52px; border-radius: 8px; overflow: hidden;
+  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--pegi) 55%, transparent);
 }
+.pegi-age {
+  padding: 7px 0 5px; text-align: center;
+  font-size: 25px; font-weight: 700; letter-spacing: -0.03em; color: var(--pegi);
+}
+.pegi-word {
+  padding: 3px 0 4px; text-align: center;
+  background: var(--pegi); color: var(--bg-deep);
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.16em;
+}
+.pegi[data-band="green"] { --pegi: #6ab04c; }
+.pegi[data-band="amber"] { --pegi: #e8a33d; }
+.pegi[data-band="red"]   { --pegi: #d64545; }
 
 /* cover placeholder (no art available) */
 .ph { display: flex; align-items: center; justify-content: center; }
@@ -338,7 +357,6 @@ body.no-legend .legend { display: none; }
    in different places -- this way the buttons and stats land where you expect them either way,
    and whatever is left over goes to the art. */
 .detail-main {
-  position: relative;   /* the score panel is pinned to this column's bottom-right */
   display: flex; flex-direction: column; gap: 62px; align-items: flex-start;
   margin-top: auto; margin-bottom: 52px;
 }
@@ -714,11 +732,9 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .playing-art {
-  /* The card sets the height, so the width is what is cut to 1.75:1: 210 less 10px of padding is
-     200, and 200 x 1.75 is 350 inside a 360px box. */
-  width: 360px; height: 100%; flex: 0 0 auto;
+  /* The card sets the height, so the width is what is cut to 1.75:1: 210 x 1.745 is 366. */
+  width: 366px; height: 100%; flex: 0 0 auto;
   background-color: var(--surface); background-size: cover; background-position: center;
-  padding: 5px; background-origin: content-box;
 }
 .playing-info { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .playing-name { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
