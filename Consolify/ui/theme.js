@@ -51,6 +51,7 @@ window.Theme = (() => {
     try {
       const doc = new DOMParser().parseFromString(html, "text/html");
       doc.querySelectorAll("template[data-template]").forEach(t => {
+        disarm(t.content);
         templates[t.dataset.template] = t;
       });
     } catch (e) {
@@ -58,6 +59,30 @@ window.Theme = (() => {
       templates = {};
     }
     return Object.keys(templates).length;
+  }
+
+  /**
+   * Make "a theme cannot run script" true rather than merely intended.
+   *
+   * DOMParser builds an inert document, and a <script> inside a <template> does not run while it
+   * is parsed -- which is what made this look safe. But render() CLONES the template's content
+   * and appends it to the live document, and a cloned script that has never started runs the
+   * moment it lands there. Tested: both a <script> and an `onerror` on an <img> fired.
+   *
+   * That matters because script in the page can post to the host bridge, and the bridge launches
+   * games and writes settings. Installing a theme is already an act of trust, but the trust asked
+   * for should be "this folder restyles my launcher", not "this folder runs code" -- and the
+   * documentation promises the first one.
+   */
+  function disarm(root) {
+    root.querySelectorAll("script").forEach(s => s.remove());
+    root.querySelectorAll("*").forEach(el => {
+      for (const attr of [...el.attributes]) {
+        // Every event handler is an on* attribute, and there is no legitimate use for one here:
+        // the app attaches its own listeners to whatever render() hands back.
+        if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+      }
+    });
   }
 
   function clear() { templates = {}; loadedFrom = null; }

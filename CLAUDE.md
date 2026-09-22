@@ -57,16 +57,19 @@ Stop the scrolled grid from clipping through the All games header
 
 ## Art and metadata
 
-- Four shapes, and they are not interchangeable. Putting the wrong one in a slot is what
+- Five shapes, and they are not interchangeable. Putting the wrong one in a slot is what
   made tiles look like they had the wrong game's art:
-  - `CoverFile` portrait (600x900) — portrait grid tiles
-  - `BannerFile` ~16:9 (616x353) — landscape tiles, the continue row, the now-playing card
-  - `HeroFile` ~3:1 (1920x620) — full-screen backdrops and the detail page
-  - `LogoFile` transparent wordmark — unused so far; there for a theme that wants the
-    title as art
-- `bannerUrl` falls back to the cover, never to the hero. `heroUrl` falls back to
-  anything. A 3:1 hero centre-cropped into a 16:9 tile throws away 43% of the width and
-  what is left is background.
+  - `CoverFile` portrait 2:3 (600x900) — portrait grid tiles
+  - `BannerFile` 1.75:1 (616x353, Steam's capsule) — landscape tiles, the continue row,
+    the now-playing card
+  - `HeroFile` ~3.1:1 (1920x620, 3840x1240 at 2x) — full-screen backdrops and the detail page
+  - `BackdropFile` 16:9 key art — only for a game with no hero at all; see the note below
+    about why it is no longer preferred
+  - `LogoFile` transparent wordmark, 1.2:1 or wider — the title as art on the detail page
+- `bannerUrl` falls back to the cover, never to the hero. `backdropUrls` is a list —
+  hero, then backdrop, then the tile — and never reaches the portrait cover. A 3:1 hero
+  centre-cropped into a 16:9 tile throws away 43% of the width and what is left is
+  background; a 2:3 cover hung across a screen is a column of box art.
 - `MetadataService` fills the rest in after the scan, from Steam only: the CDN
   (`cdn.cloudflare.steamstatic.com/steam/apps/<appid>/…`) for art and the undocumented
   `store.steampowered.com/api/appdetails` for the description, developer, genres, release

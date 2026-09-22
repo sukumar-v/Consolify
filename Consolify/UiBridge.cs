@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Consolify.Models;
 using Consolify.Services;
 using Microsoft.Web.WebView2.Core;
@@ -642,7 +643,11 @@ public class UiBridge
     {
         try
         {
-            var safe = gameId.Replace(':', '_');
+            // Every character that is not plainly a name goes, not just the colon. A game id is
+            // ours -- the scanner writes "steam:1091500" and "manual:<guid>" -- but this one
+            // arrives from the page and ends up in a file path, and "ours" is an argument about
+            // where it came from rather than a property of the string in hand.
+            var safe = Regex.Replace(gameId, "[^A-Za-z0-9_-]", "_");
             var ext = Path.GetExtension(source).ToLowerInvariant();
             var dest = Path.Combine(Paths.CoversDir, $"custom_{safe}{suffix}{ext}");
             File.Copy(source, dest, overwrite: true);

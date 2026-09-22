@@ -100,14 +100,39 @@ public static class Log
 {
     private static readonly object Gate = new();
 
+    /// <summary>
+    /// Roll over at a megabyte, keeping one previous file.
+    ///
+    /// This only ever appended, so on a launcher that starts with Windows and runs all day the
+    /// file grew without limit -- slowly, which is the kind that goes unnoticed until it is
+    /// hundreds of megabytes. One megabyte is several thousand lines, far more than anything
+    /// worth reading back, and keeping the previous file means a problem from before the roll is
+    /// still there to look at.
+    /// </summary>
+    private const long MaxBytes = 1024 * 1024;
+
     public static void Info(string message)
     {
         try
         {
             lock (Gate)
+            {
+                Roll();
                 File.AppendAllText(Paths.LogFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+            }
         }
         catch { /* logging must never take the app down */ }
+    }
+
+    private static void Roll()
+    {
+        try
+        {
+            var info = new FileInfo(Paths.LogFile);
+            if (!info.Exists || info.Length < MaxBytes) return;
+            File.Move(Paths.LogFile, Paths.LogFile + ".old", overwrite: true);
+        }
+        catch { /* a locked or missing file is not worth losing the line over */ }
     }
 }
 

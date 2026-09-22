@@ -45,12 +45,9 @@ export default {
     if (title.length > 200) return json({ error: "title too long" }, 400);
     if (appid && !/^\d{1,10}$/.test(appid)) return json({ error: "appid must be a number" }, 400);
 
-    const limited = await rateLimited(request, env);
-    if (limited) return json({ error: "slow down" }, 429, { "Retry-After": String(RATE_WINDOW) });
-
     try {
-      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, appid, igdbFacts);
-      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, appid, gridArt);
+      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, appid, igdbFacts, request);
+      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, appid, gridArt, request);
       return json({ error: "not found" }, 404);
     } catch (err) {
       // Never leak an upstream error body: it can carry our own credentials back to the caller.
@@ -70,7 +67,7 @@ export default {
  * entry even if their launchers spell the title differently, and the entry cannot be poisoned by
  * a near-miss title.
  */
-async function serve(env, ctx, kind, title, appid, fetcher) {
+async function serve(env, ctx, kind, title, appid, fetcher, request) {
   const key = appid
     ? `${kind}:${SCHEMA}:steam:${appid}`
     : `${kind}:${SCHEMA}:${normalise(title)}`;
@@ -81,6 +78,14 @@ async function serve(env, ctx, kind, title, appid, fetcher) {
       ? json({ error: "no match" }, 404, { "X-Cache": "HIT" })
       : json(cached.data, 200, { "X-Cache": "HIT" });
   }
+
+  // Rate limited only from here down, where a request is actually about to cost an upstream call.
+  // It used to run on EVERY request, and the counter is a KV write -- so on a free plan's 1,000
+  // writes a day, one person's first scan of a 200-game library spent 400 of them on bookkeeping
+  // for requests the cache was answering for free. The limit exists to protect IGDB's budget, and
+  // a cache hit does not touch it.
+  if (await rateLimited(request, env))
+    return json({ error: "slow down" }, 429, { "Retry-After": String(RATE_WINDOW) });
 
   const data = await fetcher(env, title, appid);
 
