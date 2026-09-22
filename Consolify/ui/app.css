@@ -223,15 +223,15 @@ html, body {
 .detail-top { display: flex; align-items: center; justify-content: space-between; gap: 40px; }
 .detail-platform {
   display: inline-flex; align-items: center; gap: 13px;
-  height: 52px; padding: 0 22px 0 18px; border-radius: 26px;
-  font-size: 20px; letter-spacing: 0.01em;
+  height: 44px; padding: 0 18px 0 15px; border-radius: 22px;
+  font-size: 17px; letter-spacing: 0.01em;
   color: color-mix(in srgb, var(--ink) 86%, transparent);
   background: color-mix(in srgb, var(--bg-deep) 52%, transparent);
   border: 1px solid color-mix(in srgb, var(--edge) 10%, transparent);
   backdrop-filter: blur(18px) saturate(1.3);
 }
 .detail-platform:empty { display: none; }
-.detail-platform svg { width: 30px; height: 30px; }
+.detail-platform svg { width: 25px; height: 25px; }
 
 /* Ratings sit over on the right, level with the stats hairline and clear of the text column --
    the corner of a game's box, which is where an age mark has been printed for thirty years and
@@ -245,56 +245,36 @@ html, body {
 .detail-numbers { position: relative; align-self: stretch; }
 .detail-ratings {
   position: absolute; right: 0; bottom: calc(100% + 20px);
-  display: flex; align-items: flex-end; gap: 30px;
+  display: flex; align-items: flex-end; gap: 14px;
 }
 .detail-ratings:empty { display: none; }
-.rating-score, .rating-pegi { display: flex; align-items: center; gap: 15px; }
-/* The age mark hard against the right edge, its caption inboard of it. Reversed only for this
-   one: the PEGI tablet is the graphic everybody recognises, so it is what should be sitting in
-   the corner, not a line of small type. */
-.rating-pegi { flex-direction: row-reverse; }
-.rating-pegi .rating-side { text-align: right; }
-.rating-side { display: flex; flex-direction: column; gap: 5px; }
-.rating-name { font-size: 14px; letter-spacing: 0.14em; }
-.rating-sub {
-  font-size: 13px; letter-spacing: 0.14em;
-  color: color-mix(in srgb, var(--ink) 40%, transparent);
-}
-
-.score-panel {
-  display: flex; align-items: center; justify-content: center;
-  width: 58px; height: 58px; border-radius: 11px;
-  font-size: 29px; font-weight: 700; letter-spacing: -0.02em;
-  color: var(--bg-deep);
-}
-/* Metacritic's own bands, because the colour is only shorthand if it is the one people already
-   know from the site. */
-.rating-score[data-band="good"]  .score-panel { background: #66cc33; }
-.rating-score[data-band="mixed"] .score-panel { background: #ffcc33; }
-.rating-score[data-band="poor"]  .score-panel { background: #ff6666; }
-
-/* PEGI's mark is a black tablet with the age over the word, banded by colour -- 3 and 7 green,
-   12 and 16 amber, 18 red. Drawn here in the page's own materials rather than shipped as their
-   artwork: it has to sit beside the score at the same weight, and it has to recolour with the
-   theme's background. The band colour is the half people actually read from a sofa. */
-.pegi {
+/* One construction for both marks: a value over the name of whoever issued it.
+   Drawn in the page's own materials rather than shipped as the boards' artwork -- they have to
+   sit together at the same weight and recolour with the theme's background. The wordmark is what
+   makes the number mean something, so it is part of the badge rather than a caption beside it:
+   89 over METACRITIC, M over ESRB. Nothing else needs saying, and "OUT OF 100" beside a score or
+   "AGE RATING / 16 AND OVER" beside a PEGI 16 was saying it two and three times over. */
+.badge {
   display: flex; flex-direction: column; align-items: stretch;
-  width: 52px; border-radius: 8px; overflow: hidden;
-  background: var(--bg-deep);
-  border: 1px solid color-mix(in srgb, var(--pegi) 55%, transparent);
+  min-width: 48px; border-radius: 8px; overflow: hidden;
+  background: var(--band-deep, var(--bg-deep));
+  border: 1px solid color-mix(in srgb, var(--band) 55%, transparent);
 }
-.pegi-age {
-  padding: 7px 0 5px; text-align: center;
-  font-size: 25px; font-weight: 700; letter-spacing: -0.03em; color: var(--pegi);
+.badge-value {
+  padding: 5px 10px 3px; text-align: center;
+  font-size: 22px; font-weight: 700; letter-spacing: -0.03em; color: var(--band);
 }
-.pegi-word {
-  padding: 3px 0 4px; text-align: center;
-  background: var(--pegi); color: var(--bg-deep);
-  font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.16em;
+.badge-word {
+  padding: 3px 10px 4px; text-align: center;
+  background: var(--band); color: var(--bg-deep);
+  font-size: 9px; letter-spacing: 0.14em;
 }
-.pegi[data-band="green"] { --pegi: #6ab04c; }
-.pegi[data-band="amber"] { --pegi: #e8a33d; }
-.pegi[data-band="red"]   { --pegi: #d64545; }
+/* The three steps both boards use, in Metacritic's colours -- the ones people already read
+   without being told. RP ("rating pending") is not a severity, so it is the neutral one. */
+.badge[data-band="good"], .badge[data-band="green"] { --band: #6ab04c; }
+.badge[data-band="mixed"], .badge[data-band="amber"] { --band: #e8a33d; }
+.badge[data-band="poor"], .badge[data-band="red"] { --band: #d64545; }
+.badge[data-band="grey"] { --band: color-mix(in srgb, var(--ink) 45%, transparent); }
 
 /* The two layers of a fitted tile: the game's own colours filling the box, and the picture
    whole on top of it. See bedArt -- built only for art that does not fill its box. */
@@ -404,10 +384,10 @@ body.no-legend .legend { display: none; }
    in different places -- this way the buttons and stats land where you expect them either way,
    and whatever is left over goes to the art. */
 .detail-main {
-  display: flex; flex-direction: column; gap: 62px; align-items: flex-start;
-  margin-top: auto; margin-bottom: 52px;
+  display: flex; flex-direction: column; gap: 44px; align-items: flex-start;
+  margin-top: auto; margin-bottom: 46px;
 }
-.detail-titleblock { position: relative; display: flex; flex-direction: column; gap: 26px; max-width: 900px; }
+.detail-titleblock { position: relative; display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
 /* A pool of shade under the wordmark.
    A logo is whatever colour its designer chose and the art behind it is usually the same palette
    -- a red wordmark on red key art disappears into it, and no amount of scrim across the whole
@@ -426,42 +406,56 @@ body.no-legend .legend { display: none; }
    paint order than the text nodes it shares a stacking context with, would cover them. */
 .detail-titleblock > * { position: relative; }
 .detail-titleblock h1 {
-  /* 62px keeps all but the longest names on one line, where 88px wrapped most of them. */
-  margin: 0; font-size: 62px; font-weight: 600;
+  /* 54px. Everything on this page came down a step: at 62/22/27 the column read as a poster
+     rather than a page, and a 1920 stage seen from a sofa has far more room than the type was
+     admitting. This still keeps all but the longest names on one line. */
+  margin: 0; font-size: 54px; font-weight: 600;
   letter-spacing: -0.028em; line-height: 1.08;
 }
 .detail-titleblock p {
   /* Narrower than the title block on purpose: ~70 characters is a comfortable measure, and a
      blurb running the full 900px is a wall. */
-  margin: 0; font-size: 22px; line-height: 1.75;
-  color: color-mix(in srgb, var(--ink) 60%, transparent); text-wrap: pretty; max-width: 740px;
+  margin: 0; font-size: 19px; line-height: 1.7;
+  color: color-mix(in srgb, var(--ink) 58%, transparent); text-wrap: pretty; max-width: 700px;
   /* Store blurbs run to a paragraph; three lines is about as much as anyone reads from a sofa,
      and an unclamped one pushes the stats and the Play button down the screen. */
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
+
+/* The board's own words for why it rated the game what it did. Set as quiet outlined chips, not
+   as prose: they are a list of labels rather than a sentence, and at body weight they competed
+   with the blurb directly above them. */
+.detail-descriptors { display: flex; flex-wrap: wrap; gap: 8px; max-width: 700px; }
+.detail-descriptors:empty { display: none; }
+.descriptor {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 10px;
+  border-radius: 13px; font-size: 13px; letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ink) 52%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+}
 /* A hairline above the numbers, which is the only structure this column needs: it separates the
    pitch from the facts without drawing a box round either. */
 .detail-stats {
-  display: flex; gap: 76px;
-  padding-top: 34px;
+  display: flex; gap: 64px;
+  padding-top: 28px;
   border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
-.stat { display: flex; flex-direction: column; gap: 10px; }
-.stat-label { font-size: 15px; letter-spacing: 0.16em; color: color-mix(in srgb, var(--ink) 38%, transparent); }
-.stat-value { font-size: 27px; font-weight: 500; }
+.stat { display: flex; flex-direction: column; gap: 7px; }
+.stat-label { font-size: 13px; letter-spacing: 0.16em; color: color-mix(in srgb, var(--ink) 38%, transparent); }
+.stat-value { font-size: 22px; font-weight: 500; }
 
 /* The line under the title on the detail page. Sized to sit between the 88px title and the 26px
    description without competing with either. */
 .detail-facts {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 13px;
-  font-size: 21px; color: color-mix(in srgb, var(--ink) 70%, transparent);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+  font-size: 18px; color: color-mix(in srgb, var(--ink) 68%, transparent);
 }
 .detail-facts:empty, .detail-titleblock p:empty { display: none; }
 .fact-dot { color: color-mix(in srgb, var(--ink) 30%, transparent); }
 .fact-chip {
-  display: inline-flex; align-items: center; height: 38px; padding: 0 16px;
-  border-radius: 19px; font-size: 18px; font-weight: 500;
+  display: inline-flex; align-items: center; height: 32px; padding: 0 13px;
+  border-radius: 16px; font-size: 15px; font-weight: 500;
   color: color-mix(in srgb, var(--ink) 78%, transparent);
   background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
@@ -664,7 +658,10 @@ body.no-legend .legend { display: none; }
    lockup and a tall crest both have to land on the same line without pushing the page around.
    contain, left-aligned, so it is never stretched. */
 .detail-logo {
-  width: 620px; height: 132px;
+  /* Height is what actually sets the size here: `contain` fits the picture inside the box, so a
+     4:1 wordmark uses the full width and a 1.8:1 one only draws 212px of it. The width is just
+     the room the widest ones need. */
+  width: 560px; height: 118px;
   background-size: contain; background-position: left center; background-repeat: no-repeat;
 }
 

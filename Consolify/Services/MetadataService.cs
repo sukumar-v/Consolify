@@ -45,7 +45,7 @@ public class MetadataService
     /// about not re-hitting the network for the same answer; it was never meant to pin a library
     /// to whatever the app happened to know the day it first scanned.
     /// </summary>
-    private const int FetchVersion = 4;
+    private const int FetchVersion = 5;
 
     /// <summary>
     /// Which source wrote a file, as part of its name.
@@ -109,6 +109,11 @@ public class MetadataService
         ("capsule_616x353.jpg",    Slot.Tile,  Steam + "_cap"),    // 616x353, the landscape tile
         ("library_600x900_2x.jpg", Slot.Cover, Steam + "_cover"),  // 600x900, portrait box art
         ("library_hero_2x.jpg",    Slot.Hero,  Steam + "_hero2x"), // 3840x1240 -- see below
+        // Steam's wordmark is 640x360 or wider, every time. SteamGridDB's logos are whatever
+        // somebody drew: 0.92:1 for DREDGE, 1.11:1 for Henry Stickmin, 7.34:1 for ULTRAKILL. The
+        // detail page hangs this where the title goes, so a square one lands as a small blob in
+        // the corner of a box cut for a wordmark. Same argument as the capsule and the hero.
+        ("logo.png",               Slot.Logo,  Steam + "_logo"),   // transparent wordmark
     };
 
     /// <summary>
@@ -120,7 +125,6 @@ public class MetadataService
     {
         ("header.jpg",       Slot.Tile, Steam + "_head"),   // 460x215, for apps with no capsule
         ("library_hero.jpg", Slot.Hero, Steam + "_hero"),   // 1920x620, the 1x hero
-        ("logo.png",         Slot.Logo, Steam + "_logo"),   // transparent wordmark
     };
 
     /// <summary>
@@ -421,6 +425,8 @@ public class MetadataService
         // Read before the early return below, for the same reason as the two above: it is worth
         // having whether or not the service answered.
         if (g.PegiRating is null && SteamPegi(d) is { } pegi) g.PegiRating = pegi;
+        if (g.EsrbRating is null && SteamEsrb(d) is { } esrb) g.EsrbRating = esrb;
+        if (g.ContentDescriptors.Count == 0) g.ContentDescriptors = SteamDescriptors(d);
 
         // The rest is Steam's only when the service did not answer at all. Keyed on that rather
         // than on whether each field happens to be empty: a field left over from a previous run is
@@ -471,6 +477,52 @@ public class MetadataService
         return int.TryParse(r.GetString(), out var age) && age is 3 or 7 or 12 or 16 or 18
             ? age : null;
     }
+
+    /// <summary>
+    /// The ESRB rating as the board prints it, or null. Steam sends it lower case and without the
+    /// plus ("e10"), so it is mapped rather than upper-cased: "E10+" is the name of the rating and
+    /// "E10" is not.
+    /// </summary>
+    private static string? SteamEsrb(JsonElement data) =>
+        Board(data, "esrb") is { } r
+            ? r.ToLowerInvariant() switch
+            {
+                "e" => "E", "e10" => "E10+", "t" => "T",
+                "m" => "M", "ao" => "AO", "rp" => "RP",
+                _ => null,   // a value we do not recognise is not a rating we can draw
+            }
+            : null;
+
+    /// <summary>
+    /// Why the game carries its rating, in the board's own words. ESRB's list is preferred because
+    /// its rating is, and the two have to agree -- printing PEGI's descriptors under an ESRB mark
+    /// would attribute one board's judgement to another.
+    /// </summary>
+    private static List<string> SteamDescriptors(JsonElement data)
+    {
+        var text = Descriptors(data, "esrb") ?? Descriptors(data, "pegi");
+        if (text is null) return new List<string>();
+
+        return text.Split('\n')
+            // ESRB writes the list as a sentence, so the last line arrives as "and Strong
+            // Language". As a chip of its own that reads like a mistake.
+            .Select(s => Regex.Replace(s.Trim(), @"^and\s+", "", RegexOptions.IgnoreCase))
+            .Where(s => s.Length > 0)
+            .Take(8)
+            .ToList();
+    }
+
+    private static string? Board(JsonElement data, string board) =>
+        data.TryGetProperty("ratings", out var ratings) && ratings.ValueKind == JsonValueKind.Object
+        && ratings.TryGetProperty(board, out var b) && b.ValueKind == JsonValueKind.Object
+        && b.TryGetProperty("rating", out var r) && r.ValueKind == JsonValueKind.String
+            ? r.GetString() : null;
+
+    private static string? Descriptors(JsonElement data, string board) =>
+        data.TryGetProperty("ratings", out var ratings) && ratings.ValueKind == JsonValueKind.Object
+        && ratings.TryGetProperty(board, out var b) && b.ValueKind == JsonValueKind.Object
+        && b.TryGetProperty("descriptors", out var d) && d.ValueKind == JsonValueKind.String
+            ? d.GetString() : null;
 
     // ---------- Everything else ----------
 
@@ -611,7 +663,11 @@ public class MetadataService
         Slot.Tile => (1.30, 2.60),      // 1.75 capsule through 2.14 header, and nothing squarer
         Slot.Hero => (2.40, 5.00),      // the 3.1:1 band
         Slot.Backdrop => (1.60, 2.10),  // 16:9 key art, which is the only thing this slot is for
-        _ => (0.0, double.MaxValue),    // a wordmark is whatever shape the wordmark is
+        // A WORDMARK, which is wider than it is tall by definition. Anything squarer is a logo
+        // mark rather than the title set as art, and the detail page hangs this where the title
+        // goes -- so a square one arrives as a small blob in the corner of a wide box. Rejecting
+        // it falls back to the text title, which is the better of the two.
+        _ => (1.20, 10.0),
     };
 
     /// <summary>

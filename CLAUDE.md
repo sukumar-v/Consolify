@@ -420,3 +420,35 @@ Stop the scrolled grid from clipping through the All games header
   its title runs vertically down the left edge and is gone. Edge-detail heuristics do not separate
   the two cases reliably (measured: 0.79 vs 0.48 and 0.60 of centre std-dev, n=3). The bed is the
   answer; "Change tile art" in Manage is the escape hatch for a tile somebody dislikes.
+
+## The detail page's rating marks
+
+- **Nothing is ever cropped off a tile.** `contain` shows 100% of the picture; the leftover strip
+  is the bed. A crop was measured and rejected — see the note under "Fitted art" — so a title
+  running down an edge, like Shotgun Cop Man's, is always whole.
+- One badge construction for both marks: a value over the name of whoever issued it. The captions
+  beside them are gone — "AGE RATING / 16 AND OVER" next to a mark already reading PEGI 16 is the
+  same fact three times, and "OUT OF 100" is a footnote. What the score was missing is what the
+  age mark always had: the issuing body's name under the number, where it cannot be read as part
+  of it.
+- **ESRB is preferred over PEGI** because Steam lists it for more games: in this library six
+  carry an ESRB rating and four a PEGI one, and every PEGI game also had ESRB. The wordmark in the
+  badge says which board it is, so falling back cannot be mistaken for the other. Drawn in the
+  page's own materials, never the boards' actual artwork.
+- Stripping "critics" off a source name needs `\s+critics?$`, not `\s*critics?$` — without the
+  required space it also eats the "critic" inside "Metacritic", and every Metacritic score came
+  out labelled META.
+- Content descriptors ("Blood and Gore", "Mild Lyrics") come from the same board as the rating and
+  sit under the description. ESRB writes them as a sentence, so the last one arrives as "and
+  Strong Language" and the leading "and " has to come off.
+- **Steam's `logo.png` is a wordmark, 1.78:1 or wider, every time. SteamGridDB's logos are
+  whatever somebody drew** — 0.92:1 for DREDGE, 1.11:1 for Henry Stickmin, 7.34:1 for ULTRAKILL.
+  The detail page hangs this where the title goes, so a square one lands as a small blob in the
+  corner of a box cut for a wordmark. Steam's now gets first refusal, and the Logo slot's `Bounds`
+  reject anything squarer than 1.2:1 — falling back to the text title, which is better than a blob.
+
+## Filters
+
+- `F.hidden` is a separate VIEW, not "show hidden as well": the reason to ask is to look over what
+  you put away and take something back out, and mixing them into 200 tiles is not that. The row
+  carries the count, because an empty hidden view and a broken filter look identical.

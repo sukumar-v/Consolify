@@ -33,7 +33,7 @@ let detailGameId = null;
 let detailReturn = "library";            // where B goes back to from detail
 
 /* filter & sort (session state) — empty sets mean "no restriction" */
-const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, sort: "az" };
+const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, hidden: false, sort: "az" };
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
 const STATUSES = ["Installed", "Not installed"];
 const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
@@ -56,11 +56,12 @@ function resetFilters() {
   F.status.clear();
   F.collections.clear();
   F.fav = false;
+  F.hidden = false;
   F.sort = "az";
 }
 
 function activeFilterCount() {
-  return F.platforms.size + F.status.size + F.collections.size + (F.fav ? 1 : 0);
+  return F.platforms.size + F.status.size + F.collections.size + (F.fav ? 1 : 0) + (F.hidden ? 1 : 0);
 }
 
 /* Collections a game belongs to are stored on the collection, not the game, so membership is a
@@ -1423,7 +1424,11 @@ window.addEventListener("wheel", (e) => {
 }, { passive: true });
 
 function libraryData() {
-  let filtered = visibleGames();
+  // Hidden games are the whole library when you ask for them, and none of it otherwise. A
+  // separate view rather than "show hidden as well": the point of asking is to look over what you
+  // put away and take something back out, and mixing them back into 200 tiles is not that.
+  const base = F.hidden ? S.games.filter(g => g.hidden) : visibleGames();
+  let filtered = base;
   if (F.platforms.size) filtered = filtered.filter(g => F.platforms.has(g.platform));
   if (F.fav) filtered = filtered.filter(g => g.favorite);
   if (F.collections.size) filtered = filtered.filter(gameInSelectedCollection);
@@ -1432,7 +1437,7 @@ function libraryData() {
     filtered = filtered.filter(g => g.installed === wantInstalled);
   }
 
-  const cont = visibleGames()
+  const cont = base
     .filter(g => g.lastPlayed && g.installed)
     .sort((a, b) => new Date(b.lastPlayed) - new Date(a.lastPlayed))
     .slice(0, CONTINUE_MAX);
@@ -1453,10 +1458,13 @@ function filterSummary(total) {
   if (F.fav) bits.push("FAVORITES");
   if (F.collections.size) bits.push(S.collections.filter(c => F.collections.has(c.id)).map(c => c.name.toUpperCase()).join(" + "));
   if (F.status.size === 1) bits.push([...F.status][0].toUpperCase());
+  if (F.hidden) bits.push("HIDDEN");
   const sort = SORTS.find(s => s.id === F.sort);
   if (F.sort !== "az" && sort) bits.push(sort.label.toUpperCase());
+  // Only as a note on the library you ARE looking at. While the hidden view is on, these games
+  // are the list, so counting them off to one side says the opposite of what it means.
   const hidden = S.games.length - visibleGames().length;
-  if (hidden > 0) bits.push(`${hidden} HIDDEN`);
+  if (hidden > 0 && !F.hidden) bits.push(`${hidden} HIDDEN`);
   return bits.join(" · ");
 }
 
@@ -1739,6 +1747,15 @@ function renderDetailStats(g) {
 /* PEGI's own bands: 3 and 7 green, 12 and 16 amber, 18 red. */
 function pegiBand(age) { return age >= 18 ? "red" : age >= 12 ? "amber" : "green"; }
 
+/* ESRB's, in the same three steps: E and E10+ green, T amber, M and AO red. RP is "not rated
+   yet", which is not a severity at all, so it gets the neutral one. */
+function esrbBand(r) {
+  if (r === "M" || r === "AO") return "red";
+  if (r === "T") return "amber";
+  if (r === "RP") return "grey";
+  return "green";
+}
+
 /*
  * What other people made of the game: the critic score, and the age it is rated for.
  *
@@ -1751,32 +1768,61 @@ function pegiBand(age) { return age >= 18 ? "red" : age >= 12 ? "amber" : "green
  * score and says so; IGDB's aggregated_rating is its own average of critics and is NOT
  * Metacritic, so printing Metacritic's name on every score would be wrong about half the time.
  */
+/*
+ * One badge for both: a value over the name of whoever gave it.
+ *
+ * The captions beside them are gone. "AGE RATING / 16 AND OVER" beside a mark that already says
+ * PEGI 16 is the same fact three times, and "OUT OF 100" beside a score is a footnote nobody
+ * needs twice. What the score was actually missing is the thing the age mark had all along --
+ * the name of the body that issued it, sitting under the number where it cannot be read as part
+ * of it. So the score gets the same two-part construction: 89 over METACRITIC.
+ */
+function ratingBadge(value, word, band, label) {
+  return `<div class="badge" data-band="${band}" role="img" aria-label="${esc(label)}">` +
+    `<div class="badge-value">${esc(value)}</div>` +
+    `<div class="badge-word mono">${esc(word)}</div></div>`;
+}
+
 function renderDetailRatings(g) {
   const el = $("detailRatings");
   const parts = [];
 
   if (typeof g.criticScore === "number") {
-    const source = g.criticSource || "Critic score";
-    parts.push(
-      `<div class="rating-score" data-band="${scoreBand(g.criticScore)}">` +
-      `<div class="score-panel">${esc(String(g.criticScore))}</div>` +
-      `<div class="rating-side"><div class="rating-name mono">${esc(source.toUpperCase())}</div>` +
-      `<div class="rating-sub mono">OUT OF 100</div></div></div>`);
+    // Named for whoever actually scored it. IGDB aggregates critics itself and is not Metacritic,
+    // so a fixed label here would put one publication's name on another's number.
+    // "IGDB critics" -> "IGDB". The space is required: without it this also ate the "critic"
+    // inside "Metacritic" and every Metacritic score was labelled META.
+    const source = (g.criticSource || "Critics").replace(/\s+critics?$/i, "");
+    parts.push(ratingBadge(String(g.criticScore), source.toUpperCase(),
+      scoreBand(g.criticScore), `${source} ${g.criticScore} out of 100`));
   }
 
-  if (typeof g.pegiRating === "number") {
-    const age = g.pegiRating;
-    parts.push(
-      `<div class="rating-pegi">` +
-      `<div class="pegi" data-band="${pegiBand(age)}" role="img" aria-label="PEGI ${age}">` +
-      `<div class="pegi-age">${esc(String(age))}</div><div class="pegi-word">PEGI</div></div>` +
-      `<div class="rating-side"><div class="rating-name mono">AGE RATING</div>` +
-      `<div class="rating-sub mono">${age} AND OVER</div></div></div>`);
+  // ESRB first: Steam lists it for more games than PEGI, and every game in a 16-game sample that
+  // had a PEGI rating had an ESRB one too. The wordmark says which board it is, so falling back
+  // to PEGI cannot be mistaken for the other.
+  if (g.esrbRating) {
+    parts.push(ratingBadge(g.esrbRating, "ESRB", esrbBand(g.esrbRating),
+      `ESRB rating ${g.esrbRating}`));
+  } else if (typeof g.pegiRating === "number") {
+    parts.push(ratingBadge(String(g.pegiRating), "PEGI", pegiBand(g.pegiRating),
+      `PEGI ${g.pegiRating}`));
   }
 
   // Empty rather than a row of "unrated" placeholders: most indies carry neither, and saying so
   // twice on every one of them is what made this page read like a form.
   el.innerHTML = parts.join("");
+}
+
+/*
+ * Why the board rated it what it did, in the board's own words -- "Blood and Gore", "Mild
+ * Lyrics". It belongs under the description because that is where the rest of the pitch is, and
+ * it is the one line on this page that says something about the CONTENT rather than about the
+ * file: everything else below is playtime, size and dates.
+ */
+function renderDetailDescriptors(g) {
+  const el = $("detailDescriptors");
+  const list = g.contentDescriptors || [];
+  el.innerHTML = list.map(d => `<span class="descriptor">${esc(d)}</span>`).join("");
 }
 
 /*
@@ -1864,6 +1910,7 @@ function renderDetail() {
   renderDetailRatings(g);
   renderDetailPlatform(g);
   $("detailDesc").textContent = g.description || "";
+  renderDetailDescriptors(g);
   renderDetailStats(g);
 
   $("playLabel").textContent = g.playtimeMinutes > 0 ? "Continue" : "Play";
@@ -2509,6 +2556,14 @@ function filterDropdownRows() {
   rows.push({
     label: "Favorites only", icon: "star", checked: F.fav,
     toggle: () => { F.fav = !F.fav; },
+  });
+  // The only way back to something you hid, short of turning the filter off again. Counted so the
+  // row says how many there are: an empty hidden view and a broken filter look the same.
+  const hiddenCount = S.games.filter(g => g.hidden).length;
+  rows.push({
+    label: "Hidden games", icon: "eyeOff", sub: `${hiddenCount}`,
+    checked: F.hidden,
+    toggle: () => { F.hidden = !F.hidden; },
   });
   return rows;
 }

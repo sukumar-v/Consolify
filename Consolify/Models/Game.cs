@@ -50,9 +50,15 @@ public class Game
     /// <summary>Where the score came from, so the UI can attribute it rather than implying we
     /// computed it.</summary>
     public string? CriticSource { get; set; }
-    /// <summary>PEGI age, one of 3, 7, 12, 16, 18, or null. Only IGDB carries this -- Steam's own
-    /// ratings block is per-storefront-region and is missing more often than not.</summary>
+    /// <summary>PEGI age, one of 3, 7, 12, 16, 18, or null.</summary>
     public int? PegiRating { get; set; }
+    /// <summary>ESRB rating as it is printed -- "E", "E10+", "T", "M", "AO", "RP" -- or null.
+    /// Preferred over PEGI because Steam lists it for more games: in a 16-game sample, six carried
+    /// an ESRB rating and four a PEGI one, and every PEGI game also had ESRB.</summary>
+    public string? EsrbRating { get; set; }
+    /// <summary>Why the game carries the rating it does -- "Blood and Gore", "Mild Lyrics". The
+    /// board's own words, taken from whichever board supplied the rating above.</summary>
+    public List<string> ContentDescriptors { get; set; } = new();
     /// <summary>"full", "partial" or null. Worth surfacing in a couch launcher above almost
     /// anything else: it answers "can I actually play this from the sofa".</summary>
     public string? ControllerSupport { get; set; }

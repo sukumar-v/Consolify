@@ -264,6 +264,8 @@ public class LibraryStore
                     s.CriticScore = old.CriticScore;
                     s.CriticSource = old.CriticSource;
                     s.PegiRating = old.PegiRating;
+                    s.EsrbRating = old.EsrbRating;
+                    s.ContentDescriptors = old.ContentDescriptors;
                     s.ControllerSupport = old.ControllerSupport;
                     s.MetadataSource = old.MetadataSource;
                     s.MetadataFetched = old.MetadataFetched;
