@@ -40,6 +40,10 @@
   <div class="tv-tile">
     <div class="tv-art">
       <span class="tv-initials">{{initials}}</span>
+      <!-- The same picture, blurred, filling the box behind the fitted one. Art that is not
+           1.75:1 does not reach the top and bottom edges, and what it leaves should be a mat
+           made of the game's own colours rather than two black bars. -->
+      <div class="tv-bed" style="background-image:url({{banner}})"></div>
       <div class="tv-img" style="background-image:url({{banner}})"></div>
       <span class="tv-star" data-if="favorite">★</span>
       <span class="tv-off" data-unless="installed">NOT INSTALLED</span>
@@ -52,6 +56,7 @@
   <div class="tv-tile">
     <div class="tv-art">
       <span class="tv-initials">{{initials}}</span>
+      <div class="tv-bed" style="background-image:url({{banner}})"></div>
       <div class="tv-img" style="background-image:url({{banner}})"></div>
       <span class="tv-star" data-if="favorite">★</span>
     </div>

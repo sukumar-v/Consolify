@@ -860,6 +860,7 @@ function pumpImgQueue() {
 }
 
 function paintPlaceholder(g, el) {
+  unbedArt(el);
   const h = hashHue(g.title);
   el.style.background = `linear-gradient(150deg, hsl(${h},16%,15%) 0%, hsl(${(h + 40) % 360},22%,9%) 100%)`;
   el.classList.add("ph");
@@ -915,11 +916,50 @@ function applyArt(g, el, url, fit) {
   queueArt(url, (src, w, h) => {
     if (!el.isConnected) return;          // tile was re-rendered while loading
     if (!src) { paintPlaceholder(g, el); setArtAspect(el, 0, 0); return; }
-    el.style.backgroundImage = `url('${src}')`;
-    el.style.backgroundSize = fit || artFit(el, w, h);
-    el.style.backgroundRepeat = "no-repeat";
     setArtAspect(el, w, h);
+    const size = fit || artFit(el, w, h);
+
+    if (size === "contain") { bedArt(el, src); return; }
+
+    unbedArt(el);
+    el.style.backgroundImage = `url('${src}')`;
+    el.style.backgroundSize = size;
+    el.style.backgroundRepeat = "no-repeat";
   });
+}
+
+/*
+ * Fitted art does not reach every edge of its box, and what it leaves behind should not be two
+ * black bars. The box is filled with a blurred, dimmed copy of the same picture and the sharp one
+ * laid over it -- the same thing the library backdrop does with a hero that does not fit the
+ * screen, and the only answer that neither crops the art nor leaves a hole.
+ *
+ * Both layers are children rather than one being the element's own background, because a child
+ * always paints ABOVE its parent's background and never below it -- and because a filter on the
+ * element would blur the sharp layer along with the bed.
+ *
+ * Only built when it is actually needed, so the great majority of tiles, whose art fills the box,
+ * carry no extra layer and no blur.
+ */
+function bedArt(el, src) {
+  el.style.backgroundImage = "none";
+  layer(el, "art-bed").style.backgroundImage = `url('${src}')`;
+  layer(el, "art-top").style.backgroundImage = `url('${src}')`;
+}
+
+function unbedArt(el) {
+  el.querySelectorAll(":scope > .art-bed, :scope > .art-top").forEach(n => n.remove());
+}
+
+/** One of the two layers, made on demand. Appended in order, which is paint order. */
+function layer(el, cls) {
+  let node = el.querySelector(":scope > ." + cls);
+  if (!node) {
+    node = document.createElement("div");
+    node.className = cls;
+    el.appendChild(node);
+  }
+  return node;
 }
 
 /*

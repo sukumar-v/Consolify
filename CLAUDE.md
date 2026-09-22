@@ -208,6 +208,16 @@ Stop the scrolled grid from clipping through the All games header
   each read as a picture pasted onto a rounded card. A radius only ever takes the four corners --
   the sides were being lost to a crop, and the fix for that is the box being the shape of the
   picture, not a border around it.
+- Art that still does not fill its box gets a bed, not black bars: a blurred, dimmed copy of the
+  same picture behind the fitted one. A uniform grid cannot give each tile the shape of its own
+  art, and the two shapes in play are 1.75:1 and 2.14:1, so a few tiles will always have a strip
+  left over. Polish builds the bed in its template (`.tv-bed`); everything going through
+  `applyArt` gets `.art-bed` + `.art-top` built on demand, and ONLY when the fit is `contain` --
+  so the great majority of tiles carry no extra layer and no blur.
+- Both layers are children. A child always paints above its parent's background and never below
+  it, so the bed cannot be the element's own background; and a `filter` on the element would blur
+  the sharp layer along with the bed. The bed is also scaled ~1.15, because a blur feathers its
+  own edges and a feathered edge inside a rounded box reads as a halo.
 - `applyArt` takes an optional `fit`. Scenery must always `cover` — a full-bleed backdrop has no
   edges of its own to protect, and `artFit` letterboxed the detail page's 3:1 hero inside its
   16:9 box, which is where the black bars came from. Only tiles are worth fitting.
@@ -216,6 +226,15 @@ Stop the scrolled grid from clipping through the All games header
   var(--art-aspect, 3.1)` with `max-height: 100%`. A fixed height only ever suited one source:
   62% of a 16:9 stage is 2.87:1, so Steam's 3.1:1 hero lost the sides and IGDB's 16:9 artwork lost
   42% of its height.
+- Polish floors the library backdrop at `--bd-fill` (72%) on top of that aspect. At its own shape
+  a 3.1:1 hero is 57% of a 16:9 screen and stopped dead there -- a hard horizontal edge across the
+  middle with the bed below it. The floor carries it past the title and into the dock, where the
+  fade has room to happen; the price is about 20% of the width. It is one number: down towards 58%
+  keeps every pixel and brings the band back, up towards 90% takes more screen and less picture.
+  Art that is already tall enough is untouched either way.
+- A mask has to fade to nothing at the element's own edge. Polish's stopped at 99% of a band that
+  was only 57% tall, so the art was still clearly visible where it ended -- which is what read as
+  cut rather than dissolved.
 - The rest of the screen is the same picture, blurred and scaled past the edges --
   `#backdrop::before`, fed by `--bd-image`, which `setBackdrop` writes alongside the art. It is
   the trick tvOS and Plex both use, and it is the only way to have the art fill a screen and stay

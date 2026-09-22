@@ -92,7 +92,7 @@ body:has(#screen-library.active) #backdrop::before {
   position: absolute; inset: -8%;
   background-image: var(--bd-image, none);
   background-size: cover; background-position: center;
-  filter: blur(64px) saturate(1.5) brightness(0.62);
+  filter: blur(64px) saturate(1.5) brightness(0.78);
   opacity: 0; transition: opacity 320ms linear;
 }
 body:has(#screen-library.active) #backdrop.has-art::before { opacity: 1; }
@@ -103,14 +103,26 @@ body:has(#screen-library.active) .bd {
   top: 0; left: 0; right: 0; bottom: auto;
   height: auto;
   aspect-ratio: var(--art-aspect, 3.1);
+  /* How far down the sharp layer reaches, as a floor under its natural height.
+     At its own aspect a 3.1:1 hero is 57% of a 16:9 screen, and it stopped there -- a hard
+     horizontal edge across the middle of the screen with the blurred bed below it. The floor
+     carries it past the title and into the dock, where the fade has somewhere to happen.
+     The price is the sides: filling 72% of the height with a 3.1:1 picture shows about 80% of
+     its width. Turn this down towards 58% to keep every pixel of the width and take the band
+     back; turn it up towards 90% for more of the screen and less of the picture. Art that is
+     already tall enough -- IGDB's 16:9 -- is untouched by it either way. */
+  min-height: var(--bd-fill, 72%);
   max-height: 100%;
   filter: none;
   background-position: top center;
   /* The fade is a share of this element, not of the screen, which is the reason
      the element is cut to the art: put it on a full-height box and the gradient
      lands below the picture and never touches it. */
-  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 64%, transparent 99%);
-          mask-image: linear-gradient(180deg, #000 0, #000 64%, transparent 99%);
+  /* Fading over the bottom 58% rather than the bottom 35%, and all the way to the element's
+     own edge. The short fade ended while the art was still clearly visible, which is what made
+     it look cut rather than dissolved. */
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 0, #000 42%, transparent 100%);
   transition: opacity 300ms linear, filter 380ms var(--ease), transform 380ms var(--ease);
 }
 body:has(#screen-library.active) .bd.visible { opacity: 1; }
@@ -334,6 +346,22 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   position: absolute; inset: 0;
   background-size: contain; background-position: center; background-repeat: no-repeat;
 }
+/* What fills the box behind it.
+   The box is cut to 1.75:1 because that is what most tile art is, and a uniform grid cannot
+   give each tile its own shape -- so the handful of games that publish only a 2.14:1 header
+   leave a strip top and bottom. Filling that strip with a blurred, dimmed copy of the same
+   picture is the alternative to two black bars, and it is the same thing the library backdrop
+   does with a hero that does not fit the screen. Where the art does fill the box, which is most
+   of the time, this is completely hidden.
+   Scaled up because a blur feathers its own edges, and a feathered edge inside a rounded box
+   reads as a halo. */
+.tv-bed {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+  filter: blur(12px) saturate(1.3) brightness(0.55);
+  transform: scale(1.14);
+}
+.tv-tile.uninstalled .tv-bed { filter: blur(12px) grayscale(0.65) brightness(0.35); }
 .tv-initials {
   font-size: 40px; font-weight: 700; letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--ink) 22%, transparent);
