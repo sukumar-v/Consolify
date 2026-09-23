@@ -171,12 +171,22 @@ public class MetadataService
             try
             {
                 var appId = SteamAppId(g);
+                IReadOnlyList<int>? platforms = null;
 
+                if (g.Emulated)
+                {
+                    // A ROM is never looked up on Steam. Steam sells "DOOM" (2016) and "DOOM
+                    // (1993)" both, and the search's exact-title rule would hand the SNES
+                    // cartridge the 2016 game's capsule with nothing about it looking wrong. The
+                    // service is asked instead, with the folder's system as a constraint on the
+                    // search, and that is the whole of what a ROM can be matched on.
+                    platforms = EmulatedPlatforms.Find(g.PlatformId)?.IgdbIds;
+                }
                 // A non-Steam game that Steam nonetheless sells. Resolved first even though Steam
                 // is now the fallback, because an app id is worth having either way: the service
                 // is asked by id rather than by title, which removes the matching from the whole
                 // exchange, and Steam can then fill anything the service leaves empty.
-                if (appId is null)
+                else if (appId is null)
                 {
                     await PaceStoreAsync(ct);
                     appId = await search.FindAppIdAsync(g.Title, ct);
@@ -211,7 +221,7 @@ public class MetadataService
                 // Steam still holds the Metacritic score and the controller-support flag.
                 var (elsewhere, serviceFacts) = lite
                     ? (false, false)
-                    : await EnrichElsewhereAsync(g, facts, art, appId, filled, ct);
+                    : await EnrichElsewhereAsync(g, facts, art, appId, platforms, filled, ct);
                 touched |= elsewhere;
 
                 // Steam runs after, as the fallback: it fills every art slot and every field the
@@ -293,9 +303,23 @@ public class MetadataService
         // so a game inside the freshness window is still due if its files are not there. Nothing
         // is excluded up front any more: with the keyless Steam tiers there is always something
         // that might answer, and the sources themselves decide whether they can.
-        if (g.MetadataFetched is { } at && DateTime.UtcNow - at < Freshness && HasFetchedArt(g)) return false;
+        if (g.MetadataFetched is { } at && DateTime.UtcNow - at < Freshness)
+        {
+            if (HasFetchedArt(g)) return false;
+            // A ROM with no art is the normal case for a lot of ROMs -- an obscure set, a title
+            // the file name did not carry -- and there is one source for it, which answered the
+            // same nothing last time. Asked again on every start, a folder of a thousand arcade
+            // sets is a thousand proxy calls per start for nothing; so a ROM waits out the
+            // window unless a picture it did have has gone missing.
+            if (g.Emulated && !ArtGoneMissing(g)) return false;
+        }
         return true;
     }
+
+    /// <summary>True when the entry names an art file that is no longer on disk.</summary>
+    private static bool ArtGoneMissing(Game g) =>
+        new[] { g.CoverFile, g.BannerFile, g.HeroFile, g.BackdropFile, g.LogoFile }
+            .Any(f => f is not null && !File.Exists(Path.Combine(Paths.CoversDir, f)));
 
     /// <summary>
     /// True when the tile is art this pass would not improve on: something downloaded, or
@@ -567,8 +591,8 @@ public class MetadataService
     /// Either half may be absent, in which case that half is simply missing and Steam fills it.
     /// </summary>
     private async Task<(bool Touched, bool Facts)> EnrichElsewhereAsync(Game g,
-        IFactsProvider? facts, IArtProvider? art, string? appId, HashSet<Slot> filled,
-        CancellationToken ct)
+        IFactsProvider? facts, IArtProvider? art, string? appId, IReadOnlyList<int>? platforms,
+        HashSet<Slot> filled, CancellationToken ct)
     {
         var any = false;
         var gotFacts = false;
@@ -576,7 +600,7 @@ public class MetadataService
 
         if (facts is not null && !facts.Unavailable)
         {
-            var hit = await facts.FindAsync(g.Title, appId, ct);
+            var hit = await facts.FindAsync(g.Title, appId, platforms, ct);
             if (hit is not null)
             {
                 g.Description = Clean(hit.Summary);

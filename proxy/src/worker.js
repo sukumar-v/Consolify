@@ -50,13 +50,18 @@ export default {
     // asked by it directly, so there is no name matching and therefore no way to answer with a
     // different game. The title is still sent alongside as the fallback.
     const appid = (url.searchParams.get("appid") || "").trim();
+    // IGDB platform ids, for a ROM: the launcher knows which system's folder the file came from,
+    // and confining the title search to it is what separates "Doom" (1993, on the SNES) from
+    // "DOOM" (2016). Only the facts lookup uses it; SteamGridDB has no platform filter.
+    const platform = (url.searchParams.get("platform") || "").trim();
     if (!title && !appid) return json({ error: "title or appid is required" }, 400);
     if (title.length > 200) return json({ error: "title too long" }, 400);
     if (appid && !/^\d{1,10}$/.test(appid)) return json({ error: "appid must be a number" }, 400);
+    if (platform && !/^\d{1,6}(,\d{1,6}){0,7}$/.test(platform)) return json({ error: "platform must be numeric ids" }, 400);
 
     try {
-      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, appid, igdbFacts, request);
-      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, appid, gridArt, request);
+      if (url.pathname === "/v1/facts") return await serve(env, ctx, "facts", title, appid, igdbFacts, request, platform);
+      if (url.pathname === "/v1/art") return await serve(env, ctx, "art", title, appid, gridArt, request, "");
       return json({ error: "not found" }, 404);
     } catch (err) {
       // Never leak an upstream error body: it can carry our own credentials back to the caller.
@@ -76,10 +81,12 @@ export default {
  * entry even if their launchers spell the title differently, and the entry cannot be poisoned by
  * a near-miss title.
  */
-async function serve(env, ctx, kind, title, appid, fetcher, request) {
+async function serve(env, ctx, kind, title, appid, fetcher, request, platform) {
+  // A platform-confined search is a different question with a possibly different answer, so it
+  // gets a key of its own; the unconfined key is untouched and needs no schema bump.
   const key = appid
     ? `${kind}:${SCHEMA}:steam:${appid}`
-    : `${kind}:${SCHEMA}:${normalise(title)}`;
+    : `${kind}:${SCHEMA}:${normalise(title)}${platform ? `:p${platform}` : ""}`;
 
   const cached = await env.METADATA.get(key, { type: "json" });
   if (cached) {
@@ -96,7 +103,7 @@ async function serve(env, ctx, kind, title, appid, fetcher, request) {
   if (await rateLimited(request, env))
     return json({ error: "slow down" }, 429, { "Retry-After": String(RATE_WINDOW) });
 
-  const data = await fetcher(env, title, appid);
+  const data = await fetcher(env, title, appid, platform);
 
   // Written after the response is on its way, so a cache write never delays the caller.
   ctx.waitUntil(env.METADATA.put(
@@ -154,7 +161,7 @@ let ageShape = 0;
 
 const fieldsFor = (i) => `fields ${BASE_FIELDS}${AGE_SHAPES[i]}; `;
 
-async function igdbFacts(env, title, appid) {
+async function igdbFacts(env, title, appid, platform) {
   const token = await igdbToken(env);
   if (!token) return null;
 
@@ -170,7 +177,10 @@ async function igdbFacts(env, title, appid) {
 
   if (!title) return null;
 
-  const all = await igdbGames(env, token, `search "${title.replace(/"/g, " ")}";`, 20);
+  // "(a, b)" is APIcalypse for "released on any of these", which is the right question for a
+  // ROM: the SNES folder's "Doom" is whichever DOOM has an SNES release.
+  const where = platform ? ` where platforms = (${platform});` : "";
+  const all = await igdbGames(env, token, `search "${title.replace(/"/g, " ")}";${where}`, 20);
   if (!all) return null;
 
   // category 0 is a main game. The rest are DLC, bundles, ports and episodes, which share their

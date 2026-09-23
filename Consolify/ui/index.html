@@ -199,6 +199,17 @@
     </div>
   </div>
 
+  <!-- ============ CHOICE ============
+       A general pick-one list: which system a ROM folder is for, which emulator runs it, what
+       to do with an emulator. Same card as Manage; the title and rows come from the caller. -->
+  <div class="overlay" id="overlay-choice" data-focus-scope>
+    <div class="quick-card menu-card">
+      <div class="quick-title mono" id="choiceTitle">CHOOSE</div>
+      <div class="ov-scroll" id="choiceList"></div>
+      <div class="ov-foot" id="choiceFoot"></div>
+    </div>
+  </div>
+
   <!-- ============ CONFIRM ============ -->
   <!-- A dialog rather than a menu: the details, then A to go ahead and B to back out. -->
   <div class="overlay" id="overlay-confirm">

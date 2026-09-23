@@ -87,7 +87,7 @@ public class IgdbClient : IFactsProvider
     /// rule is deliberately unforgiving -- see the note there about why a near miss is worse than
     /// nothing at all.
     /// </summary>
-    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct)
+    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, IReadOnlyList<int>? platforms, CancellationToken ct)
     {
         if (!await EnsureTokenAsync(ct)) return null;
 
@@ -97,7 +97,7 @@ public class IgdbClient : IFactsProvider
         // containing one has to lose it or the whole query is rejected.
         var term = title.Replace("\"", " ").Trim();
 
-        using var doc = await SearchAsync(term, title, ct);
+        using var doc = await SearchAsync(term, title, platforms, ct);
         if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array) return null;
 
         // category 0 is a main game; the rest are DLC, bundles, episodes and ports, which share
@@ -175,8 +175,17 @@ public class IgdbClient : IFactsProvider
         return hit is null ? null : Parse(hit.Value);
     }
 
-    private Task<JsonDocument?> SearchAsync(string term, string title, CancellationToken ct) =>
-        QueryAsync($"search \"{term}\";", 20, $"'{title}'", ct);
+    /// <summary>
+    /// A title search, confined to some platforms when the caller knows them. "(a, b)" in
+    /// APIcalypse means "released on any of these", which is the right question for a ROM: the
+    /// SNES folder's "Doom" is the game that has an SNES release, and that is the 1993 one.
+    /// </summary>
+    private Task<JsonDocument?> SearchAsync(string term, string title, IReadOnlyList<int>? platforms,
+        CancellationToken ct)
+    {
+        var where = platforms is { Count: > 0 } ? $" where platforms = ({string.Join(",", platforms)});" : "";
+        return QueryAsync($"search \"{term}\";{where}", 20, $"'{title}'", ct);
+    }
 
     /// <summary>One query, retried down the age-rating shapes when IGDB rejects a field name.</summary>
     private async Task<JsonDocument?> QueryAsync(string clause, int limit, string label,

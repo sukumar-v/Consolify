@@ -107,6 +107,14 @@ public class UiBridge
                     Push(new { type = "toast", message = $"{game.Title} is not installed" });
                     break;
                 }
+                // Everything that can be wrong with an emulated launch is known before anything
+                // starts -- no emulator, its exe gone, the ROM gone, a core never chosen -- and
+                // each is something the person can fix, so it is said here rather than logged.
+                if (game.Emulated && _launcher.ResolveEmulated(game, out var problem) is null)
+                {
+                    Push(new { type = "toast", message = problem ?? "This game cannot be started" });
+                    break;
+                }
                 if (_launcher.GameRunning)
                 {
                     // The UI has already asked whether to swap; `replace` is that answer.
@@ -235,7 +243,8 @@ public class UiBridge
                 var cur = _settings.Settings;
                 var storesChanged = incoming.SteamShowOwned != cur.SteamShowOwned
                                     || (incoming.SteamApiKey ?? "").Trim() != cur.SteamApiKey
-                                    || incoming.GamePassCatalog != cur.GamePassCatalog;
+                                    || incoming.GamePassCatalog != cur.GamePassCatalog
+                                    || incoming.DetectEmulators != cur.DetectEmulators;
                 CopySettings(incoming);
                 _settings.Save();
                 if (storesChanged) StartScan(force: true);
@@ -517,7 +526,273 @@ public class UiBridge
             case "log":
                 Log.Info($"UI: {msg["msg"]?.GetValue<string>()}");
                 break;
+
+            // ---- Emulators and ROM folders ----
+            // The host owns these lists outright: every change comes through one of the commands
+            // below and is saved into library.json, and the page never sends them back. They are
+            // deliberately NOT part of saveSettings, so a settings push from an older page cannot
+            // wipe them and "Restore default settings" leaves them alone.
+
+            case "emuAdd":
+                AddEmulator();
+                break;
+
+            case "emuPickExe":
+                if (msg["id"]?.GetValue<string>() is { } emuExeId) PickEmulatorExe(emuExeId);
+                break;
+
+            case "emuUpdate":
+            {
+                var emu = _library.FindEmulator(msg["id"]?.GetValue<string>());
+                if (emu is null) break;
+                if (msg["name"]?.GetValue<string>()?.Trim() is { Length: > 0 } name) emu.Name = name;
+                // Arguments may legitimately be emptied: that is "just the ROM", which Resolve
+                // supplies. The property holds the template; an empty one is the default.
+                if (msg["args"] is { } argsNode) emu.Args = argsNode.GetValue<string>()?.Trim() ?? "";
+                _library.Save();
+                PushState();
+                break;
+            }
+
+            case "emuRemove":
+            {
+                var emu = _library.FindEmulator(msg["id"]?.GetValue<string>());
+                if (emu is null) break;
+                _library.RemoveEmulator(emu.Id);
+                PushState();
+                Push(new { type = "toast", message = $"Removed {emu.Name}. Folders that used it need a new emulator" });
+                break;
+            }
+
+            case "romFolderPick":
+                PickRomFolder();
+                break;
+
+            case "romFolderAdd":
+                AddRomFolder(msg["path"]?.GetValue<string>(), msg["platformId"]?.GetValue<string>(),
+                    msg["emulatorId"]?.GetValue<string>());
+                break;
+
+            case "romFolderUpdate":
+            {
+                var folder = _library.FindRomFolder(msg["id"]?.GetValue<string>());
+                if (folder is null) break;
+                var rescan = false;
+                if (EmulatedPlatforms.Find(msg["platformId"]?.GetValue<string>()) is { } platform
+                    && platform.Id != folder.PlatformId)
+                {
+                    folder.PlatformId = platform.Id;
+                    folder.Core = null;   // a core is for one system; the new one picks its own
+                    rescan = true;
+                }
+                if (msg["emulatorId"] is { } emuNode)
+                {
+                    var emuId = emuNode.GetValue<string>();
+                    folder.EmulatorId = _library.FindEmulator(emuId)?.Id;
+                    // A new emulator may want a core, and the old core was for the old one.
+                    folder.Core = null;
+                    if (_library.FindEmulator(folder.EmulatorId) is { } newEmu
+                        && EmulatedPlatforms.Find(folder.PlatformId) is { } p)
+                        folder.Core = EmulatorLaunch.SuggestCore(newEmu, p);
+                }
+                if (msg["args"] is { } fArgs) folder.Args = fArgs.GetValue<string>()?.Trim() is { Length: > 0 } a ? a : null;
+                if (msg["extensions"] is { } extNode)
+                {
+                    var list = (extNode.GetValue<string>() ?? "")
+                        .Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(e => e.Trim().TrimStart('.').ToLowerInvariant())
+                        .Where(e => e.Length > 0 && e.All(c => char.IsAsciiLetterOrDigit(c)))
+                        .Distinct().ToList();
+                    folder.Extensions = list.Count > 0 ? list : null;
+                    rescan = true;
+                }
+                _library.Save();
+                PushState();
+                if (rescan) StartScan();
+                break;
+            }
+
+            case "romFolderPickCore":
+                if (msg["id"]?.GetValue<string>() is { } coreFolderId) PickCore(coreFolderId);
+                break;
+
+            case "romFolderRemove":
+            {
+                var folder = _library.FindRomFolder(msg["id"]?.GetValue<string>());
+                if (folder is null) break;
+                _library.RemoveRomFolder(folder.Id);
+                PushState();
+                Push(new { type = "toast", message = $"Removed {folder.Path}. Its games leave the library on this scan" });
+                StartScan();
+                break;
+            }
+
+            // A ROM's title is a guess from its file name, and the guess is what the metadata
+            // lookup runs on -- so a rename is also the way to make a wrongly-matched (or
+            // unmatched) game fetch again, which is why the stamp is cleared.
+            case "setTitle":
+            {
+                var game = _library.Find(msg["id"]?.GetValue<string>() ?? "");
+                var title = msg["title"]?.GetValue<string>()?.Trim();
+                if (game is null || string.IsNullOrEmpty(title) || title.Length > 200) break;
+                game.Title = title;
+                game.TitleEdited = true;
+                game.MetadataFetched = null;
+                _library.Save();
+                PushState();
+                Push(new { type = "toast", message = $"Renamed to {title}. Fetching its details again" });
+                _ = EnrichMetadata();
+                break;
+            }
+
+            // Which emulator runs this one game. An empty id puts it back on its folder's.
+            case "setEmulator":
+            {
+                var game = _library.Find(msg["id"]?.GetValue<string>() ?? "");
+                if (game is null || !game.Emulated) break;
+                var emu = _library.FindEmulator(msg["emulatorId"]?.GetValue<string>());
+                game.EmulatorId = emu?.Id;
+                _library.Save();
+                PushState();
+                var now = _library.EmulatorFor(game);
+                Push(new { type = "toast", message = now is null
+                    ? $"{game.Title} has no emulator to run with"
+                    : $"{game.Title} now runs with {now.Name}" });
+                break;
+            }
         }
+    }
+
+    // ---- Emulators and ROM folders ----
+
+    private void AddEmulator()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the emulator's program (retroarch.exe, Dolphin.exe, pcsx2-qt.exe…)",
+            Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*"
+        };
+        // The page may be in the middle of adding a ROM folder and waiting on this; a cancel
+        // has to be reported too, or it waits forever with nothing on screen.
+        if (!ShowDialog(dlg)) { Push(new { type = "emuAdded", id = (string?)null }); return; }
+
+        var exe = dlg.FileName;
+        if (_library.Emulators.FirstOrDefault(e => string.Equals(e.ExePath, exe, StringComparison.OrdinalIgnoreCase)) is { } dup)
+        {
+            Push(new { type = "toast", message = $"{dup.Name} is already set up" });
+            Push(new { type = "emuAdded", id = dup.Id });
+            return;
+        }
+
+        // A known exe brings its name, its command line and the systems it runs; anything else
+        // is named after its file and started with the ROM's path and nothing more.
+        var preset = EmulatorPresets.Detect(exe);
+        var emu = new EmulatorDef
+        {
+            Id = Guid.NewGuid().ToString("N")[..8],
+            Name = preset?.Name ?? Path.GetFileNameWithoutExtension(exe),
+            ExePath = exe,
+            Args = preset?.Args ?? "\"{rom}\"",
+            Preset = preset?.Key,
+            Platforms = preset?.Platforms.ToList() ?? new List<string>(),
+        };
+        _library.AddEmulator(emu);
+        PushState();
+        Push(new { type = "emuAdded", id = emu.Id });
+        Push(new { type = "toast", message = preset is null
+            ? $"Added {emu.Name}. Check its launch arguments under Settings → Library"
+            : $"Added {emu.Name}" });
+    }
+
+    private void PickEmulatorExe(string id)
+    {
+        var emu = _library.FindEmulator(id);
+        if (emu is null) return;
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Choose the program for {emu.Name}",
+            Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*"
+        };
+        if (Path.GetDirectoryName(emu.ExePath) is { } dir && Directory.Exists(dir)) dlg.InitialDirectory = dir;
+        if (!ShowDialog(dlg)) return;
+        emu.ExePath = dlg.FileName;
+        _library.Save();
+        PushState();
+        Push(new { type = "toast", message = $"{emu.Name} now runs {Path.GetFileName(dlg.FileName)}" });
+    }
+
+    /// <summary>The first step of adding a ROM folder. The rest -- which system, which emulator --
+    /// is asked on the page, where a gamepad can answer; the folder's name seeds the system.</summary>
+    private void PickRomFolder()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Choose a folder of ROMs for one system" };
+        if (!ShowDialog(dlg)) return;
+        var path = dlg.FolderName;
+        if (_library.RomFolders.Any(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            Push(new { type = "toast", message = "That folder is already in the library" });
+            return;
+        }
+        Push(new { type = "romFolderPicked", path, platformId = EmulatedPlatforms.Guess(Path.GetFileName(path.TrimEnd('\\', '/'))) });
+    }
+
+    private void AddRomFolder(string? path, string? platformId, string? emulatorId)
+    {
+        var platform = EmulatedPlatforms.Find(platformId);
+        if (path is null || !Directory.Exists(path) || platform is null)
+        {
+            Push(new { type = "toast", message = "That folder could not be added" });
+            return;
+        }
+        var emu = _library.FindEmulator(emulatorId);
+        var folder = new RomFolderDef
+        {
+            Id = Guid.NewGuid().ToString("N")[..8],
+            Path = path,
+            PlatformId = platform.Id,
+            EmulatorId = emu?.Id,
+        };
+
+        // RetroArch needs a core per system. Take the first of the platform's known cores that
+        // is installed, and only open a dialog when none of them is.
+        var needsCore = emu is not null && emu.Args.Contains("{core}", StringComparison.OrdinalIgnoreCase);
+        if (needsCore)
+        {
+            folder.Core = EmulatorLaunch.SuggestCore(emu!, platform) ?? PickCoreDialog(emu!, platform);
+        }
+
+        _library.AddRomFolder(folder);
+        PushState();
+        var core = folder.Core is null ? "" : $" with {Path.GetFileNameWithoutExtension(folder.Core)}";
+        Push(new { type = "toast", message = needsCore && folder.Core is null
+            ? $"Added {platform.Name}. Choose a core for it under Settings → Library before playing"
+            : $"Added {platform.Name}{core}. Scanning for games…" });
+        StartScan();
+    }
+
+    private void PickCore(string folderId)
+    {
+        var folder = _library.FindRomFolder(folderId);
+        var emu = _library.FindEmulator(folder?.EmulatorId);
+        var platform = EmulatedPlatforms.Find(folder?.PlatformId);
+        if (folder is null || emu is null || platform is null) return;
+        var core = PickCoreDialog(emu, platform);
+        if (core is null) return;
+        folder.Core = core;
+        _library.Save();
+        PushState();
+        Push(new { type = "toast", message = $"{platform.Name} now runs on {Path.GetFileNameWithoutExtension(core)}" });
+    }
+
+    private string? PickCoreDialog(EmulatorDef emu, EmulatedPlatforms.Def platform)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Choose the {emu.Name} core for {platform.Name}",
+            Filter = "Cores (*_libretro.dll)|*_libretro.dll|Libraries (*.dll)|*.dll|All files (*.*)|*.*"
+        };
+        if (EmulatorLaunch.CoresDir(emu) is { } cores) dlg.InitialDirectory = cores;
+        return ShowDialog(dlg) ? dlg.FileName : null;
     }
 
     private void CopySettings(AppSettings s)
@@ -536,6 +811,7 @@ public class UiBridge
         t.SteamApiKey = (s.SteamApiKey ?? "").Trim();
         t.GamePassCatalog = s.GamePassCatalog;
         t.XboxClientId = (s.XboxClientId ?? "").Trim();
+        t.DetectEmulators = s.DetectEmulators;
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
@@ -625,7 +901,13 @@ public class UiBridge
             var before = InstallSignature();
             try
             {
+                // Emulators and ROM folders first, so anything found is scanned in the same pass.
+                var detected = settings.DetectEmulators ? EmulatorDetection.Run(_library) : null;
+                if (!quiet && detected is { } d && (d.Emulators.Count > 0 || d.Folders.Count > 0))
+                    _ = _window.Dispatcher.BeginInvoke(() => Push(new { type = "toast", message = DetectionToast(d) }));
+
                 var found = _scanner.ScanAll();
+                found.AddRange(_scanner.ScanEmulated(_library.RomFolders.ToList()));
                 // What the accounts own but the disk does not have. Each source is independent
                 // and each is optional; NotAlreadyFound keeps an installed game from appearing
                 // a second time as an owned one.
@@ -654,6 +936,28 @@ public class UiBridge
 
             await EnrichMetadata();
         });
+    }
+
+    /// <summary>"Found RetroArch and PCSX2; added Game Boy Advance and Nintendo DS ROMs".</summary>
+    private static string DetectionToast(DetectionSummary d)
+    {
+        static string Join(IEnumerable<string> names)
+        {
+            var list = names.ToList();
+            return list.Count switch
+            {
+                0 => "",
+                1 => list[0],
+                2 => $"{list[0]} and {list[1]}",
+                _ => string.Join(", ", list.Take(list.Count - 1)) + " and " + list[^1],
+            };
+        }
+        var bits = new List<string>();
+        if (d.Emulators.Count > 0) bits.Add("found " + Join(d.Emulators.Select(e => e.Name)));
+        if (d.Folders.Count > 0)
+            bits.Add("added " + Join(d.Folders.Select(f => EmulatedPlatforms.Find(f.PlatformId)?.Name ?? f.PlatformId).Distinct()) + " ROMs");
+        var text = string.Join("; ", bits);
+        return char.ToUpperInvariant(text[0]) + text[1..];
     }
 
     /// <summary>Which games exist and which are on disk: the two things a manifest change can alter,
@@ -964,6 +1268,18 @@ public class UiBridge
                 gog = _accounts["gog"].Status,
                 xbox = _accounts["xbox"].Status,
                 gamePass = _gamePass.Status,
+            },
+            // The page draws the emulator and ROM folder rows from these, and the system picker
+            // from the catalogue; it never sends any of it back (see the emu* commands).
+            emulation = new
+            {
+                emulators = _library.Emulators,
+                romFolders = _library.RomFolders,
+                platforms = EmulatedPlatforms.All.Select(p => new
+                {
+                    id = p.Id, name = p.Name, shortName = p.Short,
+                    extensions = p.Extensions, hasCores = p.Cores.Length > 0,
+                }),
             }
         });
     }

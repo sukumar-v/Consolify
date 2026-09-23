@@ -145,6 +145,56 @@ old primary back when you quit.
 
 ![Consolify's settings screen](assets/screenshot-settings.png)
 
+## Emulators and ROMs
+
+Consolify runs emulated games the way Playnite and LaunchBox do: you tell it where the ROMs
+are and what runs them, and the games take their place in the library like anything else —
+cover art and box art, a description, a release date and a score, playtime, favourites,
+collections, and a tile you press A on.
+
+Most of it sets itself up. Every scan looks for emulators the way it looks for games: RetroArch
+in a portable folder at a drive root or from Steam, anything installed under Program Files or
+`%LOCALAPPDATA%`, a folder in Downloads or Desktop, an `Emulators` collection, the registry's
+uninstall entries and the Start Menu's shortcuts. Games are found from **RetroArch's playlists**
+first, which already say which system each ROM is and which core plays it, then from the game
+folders PCSX2 and DuckStation keep in their settings, then from any folder named after a system
+that holds a file of that system's kind: an EmuDeck-style `Emulation\roms\snes`, a `D:\ROMs\PS1`,
+RetroArch's own `downloads\GBA`. Everything found gets a row under **Settings → Library →
+Emulators & ROM folders**, marked *found automatically*, and anything you remove there stays
+removed. **Find emulators and ROMs automatically** turns the whole thing off.
+
+For anything the scan does not find, the same section adds it by hand, entirely from the gamepad:
+
+1. **Add an emulator.** Point to its `.exe`. RetroArch, Dolphin, PCSX2, DuckStation, PPSSPP,
+   Cemu, yuzu, Ryujinx, Citra/Azahar, melonDS, mGBA, Snes9x, bsnes, Mesen, Project64, ares,
+   Flycast, Redream, MAME, xemu, Xenia, Mednafen, BlastEm, Kega Fusion, BizHawk and a few more
+   are recognised from the file name and set up with the right command line. Anything else is
+   started with the ROM's path and can be given arguments from its own row (`{rom}` is the file,
+   `{romdir}`, `{romname}`, `{romfile}`, `{core}` and `{emudir}` also expand).
+2. **Add a ROM folder.** Pick the folder, say which system it is for (the folder's name is the
+   first guess — `SNES`, `psx`, `MegaDrive` all land on the right one) and which emulator runs
+   it. One folder per system, which is how every ROM collection is organised anyway; the
+   system decides which file extensions count as games, so save files, manuals and box scans
+   beside the ROMs are left alone. A RetroArch folder also needs a core, and the first of that
+   system's usual cores that is installed is chosen for you.
+
+The folder is scanned on every start, like the stores are. Titles are read off the file names
+with the No-Intro and GoodTools tags stripped — `Legend of Zelda, The - A Link to the Past (USA)
+(Rev 1).sfc` becomes *The Legend of Zelda: A Link to the Past* — and that title is what the
+metadata lookup runs on, so a game the file name does not describe (a MAME set called `sf2`)
+can be renamed from its Manage menu and fetches again. Multi-disc games listed in an `.m3u`
+are one game; `.bin` tracks named by a `.cue` are not listed twice.
+
+Every system is a platform in the library's filter, under its own **Emulated** heading, so a
+shelf of SNES games is one press away. An emulated game never merges with a store copy of the
+same name: *Doom* on the SNES and DOOM on Steam are two games. Art and facts come from the same
+shared service as every other non-Steam game, with the system passed along so the lookup asks
+about the right *Doom*; Steam is never consulted for a ROM.
+
+Playing one starts the emulator with the ROM, and the launcher treats the emulator as the game:
+its window goes to the TV, the in-game menu closes it, and playtime is recorded against the ROM.
+Per game, Manage offers **Rename**, **Run with** (a different emulator for this one game) and
+its own launch arguments.
 
 ## Build & run
 
@@ -185,7 +235,14 @@ Consolify/
     DisplayService.cs     Monitor enumeration + primary-display switching (ChangeDisplaySettingsEx)
     GameLaunchService.cs  Launch orchestration, process tracking, window repositioning, playtime
     LibraryScanner.cs     Steam (ACF/VDF + librarycache art), Epic (.item manifests),
-                          GOG (registry), Xbox (MicrosoftGame.config + AppModel repository)
+                          GOG (registry), Xbox (MicrosoftGame.config + AppModel repository),
+                          ROM folders (one system per folder, see Models/Emulation.cs)
+    RomTitles.cs          A game's title out of a ROM's file name (No-Intro / GoodTools tags)
+    EmulatorLaunch.cs     The emulator command line for a ROM: {rom}, {core} and friends
+    EmulatorDetection.cs  Finds installed emulators (folders, registry, Start Menu, Steam) and
+                          ROM sources (RetroArch playlists, PCSX2/DuckStation game lists,
+                          folders named after a system)
+    RetroArchPlaylists.cs Reads RetroArch's .lpl playlists: ROM path, database label, core
     GamepadService.cs     Gamepad polling: UI navigation events + gamepad-mouse (SendInput/SetCursorPos),
                           merging XInput with the HID reader; publishes which pad family is in use
     HidGamepadReader.cs   Raw Input + hid.dll: DualSense, Switch Pro and generic pads, in XInput's shape

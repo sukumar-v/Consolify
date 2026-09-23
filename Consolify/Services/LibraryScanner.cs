@@ -29,6 +29,155 @@ public class LibraryScanner
         return games;
     }
 
+    // ---------- Emulated games ----------
+
+    /// <summary>
+    /// One entry per ROM file in each configured folder. Nothing is guessed about the system: the
+    /// folder was set up for one, and every file in it with one of that system's extensions is a
+    /// game for it. The id is a hash of the file's full path, so it survives a rescan -- playtime,
+    /// favourites and hand-picked art all key on it -- and moves with nothing but the file.
+    /// </summary>
+    public List<Game> ScanEmulated(IReadOnlyList<RomFolderDef> folders)
+    {
+        var games = new List<Game>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var folder in folders)
+        {
+            try
+            {
+                foreach (var g in ScanRomFolder(folder))
+                    // The same file reached through two overlapping folders is one game. A
+                    // duplicate id would break the merge's dictionary on the next scan.
+                    if (seen.Add(g.Id)) games.Add(g);
+            }
+            catch (Exception ex) { Log.Info($"ROM folder {folder.Path} skipped: {ex.Message}"); }
+        }
+        return games;
+    }
+
+    private static List<Game> ScanRomFolder(RomFolderDef folder)
+    {
+        var games = new List<Game>();
+        var platform = EmulatedPlatforms.Find(folder.PlatformId);
+        if (platform is null) { Log.Info($"ROM folder {folder.Path}: unknown platform '{folder.PlatformId}'"); return games; }
+        if (folder.Playlist) return ScanPlaylist(folder, platform);
+        if (!Directory.Exists(folder.Path)) { Log.Info($"ROM folder {folder.Path} is not there"); return games; }
+
+        IEnumerable<string> extList = folder.Extensions is { Count: > 0 } own ? own : platform.Extensions;
+        var exts = extList
+            .Select(e => "." + e.Trim().TrimStart('.').ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = folder.Recurse,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+        };
+        var files = Directory.EnumerateFiles(folder.Path, "*", options).ToList();
+
+        // A multi-disc game is one game. Its .m3u lists the discs, and a .cue names its tracks,
+        // so anything either of them refers to is a part of a game already in the list, not a
+        // game of its own.
+        var parts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files)
+        {
+            var ext = Path.GetExtension(file);
+            if (ext.Equals(".m3u", StringComparison.OrdinalIgnoreCase)) AddPlaylistParts(file, parts);
+            else if (ext.Equals(".cue", StringComparison.OrdinalIgnoreCase)) AddCueParts(file, parts);
+        }
+
+        foreach (var file in files)
+        {
+            if (!exts.Contains(Path.GetExtension(file))) continue;
+            if (parts.Contains(file)) continue;
+            long size = 0;
+            try { size = new FileInfo(file).Length; } catch { /* cosmetic */ }
+            games.Add(new Game
+            {
+                Id = "rom:" + PathHash(file),
+                Title = RomTitles.FromFileName(file),
+                Platform = platform.Name,
+                PlatformId = platform.Id,
+                Emulated = true,
+                RomPath = file,
+                RomFolderId = folder.Id,
+                InstallDir = Path.GetDirectoryName(file),
+                SizeBytes = size,
+                Installed = true,
+            });
+        }
+        return games;
+    }
+
+    /// <summary>
+    /// A RetroArch playlist's entries as games. The database label is the title where there is
+    /// one -- it is the No-Intro name, cleaned the same way a file name is -- and an entry whose
+    /// file has gone is left out rather than shown as a tile that cannot start.
+    /// </summary>
+    private static List<Game> ScanPlaylist(RomFolderDef folder, EmulatedPlatforms.Def platform)
+    {
+        var games = new List<Game>();
+        var playlist = RetroArchPlaylists.Read(folder.Path);
+        if (playlist is null) return games;
+        foreach (var entry in playlist.Entries)
+        {
+            if (!File.Exists(entry.RomPath)) continue;
+            long size = 0;
+            try { size = new FileInfo(entry.RomPath).Length; } catch { /* cosmetic */ }
+            games.Add(new Game
+            {
+                Id = "rom:" + PathHash(entry.RomPath),
+                Title = entry.Label.Length > 0 ? RomTitles.FromLabel(entry.Label) : RomTitles.FromFileName(entry.RomPath),
+                Platform = platform.Name,
+                PlatformId = platform.Id,
+                Emulated = true,
+                RomPath = entry.RomPath,
+                RomFolderId = folder.Id,
+                InstallDir = Path.GetDirectoryName(entry.RomPath),
+                SizeBytes = size,
+                Installed = true,
+            });
+        }
+        return games;
+    }
+
+    private static void AddPlaylistParts(string m3u, HashSet<string> parts)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(m3u) ?? "";
+            foreach (var raw in File.ReadLines(m3u))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+                parts.Add(Path.GetFullPath(Path.Combine(dir, line)));
+            }
+        }
+        catch { /* an unreadable playlist just means its discs are listed separately */ }
+    }
+
+    private static void AddCueParts(string cue, HashSet<string> parts)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(cue) ?? "";
+            foreach (Match m in Regex.Matches(File.ReadAllText(cue), "^\\s*FILE\\s+\"([^\"]+)\"", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+                parts.Add(Path.GetFullPath(Path.Combine(dir, m.Groups[1].Value)));
+        }
+        catch { /* same as above */ }
+    }
+
+    /// <summary>Sixteen hex characters of the path's SHA-1, lower-cased first so a drive letter
+    /// typed either way is the same game. Plenty for a library; a collision would need two ROM
+    /// files whose paths hash alike in 64 bits.</summary>
+    private static string PathHash(string path)
+    {
+        var bytes = System.Security.Cryptography.SHA1.HashData(
+            System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant()));
+        return Convert.ToHexString(bytes, 0, 8).ToLowerInvariant();
+    }
+
     // ---------- Xbox / Microsoft Store ----------
 
     /// <summary>

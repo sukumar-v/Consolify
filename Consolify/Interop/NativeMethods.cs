@@ -102,6 +102,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
+    /// <summary>Lets another process take the foreground next time it asks. Only honoured while
+    /// the calling process is itself the foreground process -- so it has to be called before the
+    /// launcher parks, not after.</summary>
+    [DllImport("user32.dll")]
+    public static extern bool AllowSetForegroundWindow(uint dwProcessId);
+
     [DllImport("user32.dll")]
     public static extern bool BringWindowToTop(IntPtr hWnd);
 

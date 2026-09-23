@@ -4,8 +4,27 @@ public class Game
 {
     public string Id { get; set; } = "";            // e.g. "steam:1091500", "manual:<guid>"
     public string Title { get; set; } = "";
-    public string Platform { get; set; } = "Manual"; // Steam | Epic | GOG | Manual
+    /// <summary>Steam | Epic | GOG | Xbox | Manual, or for a ROM the system's name -- "Super
+    /// Nintendo", "PlayStation" -- which is what the library's platform filter lists it under.</summary>
+    public string Platform { get; set; } = "Manual";
     public string? ExePath { get; set; }             // direct executable (GOG / Manual / Epic)
+
+    // ---- Emulated games ----
+    // A ROM found in one of the folders set up under Settings → Library. It launches through
+    // the folder's emulator (see EmulatorLaunch), never through ExePath or LaunchUri.
+    public bool Emulated { get; set; }
+    /// <summary>One of EmulatedPlatforms.All -- "snes", "ps1" -- the stable id behind Platform.</summary>
+    public string? PlatformId { get; set; }
+    public string? RomPath { get; set; }
+    public string? RomFolderId { get; set; }
+    /// <summary>An emulator chosen for this game alone, under Manage. Null -- the normal case --
+    /// means the ROM folder's emulator, resolved at launch, so changing the folder's choice moves
+    /// every game in it that has not been given one of its own.</summary>
+    public string? EmulatorId { get; set; }
+    /// <summary>The title was typed in by hand, so a rescan must not put the file name's back.
+    /// A ROM's title is a guess from its file name (see RomTitles) and the guess is what the
+    /// metadata lookup runs on, so fixing it is the way to fix a game the lookup got wrong.</summary>
+    public bool TitleEdited { get; set; }
     public string? Args { get; set; }
     public string? LaunchUri { get; set; }           // steam:// or com.epicgames.launcher:// URI
     public string? InstallDir { get; set; }          // used to find the game process after URI launches

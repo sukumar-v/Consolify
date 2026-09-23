@@ -59,6 +59,13 @@ public class AppSettings
     /// out if Microsoft ever stops accepting that. See the README.</summary>
     public string XboxClientId { get; set; } = "";
 
+    // Emulation
+    /// <summary>Look for installed emulators and for ROMs on every scan -- RetroArch's playlists,
+    /// an Emulation\roms layout, folders named after a system -- and add what is found. On by
+    /// default for the same reason the store scans are: nobody wants to go and set up what the
+    /// machine already knows. Everything found can be removed, and stays removed.</summary>
+    public bool DetectEmulators { get; set; } = true;
+
     // Display
     public string? TvDeviceName { get; set; }          // e.g. @"\\.\DISPLAY2"
     public bool SwitchPrimaryOnLaunch { get; set; } = true;

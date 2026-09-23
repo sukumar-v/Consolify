@@ -739,8 +739,109 @@ Stop the scrolled grid from clipping through the All games header
   mouse click. `TakeForeground` joins the foreground window's input queue for the call
   (`AttachThreadInput`), and while `_overlayActive` the pad service treats the launcher as in front
   and the game as not focused regardless, so a refused foreground can no longer freeze a menu.
+- **A process the launcher starts directly opened unfocused** -- an emulator, a GOG or manual exe.
+  `GameStarted` parks the launcher by hiding it, the foreground passes to whatever was underneath,
+  and when the game's window appears two seconds later Windows refuses it the foreground: the
+  rule is "started by the CURRENT foreground process", and the hidden launcher is not it any more.
+  Steam games never showed this because exclusive fullscreen takes the foreground by force. Two
+  layers now: `AllowSetForegroundWindow(pid)` right after `Process.Start`, BEFORE the park (it is
+  only honoured while the caller is the foreground process), and `FocusGameWindowAsync`, which
+  waits for the game's first real window and brings it to the front once through the same
+  `AttachThreadInput` join `TakeForeground` uses -- unless the game already has the foreground or
+  the launcher does (an overlay is up).
 - **A session used to wait a flat 15 s after every exit** for a successor process from the install
   dir. Now: anything of the game still running at that instant carries the session on (launchers
   hand over before they exit); a close Consolify asked for waits for nothing (`_closeRequested`);
   a process that lived under 90 s (a pre-launcher) keeps the 15 s window; anything longer gets 1 s,
   for a game that restarts itself. The poll is every 250 ms, not 1.5 s.
+
+## Emulators and ROMs
+
+- **The folder is the platform.** Nothing about a file says whether a `.bin` is Genesis, Atari or a
+  PlayStation track, and every ROM collection is already one folder per system, so a `RomFolderDef`
+  names its system and the system (`EmulatedPlatforms`) supplies the extensions. Disc systems leave
+  `.bin` out on purpose; a `.cue`'s `FILE` lines and an `.m3u`'s entries are "parts", skipped so a
+  five-track game is one tile. The folder can override the extension list.
+- A ROM's id is `rom:<16 hex of SHA-1(lower-cased full path)>`, so playtime, favourites and custom
+  art follow the file and survive a rescan; `ScanEmulated` dedupes ids, because two overlapping
+  folders would otherwise put the same id in the list twice and `MergeScanned`'s `ToDictionary`
+  throws on the NEXT scan, not this one.
+- **A ROM never reaches Steam's search.** Steam sells "DOOM" and "DOOM (1993)", and the exact-title
+  rule hands the SNES cartridge the 2016 capsule with nothing about it looking wrong. ROMs go to the
+  service (IGDB + SteamGridDB) only, with the system's IGDB platform ids as `platform=` on
+  `/v1/facts` and `where platforms = (…)` in `IgdbClient`. `(a, b)` in APIcalypse is "released on any
+  of these".
+- **The worker has to be deployed for the platform hint to do anything.** An undeployed worker
+  ignores the parameter: verified Sept 2026, `/v1/facts?title=Doom&platform=19,58` answered DOOM
+  (2016) on a fresh `X-Cache: MISS`. The cache key carries `:p<ids>` only when the parameter is
+  present, so no `SCHEMA` bump is needed. Deploy with `npx wrangler deploy` in `proxy/`.
+- Emulated games never group as editions (`buildEditions` gives each its own group): Doom on the
+  SNES and DOOM on Steam are different games, and so are Sonic on the Genesis and on the Master
+  System. The platform string is the system's NAME ("Super Nintendo"), which is what the filter
+  lists under an EMULATED heading; the original Xbox is "Original Xbox" because "Xbox" is already
+  the store, and a filter that could mean either would be no filter.
+- **Emulators and ROM folders live in library.json**, beside the collections, and are changed only
+  through the `emu*` / `romFolder*` bridge commands. They are deliberately NOT in `CopySettings`:
+  the page never sends them back, so a settings push cannot wipe them and "Restore default
+  settings" leaves them alone. The page's `S.emulation` is read-only state from `PushState`.
+- A game's `EmulatorId` is an OVERRIDE and null is the normal case: launch resolves
+  `game.EmulatorId ?? folder.EmulatorId` (`LibraryStore.EmulatorFor`), so changing the folder's
+  emulator moves every game that was not given one of its own. `MergeScanned` carries the override
+  and `TitleEdited` across, like `Args`.
+- **The session folder for a ROM is the emulator's folder**, not the ROM's (`SessionDir` in
+  `GameLaunchService`): the emulator is the process that runs, gets moved to the TV and is closed
+  by the in-game menu. Which is why a stand-in emulator for a test must NOT be a System32 program:
+  `PidBelongsToGame` would claim every svchost and the session would never end. The harness copies
+  cmd.exe into a scratch folder instead.
+- Arguments are a template with `{rom}`, `{romdir}`, `{romname}`, `{romfile}`, `{core}`, `{emudir}`,
+  three layers that REPLACE each other (game > folder > emulator), and quoting is the template's
+  job so MAME's unquoted set name is possible. A template with no `{rom` gets `"{rom}"` appended,
+  because an emulator started with no game looks like a launch that did nothing. RetroArch's
+  `{core}` is per folder (`RomFolderDef.Core`); `SuggestCore` takes the first of the platform's
+  listed cores that exists under `<emudir>\cores`, and only then is a file dialog shown.
+- `NeedsFetch` lets an emulated game wait out the freshness window even with no art: a folder of a
+  thousand arcade sets with nothing on SteamGridDB would otherwise cost a thousand proxy calls per
+  start. It is still re-fetched if a picture it did have has gone from disk.
+- `emuAdded` is pushed with `id: null` when the file dialog is cancelled. The page's folder wizard
+  waits on it, and without the null a cancelled dialog left `pendingEmuPick` armed, so the next
+  unrelated "Add an emulator" would have added the folder with that emulator.
+- The preview's `mockHandle` answers every emulation command and ships a slice of the catalogue
+  (`mockEmulation`), so the wizard, the options lists and the Manage rows can be walked in the
+  browser. Keys: X opens the filter, M opens Settings, Enter is A.
+
+## Finding emulators and ROMs on their own
+
+- `EmulatorDetection.Run` goes first in every scan (`DetectEmulators`, default on) and ADDS to the
+  library store from the scan thread; the scan that follows picks the new folders up in the same
+  pass. Only exes the presets name are ever taken, so a folder of exes cannot produce a "video
+  player" emulator. Sources: one level under Program Files, `%LOCALAPPDATA%` (+`Programs`), the
+  profile folders and every drive root; a second level only under a folder whose name says
+  emulator; `Emulation\emulators`; Steam's `common\RetroArch`; uninstall entries (`DisplayIcon`,
+  `InstallLocation`); Start Menu and Desktop `.lnk` files whose name contains a preset name,
+  resolved through `WScript.Shell`. Measured on this PC: emulators 246 ms, ROM sources 39 ms.
+- **RetroArch's playlists are the best ROM source and come first.** One `.lpl` per system under
+  `<retroarch>\playlists` (or `%APPDATA%\RetroArch\playlists`, or `playlist_directory` in
+  retroarch.cfg): JSON since 1.7.5, six plain lines per entry before; `content_*.lpl` are history
+  and favourites, not systems. An entry carries the ROM path (`game.zip#game.gba` for an archive
+  -- the archive is the file), the database's No-Intro label, and `core_path` or "DETECT". A
+  playlist becomes a `RomFolderDef` with `Playlist = true` whose `Path` is the .lpl, its platform
+  from the file name (`RetroArchPlaylists.PlatformFor` = a few specials, then `Guess`), and its
+  core the most-named existing one, else `SuggestCore`. Directories that playlist entries live in
+  are then NOT added as folders on top, or every game would have two rows.
+- The trade-off of playlists first: a ROM dropped into the folder later is not seen until
+  RetroArch rescans it, or the folder is added by hand. Said in the README.
+- `EmulatedPlatforms.Guess` decides a contained match by LENGTH, and "Super Nintendo Entertainment
+  System" contains the NES's full name -- so the SNES's full name is in the list, or every SNES
+  playlist filed itself under NES. The harness has both names.
+- Labels are not file names: `RomTitles.FromLabel` exists because `GetFileNameWithoutExtension`
+  on "Dr. Mario (USA)" is "Dr".
+- Detected folders get an emulator from `PickEmulator`: the source's own program (a PCSX2 ini →
+  PCSX2), else the standalone emulator made for the system with the FEWEST platforms (mGBA over an
+  everything-emulator), else a RetroArch that has a core for it installed.
+- Removing an emulator or folder puts its path on `IgnoredEmulatorPaths` / `IgnoredRomFolderPaths`
+  in library.json, however it got there; adding by hand takes it off. Without that, detection put
+  back whatever was removed on the next start, which reads as "remove does nothing".
+- The harness's detection section runs against the REAL machine, read-only (`FindEmulators` and
+  `FindRomFolders` with empty lists, nothing saved). It asserts what this PC has -- RetroArch at
+  `C:\RetroArch-Win64`, PCSX2 at `C:\PCSX2`, a GBA and a DS playlist -- so it will need its
+  expectations changed on another machine.

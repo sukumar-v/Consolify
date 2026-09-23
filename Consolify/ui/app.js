@@ -24,6 +24,7 @@ let S = {
   scanning: false,
   steamAccount: null,                    // { steamId, personaName, ownedCount, fetchedAt, error }
   stores: null,                          // { epic|gog|xbox: { signedIn, user, count, fetchedAt, error }, gamePass: { count, fetchedAt, error } }
+  emulation: null,                       // { emulators: [...], romFolders: [...], platforms: [{ id, name, shortName, extensions, hasCores }] }
   padConnected: false,
 };
 
@@ -36,7 +37,31 @@ let detailReturn = "library";            // where B goes back to from detail
 
 /* filter & sort (session state) — empty sets mean "no restriction" */
 const F = { platforms: new Set(), status: new Set(), collections: new Set(), fav: false, hidden: false, sort: "az", search: "" };
+/* The stores. An emulated game's platform is its SYSTEM -- "Super Nintendo", "PlayStation" -- so
+   the filter lists those too, but only the ones the library actually has (see emulatedPlatforms):
+   forty consoles with nothing under them would bury the five rows anyone uses. */
 const PLATFORMS = ["Steam", "Epic", "GOG", "Xbox", "Manual"];
+
+/** The systems the library holds ROMs for, in the catalogue's order, each with its count. */
+function emulatedPlatforms() {
+  const counts = new Map();
+  for (const g of S.games) if (g.emulated) counts.set(g.platform, (counts.get(g.platform) || 0) + 1);
+  const order = (S.emulation && S.emulation.platforms || []).map(p => p.name);
+  return [...counts.keys()]
+    .sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999) || a.localeCompare(b))
+    .map(name => ({ name, count: counts.get(name) }));
+}
+
+/* The catalogue entry behind an emulated game's platform id, and the emulator it runs with:
+   its own, if it was given one under Manage, otherwise its folder's. */
+function platformDef(id) { return (S.emulation && S.emulation.platforms || []).find(p => p.id === id) || null; }
+function emulatorById(id) { return id && S.emulation ? (S.emulation.emulators || []).find(e => e.id === id) || null : null; }
+function romFolderById(id) { return id && S.emulation ? (S.emulation.romFolders || []).find(f => f.id === id) || null : null; }
+function emulatorFor(g) {
+  if (!g || !g.emulated) return null;
+  const folder = romFolderById(g.romFolderId);
+  return emulatorById(g.emulatorId) || (folder ? emulatorById(folder.emulatorId) : null);
+}
 const STATUSES = ["Installed", "Not installed"];
 const MINIMIZE_COMBOS = ["LS + RS", "LB + RB", "LT + RT + LB + RB", "Guide", "View + Menu", "LS + RB", "LB + RS", "Off"];
 /* Deliberately combos rather than single buttons: inside a game every face and shoulder button
@@ -154,6 +179,7 @@ function repaintFocus() {
   else if (gameMenu) renderGameMenu();
   else if (collectOpen) renderCollect();
   else if (manageOpen) renderManage();
+  else if (choiceState) renderChoice();
   else if (confirmState) renderConfirm();
   else if (view === "library") updateLibraryFocus(true);
   else if (view === "detail") updateDetailFocus();
@@ -860,6 +886,18 @@ const ICONS = {
   terminal: '<path d="m5 8 4 4-4 4M12 16h7"/><rect x="2" y="4" width="20" height="16" rx="1.5"/>',
   file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
   store: '<path d="M21 12a9 9 0 1 1-2.6-6.35M21 3.5v5h-5"/>',
+  /* A cartridge, for anything emulated: the one shape every system from the 2600 to the DS had
+     in common, and the thing a ROM file stands for. */
+  cartridge: '<path d="M6.5 3.5h11A1.5 1.5 0 0 1 19 5v11.5l-2 2.5H7l-2-2.5V5a1.5 1.5 0 0 1 1.5-1.5z"/>'
+           + '<rect x="8" y="6.5" width="8" height="5.5" rx="0.8"/><path d="M9 15.5h6"/>',
+  /* A pencil, for renaming. */
+  edit: '<path d="M4 20h4.5L19 9.5a1.8 1.8 0 0 0 0-2.6l-1.9-1.9a1.8 1.8 0 0 0-2.6 0L4 15.5V20z"/><path d="m13 6.5 4.5 4.5"/>',
+  /* A chip, for a core. */
+  chip: '<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.8"/>'
+      + '<path d="M9 2.5v3.5M15 2.5v3.5M9 18v3.5M15 18v3.5M2.5 9h3.5M2.5 15h3.5M18 9h3.5M18 15h3.5"/>',
+  /* A folder with a cartridge in it, for a ROM folder. */
+  romFolder: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/>'
+           + '<path d="M9.5 11h5v5h-5z"/>',
 
   /* ---- store marks, for the detail page. Each is the silhouette of the real thing reduced to
      this set's stroke weight: Steam's ringed valve, Epic's arched E, GOG's rounded wordmark
@@ -1748,7 +1786,7 @@ function makeAddTile(onHover, onClick) {
  */
 function gameView(g) {
   return {
-    id: g.id, title: g.title, platform: g.platform,
+    id: g.id, title: g.title, platform: g.platform, emulated: !!g.emulated,
     installed: g.installed, favorite: g.favorite, hidden: g.hidden,
     cover: coverUrl(g) || "", banner: bannerUrl(g) || "",
     hero: heroUrl(g) || "", logo: logoUrl(g) || "",
@@ -1907,7 +1945,10 @@ function buildEditions() {
   EDITIONS = new Map();
   const byKey = new Map();
   for (const g of S.games) {
-    const key = g.hidden ? "" : titleKey(g.title);
+    // A ROM never groups with a store copy, or with a ROM for another system: "Doom" on the SNES
+    // and DOOM on Steam are different games that happen to share a name, and "Sonic the
+    // Hedgehog" on the Genesis and on the Master System are two different games too.
+    const key = g.hidden || g.emulated ? "" : titleKey(g.title);
     let group = null;
     if (key) {
       const groups = byKey.get(key) || [];
@@ -2028,7 +2069,7 @@ function updateContinueScroll(follow) {
 let hWheelAccum = 0;
 
 function overlayOpen() {
-  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!confirmState || guideOpen;
+  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!choiceState || !!confirmState || guideOpen;
 }
 
 window.addEventListener("wheel", (e) => {
@@ -2188,7 +2229,7 @@ function renderLibrary() {
     const note = document.createElement("div");
     note.className = "empty-note";
     note.innerHTML = S.scanning
-      ? "Scanning your Steam, Epic, GOG and Xbox libraries…"
+      ? "Scanning your Steam, Epic, GOG and Xbox libraries and your ROM folders…"
       : F.search
         ? `No games match “${esc(F.search)}”. Press ${slot("View")} to change the search, or ${slot("B")} while typing to clear it.`
       : (visibleGames().length
@@ -2516,12 +2557,18 @@ const PLATFORM_ICONS = {
   Steam: "steam", Epic: "epic", GOG: "gog", Xbox: "xbox", Manual: "file",
 };
 
+/** The mark for where a game came from: its store's, or the cartridge for anything emulated. */
+function platformIcon(g) { return g.emulated ? "cartridge" : PLATFORM_ICONS[g.platform] || "store"; }
+
 function renderDetailPlatform(g) {
   const el = $("detailPlatform");
-  const icon = PLATFORM_ICONS[g.platform];
-  const others = editionsOf(g).filter(m => m.id !== g.id).map(m => m.platform);
+  const icon = platformIcon(g);
+  // For a ROM the useful second fact is which program runs it, not which other stores have it.
+  const emu = emulatorFor(g);
+  const others = g.emulated ? [] : editionsOf(g).filter(m => m.id !== g.id).map(m => m.platform);
   el.innerHTML = (icon ? iconSvg(icon) : "") + `<span>${esc(g.platform)}</span>` +
-    (others.length ? `<span class="also-on">also on ${esc(others.join(", "))}</span>` : "");
+    (others.length ? `<span class="also-on">also on ${esc(others.join(", "))}</span>` : "") +
+    (g.emulated ? `<span class="also-on">${emu ? "via " + esc(emu.name) : "no emulator set"}</span>` : "");
 }
 
 /*
@@ -2809,9 +2856,12 @@ function allSettingsRows() {
   });
 
   rows.push({ section: "LIBRARY", cat: "library" });
-  const counts = PLATFORMS.map(p => `${p} ${S.games.filter(g => g.platform === p).length}`).join(" · ");
+  const romCount = S.games.filter(g => g.emulated).length;
+  const counts = PLATFORMS.map(p => `${p} ${S.games.filter(g => g.platform === p).length}`)
+    .concat(romCount ? [`Emulated ${romCount}`] : []).join(" · ");
   rows.push({
-    name: "Rescan platforms", hint: counts || "Steam, Epic and GOG are scanned from their local install data",
+    name: "Rescan platforms",
+    hint: (counts ? counts + " · " : "") + "Steam, Epic, GOG and the Xbox app from their install data, plus every ROM folder and playlist",
     type: "action", label: S.scanning ? "Scanning…" : "Rescan",
     action: () => { if (!S.scanning) send({ cmd: "rescan" }); },
   });
@@ -2819,6 +2869,48 @@ function allSettingsRows() {
     name: "Add a game manually", hint: "Point to an .exe and optional cover art",
     type: "action", label: "Add",
     action: () => send({ cmd: "addManual" }),
+  });
+
+  // One row per ROM folder and one per emulator, each opening its own options list; the two
+  // "Add" rows are the way in. A folder with no emulator, or a RetroArch folder with no core,
+  // says so on its row: its games are in the library and cannot start, and that is the one
+  // thing worth a warning here.
+  rows.push({ section: "EMULATORS & ROM FOLDERS", cat: "library" });
+  rows.push(toggleRow("Find emulators and ROMs automatically",
+    "Every scan looks for installed emulators in the usual places, then for games: RetroArch's playlists, an Emulation\\roms layout, and folders named after a system. Anything you remove stays removed",
+    () => s.detectEmulators !== false, v => set(() => s.detectEmulators = v)));
+  const em = S.emulation || { emulators: [], romFolders: [], platforms: [] };
+  (em.romFolders || []).forEach(f => {
+    const p = platformDef(f.platformId);
+    const emu = emulatorById(f.emulatorId);
+    const n = S.games.filter(g => g.romFolderId === f.id).length;
+    const bits = [`${n} game${n === 1 ? "" : "s"}`, emu ? emu.name : "no emulator"];
+    if (usesCore(emu)) bits.push(f.core ? coreName(f.core) : "no core");
+    if (f.detected) bits.push("found automatically");
+    // A playlist is named for its file; the folder its games are in is the games' business.
+    const where = f.playlist ? `RetroArch playlist · ${f.path.split(/[\\/]/).pop()}` : f.path;
+    rows.push({
+      name: p ? p.name : f.platformId, hint: `${where} · ${bits.join(" · ")}`,
+      warn: !emu ? "No emulator is set for this folder, so its games cannot start yet"
+          : usesCore(emu) && !f.core ? `${emu.name} needs a core for this system before its games can start` : undefined,
+      type: "action", label: "Options",
+      action: () => openRomFolderOptions(f),
+    });
+  });
+  rows.push({
+    name: "Add a ROM folder", hint: "One folder per system. You will be asked which system it is and which emulator runs it; the folder's name is a first guess",
+    type: "action", label: "Add",
+    action: () => send({ cmd: "romFolderPick" }),
+  });
+  (em.emulators || []).forEach(e => rows.push({
+    name: e.name, hint: `${e.exePath} · ${e.args || '"{rom}"'}${e.detected ? " · found automatically" : ""}`,
+    type: "action", label: "Options",
+    action: () => openEmulatorOptions(e),
+  }));
+  rows.push({
+    name: "Add an emulator", hint: "For one the scan did not find: point to its .exe. RetroArch, Dolphin, PCSX2, DuckStation, PPSSPP, mGBA, MAME and the other common ones are recognised and set up on their own",
+    type: "action", label: "Add",
+    action: () => send({ cmd: "emuAdd" }),
   });
 
   rows.push({ section: "STEAM ACCOUNT", cat: "library" });
@@ -3332,10 +3424,18 @@ function filterMenuRows() {
 /** Flat list of the multi-select dropdown, with category headers interleaved. */
 function filterDropdownRows() {
   const rows = [{ cat: "PLATFORM" }];
-  PLATFORMS.forEach(p => rows.push({
-    label: p, icon: "gamepad", checked: F.platforms.has(p),
+  const platformRow = (p, icon, sub) => ({
+    label: p, icon, sub, checked: F.platforms.has(p),
     toggle: () => { F.platforms.has(p) ? F.platforms.delete(p) : F.platforms.add(p); },
-  }));
+  });
+  PLATFORMS.forEach(p => rows.push(platformRow(p, "gamepad")));
+  // One row per system there are ROMs for, under their own heading. Same set as the stores --
+  // ticking SNES and Steam shows both -- so a system is a platform in every sense the filter has.
+  const systems = emulatedPlatforms();
+  if (systems.length) {
+    rows.push({ cat: "EMULATED" });
+    systems.forEach(s => rows.push(platformRow(s.name, "cartridge", `${s.count}`)));
+  }
   rows.push({ cat: "STATUS" });
   STATUSES.forEach(s => rows.push({
     label: s, icon: s === "Installed" ? "checkCircle" : "download", checked: F.status.has(s),
@@ -3573,6 +3673,7 @@ function collectInput(btn) {
 
 /* How this game actually starts, in one line. */
 function launchRoute(g) {
+  if (g.emulated) { const e = emulatorFor(g); return e ? `Through ${e.name}` : "No emulator is set for it"; }
   if (g.preferDirectLaunch && g.exePath) return g.exePath;
   if (g.platform === "Steam") return "Through the Steam client";
   if (g.platform === "Epic") return "Through the Epic Games launcher";
@@ -3593,7 +3694,7 @@ function manageItems() {
     // top the moment it was chosen, and the row under the highlight changed out from beneath it.
     const byStore = (a, b) => EDITION_ORDER.indexOf(a.platform) - EDITION_ORDER.indexOf(b.platform);
     [...editions].sort(byStore).forEach(m => items.push({
-      label: m.platform, icon: PLATFORM_ICONS[m.platform] || "store", radio: true,
+      label: m.platform, icon: platformIcon(m), radio: true,
       checked: m.id === g.id,
       action: () => {
         if (m.id === g.id) return;
@@ -3607,22 +3708,52 @@ function manageItems() {
     }));
     items.push({ cat: "THIS COPY" });
   }
-  items.push({
-    label: "Set launch arguments", icon: "terminal", sub: g.args || "e.g. --launcher-skip",
-    action: () => {
-      closeManage();
-      openInput("LAUNCH ARGUMENTS", g.args || "", v => send({ cmd: "setArgs", id: g.id, args: v }));
-    },
-  });
-  items.push({
-    label: "Change executable", icon: "file",
-    // The subtitle carries the launch route, which used to sit under the title on the detail
-    // page. It is troubleshooting detail: it belongs on the screen you open to change it.
-    sub: launchRoute(g),
-    action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
-  });
-  if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
-    items.push({ label: `Launch through ${g.platform} again`, icon: "store", action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
+  if (g.emulated) {
+    // A ROM has no executable of its own to change; what it has is an emulator, a title that
+    // was guessed from its file name, and a command line that is the emulator's template
+    // unless overridden here. "Remove" is absent on purpose: the file would be found again on
+    // the next scan. Hide is the way to keep one out.
+    const emu = emulatorFor(g);
+    const folder = romFolderById(g.romFolderId);
+    const template = g.args || (folder && folder.args) || (emu && emu.args) || '"{rom}"';
+    items.push({
+      label: "Rename", icon: "edit",
+      sub: "The name is read off the file. Fixing it is how a wrongly matched game fetches the right details",
+      action: () => {
+        closeManage();
+        openInput("GAME TITLE", g.title, v => { if (v && v !== g.title) send({ cmd: "setTitle", id: g.id, title: v }); });
+      },
+    });
+    items.push({
+      label: "Run with", icon: "cartridge", sub: launchRoute(g),
+      action: () => { closeManage(); openEmulatorChoice(g); },
+    });
+    items.push({
+      label: "Set launch arguments", icon: "terminal",
+      sub: g.args ? g.args : `Uses ${emu ? emu.name + "'s" : "the emulator's"} own: ${template}`,
+      action: () => {
+        closeManage();
+        openInput("LAUNCH ARGUMENTS ({rom} is the file)", g.args || template, v => send({ cmd: "setArgs", id: g.id, args: v === template ? "" : v }));
+      },
+    });
+  } else {
+    items.push({
+      label: "Set launch arguments", icon: "terminal", sub: g.args || "e.g. --launcher-skip",
+      action: () => {
+        closeManage();
+        openInput("LAUNCH ARGUMENTS", g.args || "", v => send({ cmd: "setArgs", id: g.id, args: v }));
+      },
+    });
+    items.push({
+      label: "Change executable", icon: "file",
+      // The subtitle carries the launch route, which used to sit under the title on the detail
+      // page. It is troubleshooting detail: it belongs on the screen you open to change it.
+      sub: launchRoute(g),
+      action: () => { send({ cmd: "pickExe", id: g.id }); closeManage(); },
+    });
+    if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
+      items.push({ label: `Launch through ${g.platform} again`, icon: "store", action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
+  }
   // Two pictures, two entries. They are different shapes and they appear in different places, so
   // one "change artwork" that set both would put whichever file was chosen into a slot it is the
   // wrong shape for. The subtitles say where each one shows up, because "cover" and "tile" are
@@ -3677,6 +3808,208 @@ function manageInput(btn) {
     case "A": if (focusVisible() && items[manageIdx]) items[manageIdx].action(); break;
     case "B": closeManage(); break;
   }
+}
+
+/* ============================== choice overlay ==============================
+ *
+ * A pick-one list for whatever needs one and has no menu of its own: which system a ROM folder
+ * is for, which emulator runs a game, what to do with a folder. The same card and rows as every
+ * other menu. Choosing an item closes the list and then runs the item, so an item that opens
+ * another list simply does -- which is how the two-step folder wizard is built out of it.
+ */
+let choiceState = null;   // { title, items, idx, onBack }
+
+function openChoice(title, items, opts = {}) {
+  const idx = Math.max(0, items.findIndex(i => !i.cat && i.checked));
+  choiceState = { title, items, idx, onBack: opts.onBack || null };
+  $("overlay-choice").classList.add("active");
+  renderChoice();
+}
+
+function closeChoice() { choiceState = null; $("overlay-choice").classList.remove("active"); }
+
+function renderChoice() {
+  if (!choiceState) return;
+  const { title, items } = choiceState;
+  const focusable = items.map((r, i) => r.cat ? -1 : i).filter(i => i >= 0);
+  if (!focusable.includes(choiceState.idx)) choiceState.idx = focusable[0] ?? 0;
+  $("choiceTitle").textContent = title.toUpperCase();
+  renderMenu($("choiceList"), $("choiceFoot"), items, choiceState.idx,
+    foot(["A", "Choose"], ["B", choiceState.onBack ? "Back" : "Cancel"]),
+    (i) => { if (choiceState && choiceState.idx !== i) { choiceState.idx = i; renderChoice(); } },
+    (i) => { if (choiceState) { choiceState.idx = i; choiceActivate(); } });
+}
+
+function choiceActivate() {
+  const item = choiceState && choiceState.items[choiceState.idx];
+  if (!item || item.cat || !item.action) return;
+  closeChoice();
+  item.action();
+}
+
+function choiceInput(btn) {
+  switch (btn) {
+    case "Up": case "Down":
+      choiceState.idx = menuStep(btn, choiceState.idx, choiceState.items.length);
+      renderChoice();
+      break;
+    case "A": if (focusVisible()) choiceActivate(); break;
+    case "B": { const back = choiceState.onBack; closeChoice(); if (back) back(); break; }
+  }
+}
+
+/* ============================== emulators and ROM folders ==============================
+ *
+ * The host owns the lists (see the emu* commands in UiBridge); the page only asks. Adding a
+ * folder is a three-step thing -- the host's folder dialog, then "which system", then "which
+ * emulator" -- and the last two are lists here, where a gamepad can answer them. The folder's
+ * name seeds the system, so the usual answer is A, A.
+ */
+let romWizard = null;        // { path, platformId } while a folder is being added
+let pendingEmuPick = null;   // called with the new emulator's id after "Add an emulator…"
+
+function coreName(path) { return String(path || "").split(/[\\/]/).pop().replace(/_libretro\.dll$/i, ""); }
+function usesCore(emu) { return !!emu && /\{core\}/i.test(emu.args || ""); }
+
+function startRomFolderWizard(path, guess) {
+  romWizard = { path, platformId: guess || null };
+  const name = path.split(/[\\/]/).filter(Boolean).pop() || path;
+  openPlatformChoice(guess, id => { romWizard.platformId = id; wizardPickEmulator(); }, null,
+    `Which system is ${name}?`);
+}
+
+function wizardPickEmulator() {
+  const w = romWizard;
+  openEmulatorPick(w.platformId, null, id => {
+    send({ cmd: "romFolderAdd", path: w.path, platformId: w.platformId, emulatorId: id || "" });
+    romWizard = null;
+  }, () => startRomFolderWizard(w.path, w.platformId), { allowNone: true });
+}
+
+/* The catalogue, with the current or guessed system first so the likely answer is under the
+   highlight. The extensions ride along as the subtitle: they are what "which system" means to
+   the scan, and the quickest way to tell Sega CD (.cue, .chd) from Genesis (.md, .bin). */
+function openPlatformChoice(currentId, onPick, onBack, title) {
+  const list = S.emulation && S.emulation.platforms || [];
+  const items = list.map(p => ({
+    label: p.name, icon: "cartridge", radio: true, checked: p.id === currentId,
+    sub: (p.extensions || []).slice(0, 6).map(e => "." + e).join("  "),
+    action: () => onPick(p.id),
+  }));
+  const i = items.findIndex(x => x.checked);
+  if (i > 0) items.unshift(items.splice(i, 1)[0]);
+  openChoice(title || "Which system?", items, { onBack });
+}
+
+/* The emulators set up, the ones known to run this system first. "Add an emulator…" opens the
+   host's file dialog and comes back through the emuAdded message with the new id. */
+function openEmulatorPick(platformId, currentId, onPick, onBack, opts = {}) {
+  const emus = [...(S.emulation && S.emulation.emulators || [])];
+  const fits = e => (e.platforms || []).includes(platformId);
+  emus.sort((a, b) => (fits(b) ? 1 : 0) - (fits(a) ? 1 : 0) || a.name.localeCompare(b.name));
+  const items = emus.map(e => ({
+    label: e.name, icon: "gamepad", radio: true, checked: e.id === currentId,
+    sub: fits(e) ? "Runs this system" : e.exePath.split(/[\\/]/).pop(),
+    action: () => onPick(e.id),
+  }));
+  items.push({
+    label: "Add an emulator…", icon: "folderPlus", sub: "Point to its .exe. The common ones set themselves up",
+    action: () => { pendingEmuPick = onPick; send({ cmd: "emuAdd" }); },
+  });
+  if (opts.allowNone) items.push({
+    label: "Decide later", icon: "clock", sub: "The games are listed now and get an emulator when the folder does",
+    action: () => onPick(""),
+  });
+  openChoice(opts.title || "Which emulator runs it?", items, { onBack });
+}
+
+/* Per game, from Manage: its own emulator, or back to its folder's. */
+function openEmulatorChoice(g) {
+  const folder = romFolderById(g.romFolderId);
+  const folderEmu = folder ? emulatorById(folder.emulatorId) : null;
+  const emus = S.emulation && S.emulation.emulators || [];
+  const items = [{
+    label: folderEmu ? `${folderEmu.name} — the folder's choice` : "The folder's emulator (none set yet)",
+    icon: "romFolder", radio: true, checked: !g.emulatorId,
+    action: () => send({ cmd: "setEmulator", id: g.id, emulatorId: "" }),
+  }];
+  emus.forEach(e => items.push({
+    label: e.name, icon: "gamepad", radio: true, checked: g.emulatorId === e.id,
+    sub: (e.platforms || []).includes(g.platformId) ? "Runs this system" : undefined,
+    action: () => send({ cmd: "setEmulator", id: g.id, emulatorId: e.id }),
+  }));
+  openChoice(`Run ${g.title} with`, items);
+}
+
+function openRomFolderOptions(f) {
+  const p = platformDef(f.platformId);
+  const emu = emulatorById(f.emulatorId);
+  const exts = f.extensions && f.extensions.length ? f.extensions : (p ? p.extensions : []);
+  const again = () => openRomFolderOptions(romFolderById(f.id) || f);
+  const items = [
+    { label: "System", icon: "cartridge", sub: p ? p.name : f.platformId,
+      action: () => openPlatformChoice(f.platformId, id => send({ cmd: "romFolderUpdate", id: f.id, platformId: id }), again) },
+    { label: "Emulator", icon: "gamepad", sub: emu ? emu.name : "None set — the games cannot start until one is",
+      action: () => openEmulatorPick(f.platformId, f.emulatorId, id => send({ cmd: "romFolderUpdate", id: f.id, emulatorId: id }), again) },
+  ];
+  if (usesCore(emu)) items.push({
+    label: "Core", icon: "chip", sub: f.core ? coreName(f.core) : "Not chosen — pick one before playing",
+    action: () => send({ cmd: "romFolderPickCore", id: f.id }),
+  });
+  items.push({
+    label: "Launch arguments for this folder", icon: "terminal",
+    sub: f.args || `Uses ${emu ? emu.name + "'s own" : "the emulator's own"}`,
+    action: () => openInput("FOLDER LAUNCH ARGUMENTS", f.args || (emu ? emu.args : ""),
+      v => send({ cmd: "romFolderUpdate", id: f.id, args: emu && v === emu.args ? "" : v })),
+  });
+  // A playlist lists its files by name; there are no extensions to choose.
+  if (!f.playlist) items.push({
+    label: "File types", icon: "file", sub: exts.map(e => "." + e).join("  "),
+    action: () => openInput("FILE TYPES, COMMA SEPARATED", exts.join(", "),
+      v => send({ cmd: "romFolderUpdate", id: f.id, extensions: v })),
+  });
+  items.push({
+    label: f.playlist ? "Remove this playlist" : "Remove this folder", icon: "trash", danger: true,
+    action: () => {
+      const n = S.games.filter(g => g.romFolderId === f.id).length;
+      confirmState = {
+        title: `Remove ${p ? p.name : "this folder"}?`,
+        body: `${f.path} leaves the library${n ? ` with its ${n} game${n === 1 ? "" : "s"}` : ""}. Nothing on disk is touched, and it will not be found again by itself.`,
+        yesLabel: "Remove", icon: "trash", danger: true,
+        onYes: () => send({ cmd: "romFolderRemove", id: f.id }),
+      };
+      confirmIdx = 0;
+      $("overlay-confirm").classList.add("active");
+      renderConfirm();
+    },
+  });
+  openChoice(p ? p.name : "ROM folder", items);
+}
+
+function openEmulatorOptions(e) {
+  const users = (S.emulation && S.emulation.romFolders || []).filter(f => f.emulatorId === e.id);
+  const items = [
+    { label: "Rename", icon: "edit", sub: e.name,
+      action: () => openInput("EMULATOR NAME", e.name, v => { if (v) send({ cmd: "emuUpdate", id: e.id, name: v }); }) },
+    { label: "Change program", icon: "file", sub: e.exePath, action: () => send({ cmd: "emuPickExe", id: e.id }) },
+    { label: "Launch arguments", icon: "terminal", sub: e.args || '"{rom}"',
+      action: () => openInput("LAUNCH ARGUMENTS ({rom} is the file)", e.args || "", v => send({ cmd: "emuUpdate", id: e.id, args: v })) },
+    { label: "Remove", icon: "trash", danger: true,
+      action: () => {
+        confirmState = {
+          title: `Remove ${e.name}?`,
+          body: users.length
+            ? `${users.length} ROM folder${users.length === 1 ? "" : "s"} use${users.length === 1 ? "s" : ""} it and will need another emulator. The program itself is not touched.`
+            : "The program itself is not touched.",
+          yesLabel: "Remove", icon: "trash", danger: true,
+          onYes: () => send({ cmd: "emuRemove", id: e.id }),
+        };
+        confirmIdx = 0;
+        $("overlay-confirm").classList.add("active");
+        renderConfirm();
+      } },
+  ];
+  openChoice(e.name, items);
 }
 
 /* ============================== confirm overlay ============================== */
@@ -3952,6 +4285,7 @@ function handleInput(btn, src) {
   if (gameMenu) { gameMenuInput(btn); return; }
   if (collectOpen) { collectInput(btn); return; }
   if (manageOpen) { manageInput(btn); return; }
+  if (choiceState) { choiceInput(btn); return; }
 
   if (view === "library") libraryInput(btn);
   else if (view === "detail") detailInput(btn);
@@ -4078,6 +4412,7 @@ function handleHostMessage(m) {
       S.scanning = m.scanning;
       S.steamAccount = m.steamAccount || null;
       S.stores = m.stores || null;
+      S.emulation = m.emulation || null;
       if (S.settings) S.settings.launchOnStartup = m.startupRegistered;
       applyTheme();
       // First real library: let clampFocus drop the highlight onto the first game rather
@@ -4090,6 +4425,7 @@ function handleHostMessage(m) {
       if (manageOpen) renderManage();
       if (gameMenu) renderGameMenu();
       if (filterOpen) renderFilter();
+      if (choiceState) renderChoice();
       if (firstState && S.settings && !S.settings.tvDeviceName && S.displays.length > 1) {
         switchView("settings");
         toast("Welcome — pick which display is your TV");
@@ -4181,6 +4517,20 @@ function handleHostMessage(m) {
       S.runningGameId = m.id;
       renderLibrary();
       break;
+    // The host's folder dialog closed on a folder; the rest of adding it is asked here.
+    case "romFolderPicked":
+      startRomFolderWizard(m.path, m.platformId);
+      break;
+    // "Add an emulator…" from a pick list came back -- with an id, or with null when the file
+    // dialog was cancelled. Either way the pick list that asked for it is put back up, so a
+    // cancelled dialog cannot leave the folder wizard hanging with nothing on screen.
+    case "emuAdded": {
+      const cb = pendingEmuPick;
+      pendingEmuPick = null;
+      if (cb && m.id) cb(m.id);
+      else if (cb && romWizard) wizardPickEmulator();
+      break;
+    }
     case "toast":
       toast(m.message);
       break;
@@ -4200,6 +4550,30 @@ const mockWindows = [
 const mockCollections = [
   { id: "c1", name: "Cozy evenings", gameIds: ["gog:salttide", "manual:foundrynine"] },
 ];
+
+/* A slice of the host's catalogue, enough to walk the folder wizard and the options lists. */
+const mockEmulation = {
+  emulators: [
+    { id: "e1", name: "RetroArch", exePath: "C:\\RetroArch\\retroarch.exe", args: '-L "{core}" "{rom}" -f', preset: "retroarch", platforms: ["nes", "snes", "n64", "gb", "gba", "ps1", "genesis", "arcade"], detected: true },
+    { id: "e2", name: "DuckStation", exePath: "C:\\Emulators\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe", args: '-batch -fullscreen -- "{rom}"', preset: "duckstation", platforms: ["ps1"] },
+  ],
+  romFolders: [
+    { id: "f1", path: "D:\\ROMs\\SNES", platformId: "snes", emulatorId: "e1", core: "C:\\RetroArch\\cores\\snes9x_libretro.dll", args: null, extensions: null, recurse: true },
+    { id: "f2", path: "D:\\ROMs\\PS1", platformId: "ps1", emulatorId: "e1", core: null, args: null, extensions: null, recurse: true },
+    { id: "f3", path: "D:\\ROMs\\Arcade", platformId: "arcade", emulatorId: null, core: null, args: null, extensions: ["zip"], recurse: false },
+    { id: "f4", path: "C:\\RetroArch\\playlists\\Nintendo - Game Boy Advance.lpl", platformId: "gba", emulatorId: "e1", core: "C:\\RetroArch\\cores\\mgba_libretro.dll", args: null, extensions: null, recurse: true, playlist: true, detected: true },
+  ],
+  platforms: [
+    { id: "nes", name: "Nintendo Entertainment System", shortName: "NES", extensions: ["nes", "fds", "zip", "7z"], hasCores: true },
+    { id: "snes", name: "Super Nintendo", shortName: "SNES", extensions: ["sfc", "smc", "zip", "7z"], hasCores: true },
+    { id: "n64", name: "Nintendo 64", shortName: "N64", extensions: ["n64", "z64", "v64", "zip"], hasCores: true },
+    { id: "gba", name: "Game Boy Advance", shortName: "GBA", extensions: ["gba", "zip", "7z"], hasCores: true },
+    { id: "ps1", name: "PlayStation", shortName: "PS1", extensions: ["cue", "chd", "pbp", "m3u"], hasCores: true },
+    { id: "ps2", name: "PlayStation 2", shortName: "PS2", extensions: ["iso", "chd", "cso"], hasCores: true },
+    { id: "genesis", name: "Sega Genesis / Mega Drive", shortName: "Genesis", extensions: ["md", "gen", "bin", "zip"], hasCores: true },
+    { id: "arcade", name: "Arcade", shortName: "Arcade", extensions: ["zip", "7z", "chd"], hasCores: true },
+  ],
+};
 
 function mockHandle(msg) {
   const pushState = () => {
@@ -4253,7 +4627,17 @@ function mockHandle(msg) {
       g("Hollow Reef", "Xbox", { installed: false, installUri: "ms-windows-store://pdp/?productid=9XXXXXXXXXXX" }),
       g("Starfield", "Xbox", { installed: false, installUri: "ms-windows-store://pdp/?productid=9NCJSXWZRJPS" }),
       g("Wallpaper Engine", "Steam", { hidden: true, sizeBytes: 2 * 1024 ** 3 }),
+      // ROMs: the platform is the system, and they group with nothing.
+      g("Super Mario World", "Super Nintendo", { emulated: true, platformId: "snes", romFolderId: "f1", romPath: "D:\\ROMs\\SNES\\Super Mario World (USA).sfc", playtimeMinutes: 420, sessions: 6, lastPlayed: new Date(now - 86400000 * 1.5).toISOString(), sizeBytes: 512 * 1024, releaseDate: "Nov 21, 1990", developer: "Nintendo EAD", publisher: "Nintendo", genres: ["Platform"], criticScore: 94, criticSource: "IGDB critics" }),
+      g("Chrono Trigger", "Super Nintendo", { emulated: true, platformId: "snes", romFolderId: "f1", romPath: "D:\\ROMs\\SNES\\Chrono Trigger (USA).sfc", sizeBytes: 4 * 1024 ** 2, releaseDate: "Mar 11, 1995", genres: ["RPG"], criticScore: 92, criticSource: "IGDB critics" }),
+      g("Doom", "Super Nintendo", { emulated: true, platformId: "snes", romFolderId: "f1", romPath: "D:\\ROMs\\SNES\\Doom (USA).sfc", sizeBytes: 2 * 1024 ** 2, description: null, developer: null, publisher: null, genres: [], releaseDate: null, criticScore: null, criticSource: null, controllerSupport: null }),
+      g("Final Fantasy VII", "PlayStation", { emulated: true, platformId: "ps1", romFolderId: "f2", romPath: "D:\\ROMs\\PS1\\Final Fantasy VII (USA).m3u", sizeBytes: 1.3 * 1024 ** 3, releaseDate: "Jan 31, 1997", genres: ["RPG"] }),
+      g("Crash Bandicoot", "PlayStation", { emulated: true, platformId: "ps1", romFolderId: "f2", emulatorId: "e2", romPath: "D:\\ROMs\\PS1\\Crash Bandicoot (USA).chd", sizeBytes: 320 * 1024 ** 2 }),
+      g("sf2", "Arcade", { emulated: true, platformId: "arcade", romFolderId: "f3", romPath: "D:\\ROMs\\Arcade\\sf2.zip", sizeBytes: 3 * 1024 ** 2, description: null, developer: null, publisher: null, genres: [], releaseDate: null, criticScore: null, criticSource: null, controllerSupport: null, coverFile: null, bannerFile: null, heroFile: null }),
+      g("Pokemon: Emerald Version", "Game Boy Advance", { emulated: true, platformId: "gba", romFolderId: "f4", romPath: "C:\\RetroArch\\downloads\\GBA\\Pokemon - Emerald Version (USA, Europe).gba", sizeBytes: 16 * 1024 ** 2, releaseDate: "Sep 16, 2004", genres: ["RPG"] }),
     ];
+    if (mockHandle._titles) games.forEach(x => { if (mockHandle._titles[x.id]) x.title = mockHandle._titles[x.id]; });
+    if (mockHandle._emus) games.forEach(x => { if (mockHandle._emus[x.id] !== undefined) x.emulatorId = mockHandle._emus[x.id] || null; });
     if (mockHandle._fav) games.forEach(x => { if (mockHandle._fav[x.id] !== undefined) x.favorite = mockHandle._fav[x.id]; });
     if (mockHandle._running) { S.gameRunning = true; S.runningGameId = mockHandle._running; }
   if (mockHandle._hidden) games.forEach(x => { if (mockHandle._hidden[x.id] !== undefined) x.hidden = mockHandle._hidden[x.id]; });
@@ -4269,6 +4653,7 @@ function mockHandle(msg) {
         xbox: { signedIn: true, user: "CouchGamer", count: 12, fetchedAt: null, error: "The sign-in has expired. Sign in again" },
         gamePass: { count: 0, fetchedAt: null, error: null },
       },
+      emulation: mockEmulation,
       settings: S.settings || {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
@@ -4276,7 +4661,7 @@ function mockHandle(msg) {
         touchpadMouse: true, touchpadSensitivity: 1.0, touchpadTapToClick: true,
         touchpadTapDrag: true, touchpadNaturalScroll: true, touchpadScrollSpeed: 1.0,
         boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "", metadataEndpoint: "",
-        steamShowOwned: true, steamApiKey: "", gamePassCatalog: false, xboxClientId: "",
+        steamShowOwned: true, steamApiKey: "", gamePassCatalog: false, xboxClientId: "", detectEmulators: true,
         leftClickButton: "A", rightClickButton: "B",
         minimizeCombo: "LS + RS",
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
@@ -4338,6 +4723,54 @@ function mockHandle(msg) {
     setTimeout(() => handleHostMessage({ type: "scanning", busy: false }), 1500);
   } else if (msg.cmd === "setArgs") {
     toast("(preview) args = " + msg.args);
+  } else if (msg.cmd === "romFolderPick") {
+    setTimeout(() => handleHostMessage({ type: "romFolderPicked", path: "D:\\ROMs\\N64", platformId: "n64" }), 300);
+  } else if (msg.cmd === "romFolderAdd") {
+    mockEmulation.romFolders.push({ id: "f" + (mockEmulation.romFolders.length + 1), path: msg.path, platformId: msg.platformId, emulatorId: msg.emulatorId || null, core: null, args: null, extensions: null, recurse: true });
+    toast(`(preview) added ${msg.platformId} folder ${msg.path}`);
+    pushState();
+  } else if (msg.cmd === "romFolderUpdate") {
+    const f = mockEmulation.romFolders.find(x => x.id === msg.id);
+    if (f) {
+      if (msg.platformId) f.platformId = msg.platformId;
+      if (msg.emulatorId !== undefined) { f.emulatorId = msg.emulatorId || null; f.core = null; }
+      if (msg.args !== undefined) f.args = msg.args || null;
+      if (msg.extensions !== undefined) f.extensions = msg.extensions ? msg.extensions.split(/[,\s;]+/).filter(Boolean) : null;
+    }
+    pushState();
+  } else if (msg.cmd === "romFolderPickCore") {
+    const f = mockEmulation.romFolders.find(x => x.id === msg.id);
+    if (f) f.core = "C:\\RetroArch\\cores\\mednafen_psx_hw_libretro.dll";
+    toast("(preview) core chosen");
+    pushState();
+  } else if (msg.cmd === "romFolderRemove") {
+    const i = mockEmulation.romFolders.findIndex(x => x.id === msg.id);
+    if (i >= 0) mockEmulation.romFolders.splice(i, 1);
+    pushState();
+  } else if (msg.cmd === "emuAdd") {
+    const e = { id: "e" + (mockEmulation.emulators.length + 1), name: "Dolphin", exePath: "C:\\Emulators\\Dolphin\\Dolphin.exe", args: '-b -e "{rom}"', preset: "dolphin", platforms: ["gc", "wii"] };
+    mockEmulation.emulators.push(e);
+    pushState();
+    setTimeout(() => handleHostMessage({ type: "emuAdded", id: e.id }), 200);
+  } else if (msg.cmd === "emuUpdate") {
+    const e = mockEmulation.emulators.find(x => x.id === msg.id);
+    if (e) { if (msg.name) e.name = msg.name; if (msg.args !== undefined) e.args = msg.args; }
+    pushState();
+  } else if (msg.cmd === "emuPickExe") {
+    toast("(preview) would open the file picker");
+  } else if (msg.cmd === "emuRemove") {
+    const i = mockEmulation.emulators.findIndex(x => x.id === msg.id);
+    if (i >= 0) mockEmulation.emulators.splice(i, 1);
+    mockEmulation.romFolders.forEach(f => { if (f.emulatorId === msg.id) f.emulatorId = null; });
+    pushState();
+  } else if (msg.cmd === "setEmulator") {
+    mockHandle._emus = mockHandle._emus || {};
+    mockHandle._emus[msg.id] = msg.emulatorId || null;
+    pushState();
+  } else if (msg.cmd === "setTitle") {
+    mockHandle._titles = mockHandle._titles || {};
+    mockHandle._titles[msg.id] = msg.title;
+    pushState();
   }
 }
 

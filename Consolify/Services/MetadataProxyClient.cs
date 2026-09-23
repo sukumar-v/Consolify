@@ -6,7 +6,10 @@ namespace Consolify.Services;
 /// <summary>Somewhere facts can come from: our proxy, or the user's own IGDB credentials.</summary>
 public interface IFactsProvider
 {
-    Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct);
+    /// <param name="platforms">IGDB platform ids to confine a title search to, for a ROM: the
+    /// folder says it is a SNES game, and "Doom" on the SNES is the 1993 game, not the 2016 one.
+    /// Null for anything that is not emulated. Ignored when the lookup is by Steam app id.</param>
+    Task<IgdbGame?> FindAsync(string title, string? steamAppId, IReadOnlyList<int>? platforms, CancellationToken ct);
     /// <summary>True once this source has failed in a way that will repeat for every game, so the
     /// pass can stop asking rather than failing once per title.</summary>
     bool Unavailable { get; }
@@ -55,9 +58,9 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
         && Uri.TryCreate(endpoint, UriKind.Absolute, out var u)
         && (u.Scheme == Uri.UriSchemeHttps || u.IsLoopback);
 
-    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, CancellationToken ct)
+    public async Task<IgdbGame?> FindAsync(string title, string? steamAppId, IReadOnlyList<int>? platforms, CancellationToken ct)
     {
-        var d = await GetAsync("facts", title, steamAppId, ct);
+        var d = await GetAsync("facts", title, steamAppId, platforms, ct);
         if (d is null) return null;
 
         using (d)
@@ -101,7 +104,7 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
 
     public async Task<SteamGridArt?> FindArtAsync(string title, string? steamAppId, CancellationToken ct)
     {
-        var d = await GetAsync("art", title, steamAppId, ct);
+        var d = await GetAsync("art", title, steamAppId, null, ct);
         if (d is null) return null;
 
         using (d)
@@ -125,7 +128,7 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
     }
 
     private async Task<JsonDocument?> GetAsync(string kind, string title, string? steamAppId,
-        CancellationToken ct)
+        IReadOnlyList<int>? platforms, CancellationToken ct)
     {
         if (Unavailable) return null;
         try
@@ -134,6 +137,9 @@ public class MetadataProxyClient : IFactsProvider, IArtProvider
             // title is its fallback when that game is not in the upstream database under that id.
             var url = $"{_endpoint}/v1/{kind}?title={Uri.EscapeDataString(title)}";
             if (steamAppId is not null) url += $"&appid={Uri.EscapeDataString(steamAppId)}";
+            // A worker that predates the parameter ignores it and answers by title alone, which
+            // is what every non-Steam game got before ROMs existed -- a downgrade, not a failure.
+            if (platforms is { Count: > 0 }) url += $"&platform={string.Join(",", platforms)}";
             using var res = await _http.GetAsync(url, ct);
 
             // 404 is the service saying "no confident answer", which is an ordinary outcome.

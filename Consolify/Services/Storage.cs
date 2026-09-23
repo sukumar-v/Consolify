@@ -203,6 +203,15 @@ public class LibraryFileData
 {
     public List<Game> Games { get; set; } = new();
     public List<CollectionDef> Collections { get; set; } = new();
+    /// <summary>Emulators and ROM folders live here rather than in settings.json: they describe
+    /// the library, like collections do, and "Restore default settings" promises to leave the
+    /// library alone.</summary>
+    public List<EmulatorDef> Emulators { get; set; } = new();
+    public List<RomFolderDef> RomFolders { get; set; } = new();
+    /// <summary>What was removed by hand, so detection does not put it straight back. Paths,
+    /// because that is what detection finds things by.</summary>
+    public List<string> IgnoredEmulatorPaths { get; set; } = new();
+    public List<string> IgnoredRomFolderPaths { get; set; } = new();
 }
 
 public class LibraryStore
@@ -212,6 +221,10 @@ public class LibraryStore
 
     public List<Game> Games { get; private set; } = new();
     public List<CollectionDef> Collections { get; private set; } = new();
+    public List<EmulatorDef> Emulators { get; private set; } = new();
+    public List<RomFolderDef> RomFolders { get; private set; } = new();
+    public List<string> IgnoredEmulatorPaths { get; private set; } = new();
+    public List<string> IgnoredRomFolderPaths { get; private set; } = new();
 
     public void Load()
     {
@@ -230,6 +243,10 @@ public class LibraryStore
                     var data = JsonSerializer.Deserialize<LibraryFileData>(text) ?? new LibraryFileData();
                     Games = data.Games;
                     Collections = data.Collections;
+                    Emulators = data.Emulators ?? new();
+                    RomFolders = data.RomFolders ?? new();
+                    IgnoredEmulatorPaths = data.IgnoredEmulatorPaths ?? new();
+                    IgnoredRomFolderPaths = data.IgnoredRomFolderPaths ?? new();
                 }
             }
         }
@@ -238,6 +255,10 @@ public class LibraryStore
             Log.Info($"Library load failed, starting empty: {ex.Message}");
             Games = new List<Game>();
             Collections = new List<CollectionDef>();
+            Emulators = new List<EmulatorDef>();
+            RomFolders = new List<RomFolderDef>();
+            IgnoredEmulatorPaths = new List<string>();
+            IgnoredRomFolderPaths = new List<string>();
         }
     }
 
@@ -246,7 +267,11 @@ public class LibraryStore
         lock (_gate)
         {
             Paths.EnsureCreated();
-            var data = new LibraryFileData { Games = Games, Collections = Collections };
+            var data = new LibraryFileData
+            {
+                Games = Games, Collections = Collections, Emulators = Emulators, RomFolders = RomFolders,
+                IgnoredEmulatorPaths = IgnoredEmulatorPaths, IgnoredRomFolderPaths = IgnoredRomFolderPaths,
+            };
             File.WriteAllText(Paths.LibraryFile, JsonSerializer.Serialize(data, JsonOpts));
         }
     }
@@ -314,12 +339,82 @@ public class LibraryStore
                     // user overrides survive rescans
                     if (!string.IsNullOrWhiteSpace(old.Args)) s.Args = old.Args;
                     if (old.PreferDirectLaunch) { s.PreferDirectLaunch = true; s.ExePath = old.ExePath; }
+                    // A ROM's title is guessed from its file name and a rescan guesses the same
+                    // thing again, so one typed in by hand has to be carried across or "Rename"
+                    // would undo itself on the next start. The per-game emulator is an override
+                    // in the same sense as Args.
+                    if (old.TitleEdited) { s.Title = old.Title; s.TitleEdited = true; }
+                    if (old.EmulatorId is not null) s.EmulatorId = old.EmulatorId;
                 }
                 merged.Add(s);
             }
 
             merged.AddRange(manual);
             Games = merged;
+        }
+        Save();
+    }
+
+    // ---- Emulators and ROM folders ----
+
+    public EmulatorDef? FindEmulator(string? id) =>
+        id is null ? null : Emulators.FirstOrDefault(e => e.Id == id);
+
+    public RomFolderDef? FindRomFolder(string? id) =>
+        id is null ? null : RomFolders.FirstOrDefault(f => f.Id == id);
+
+    /// <summary>The emulator this ROM starts with: its own choice if it has one, else its folder's.</summary>
+    public EmulatorDef? EmulatorFor(Game game) =>
+        FindEmulator(game.EmulatorId) ?? FindEmulator(FindRomFolder(game.RomFolderId)?.EmulatorId);
+
+    // Adding by hand takes the path off the ignore list, and removing puts it on: "I removed it"
+    // means "do not find it again", however it got there, and "I added it back" means the reverse.
+
+    public void AddEmulator(EmulatorDef emulator)
+    {
+        lock (_gate)
+        {
+            Emulators.Add(emulator);
+            IgnoredEmulatorPaths.RemoveAll(p => p.Equals(emulator.ExePath, StringComparison.OrdinalIgnoreCase));
+        }
+        Save();
+    }
+
+    /// <summary>Removes the emulator and un-assigns it from every folder and game that named it,
+    /// so nothing is left pointing at an id that no longer exists.</summary>
+    public void RemoveEmulator(string id)
+    {
+        lock (_gate)
+        {
+            foreach (var e in Emulators.Where(e => e.Id == id))
+                if (!IgnoredEmulatorPaths.Contains(e.ExePath, StringComparer.OrdinalIgnoreCase))
+                    IgnoredEmulatorPaths.Add(e.ExePath);
+            Emulators.RemoveAll(e => e.Id == id);
+            foreach (var f in RomFolders) if (f.EmulatorId == id) f.EmulatorId = null;
+            foreach (var g in Games) if (g.EmulatorId == id) g.EmulatorId = null;
+        }
+        Save();
+    }
+
+    public void AddRomFolder(RomFolderDef folder)
+    {
+        lock (_gate)
+        {
+            RomFolders.Add(folder);
+            IgnoredRomFolderPaths.RemoveAll(p => p.Equals(folder.Path, StringComparison.OrdinalIgnoreCase));
+        }
+        Save();
+    }
+
+    /// <summary>The folder's games go with it on the next scan, which only keeps what was scanned.</summary>
+    public void RemoveRomFolder(string id)
+    {
+        lock (_gate)
+        {
+            foreach (var f in RomFolders.Where(f => f.Id == id))
+                if (!IgnoredRomFolderPaths.Contains(f.Path, StringComparer.OrdinalIgnoreCase))
+                    IgnoredRomFolderPaths.Add(f.Path);
+            RomFolders.RemoveAll(f => f.Id == id);
         }
         Save();
     }

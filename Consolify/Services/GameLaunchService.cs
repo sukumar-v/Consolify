@@ -55,7 +55,11 @@ public class GameLaunchService
         var started = DateTime.Now;
         var monitorCts = new CancellationTokenSource();
 
-        _runningInstallDir = game.InstallDir;
+        // Where the game's processes live. For a ROM that is the EMULATOR's folder, not the
+        // ROM's: the emulator is the process that runs, the one whose window goes on the TV and
+        // the one the in-game menu closes. Nothing in a ROM folder is ever a running process.
+        var sessionDir = SessionDir(game);
+        _runningInstallDir = sessionDir;
         _closeRequested = false;
         lock (_pidGate) _pidCache.Clear();
 
@@ -72,7 +76,19 @@ public class GameLaunchService
             }
 
             Process? tracked = StartGame(game);
+
+            // A process we started ourselves is granted the right to take the foreground NOW,
+            // while this window still is the foreground. GameStarted parks the launcher a moment
+            // later, and Windows only ever grants that right to a process started by the CURRENT
+            // foreground process -- so an emulator whose window opened two seconds after the
+            // launcher hid came up behind whatever the launcher had been covering, unfocused.
+            // Steam games never showed it: exclusive fullscreen takes the foreground by force.
+            if (tracked is not null) AllowForeground(tracked);
             GameStarted?.Invoke(game);
+
+            // And, in case the grant was refused or the emulator never asks, the first real window
+            // the game opens is brought to the front once.
+            _ = Task.Run(() => FocusGameWindowAsync(game, monitorCts.Token));
 
             // One monitor for the whole session, covering every process the game spawns.
             if (s.RepositionGameWindow && s.TvDeviceName is not null)
@@ -80,8 +96,8 @@ public class GameLaunchService
 
 
             // URI launches (Steam/Epic) return the store client, not the game — find the real process.
-            if (tracked is null && game.InstallDir is not null)
-                tracked = await WaitForProcessFromDir(game.InstallDir, TimeSpan.FromSeconds(120));
+            if (tracked is null && sessionDir is not null)
+                tracked = await WaitForProcessFromDir(sessionDir, TimeSpan.FromSeconds(120));
 
             if (tracked is not null)
             {
@@ -94,13 +110,13 @@ public class GameLaunchService
                     var trackedSince = DateTime.UtcNow;
 
                     await tracked.WaitForExitAsync();
-                    if (game.InstallDir is null) break;
+                    if (sessionDir is null) break;
 
                     // Anything of the game's still running right now carries the session on: a
                     // launcher hands over to the game before it exits (REDprelauncher starts
                     // REDlauncher, which starts Cyberpunk2077.exe), so the successor is already
                     // there the moment its parent goes.
-                    tracked = FindProcessFromDir(game.InstallDir);
+                    tracked = FindProcessFromDir(sessionDir);
                     if (tracked is not null || _closeRequested) continue;
 
                     // Nothing running. This used to wait a flat 15 seconds for a successor after
@@ -112,7 +128,7 @@ public class GameLaunchService
                     var grace = DateTime.UtcNow - trackedSince < TimeSpan.FromSeconds(90)
                         ? TimeSpan.FromSeconds(15)
                         : TimeSpan.FromSeconds(1);
-                    tracked = await WaitForProcessFromDir(game.InstallDir, grace);
+                    tracked = await WaitForProcessFromDir(sessionDir, grace);
                 }
                 Log.Info($"{game.Title} has exited");
             }
@@ -150,8 +166,34 @@ public class GameLaunchService
         }
     }
 
-    private static Process? StartGame(Game game)
+    /// <summary>The folder whose processes are the game's for this session. See RunSession.</summary>
+    private string? SessionDir(Game game)
     {
+        if (!game.Emulated) return game.InstallDir;
+        var emulator = _library.EmulatorFor(game);
+        return emulator is null ? null : Path.GetDirectoryName(emulator.ExePath);
+    }
+
+    /// <summary>Everything the bridge checks before it lets an emulated game launch, in one place,
+    /// so the toast it shows and the exception below can never disagree about what is wrong.</summary>
+    public EmulatorCommand? ResolveEmulated(Game game, out string? problem) =>
+        EmulatorLaunch.Resolve(game, _library.EmulatorFor(game), _library.FindRomFolder(game.RomFolderId), out problem);
+
+    private Process? StartGame(Game game)
+    {
+        if (game.Emulated)
+        {
+            var cmd = ResolveEmulated(game, out var problem)
+                      ?? throw new InvalidOperationException(problem ?? "The emulator could not be resolved");
+            Log.Info($"Emulated launch: \"{cmd.Exe}\" {cmd.Args}");
+            return Process.Start(new ProcessStartInfo(cmd.Exe)
+            {
+                UseShellExecute = true,
+                Arguments = cmd.Args,
+                WorkingDirectory = cmd.WorkingDir,
+            });
+        }
+
         // "Prefer direct launch" (user picked an exe in Manage) bypasses the store client.
         bool direct = game.ExePath is not null && File.Exists(game.ExePath)
                       && (game.Platform is "GOG" or "Manual" || game.PreferDirectLaunch);
@@ -300,6 +342,99 @@ public class GameLaunchService
                 && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
             _pidCache[pid] = belongs;
             return belongs;
+        }
+    }
+
+    private static void AllowForeground(Process p)
+    {
+        try
+        {
+            var ok = NativeMethods.AllowSetForegroundWindow((uint)p.Id);
+            if (!ok) Log.Info("AllowSetForegroundWindow was refused: the launcher was not the foreground process");
+        }
+        catch (Exception ex) { Log.Info($"AllowSetForegroundWindow failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Waits for the game's first real window and brings it to the front, once.
+    ///
+    /// Only if the game has not taken the foreground on its own by then, and never while the
+    /// launcher itself is in front -- that is the in-game menu, and a menu that loses focus to
+    /// the game it is over reads as broken. Gives up after half a minute: a game that takes
+    /// longer than that to open a window is loading, and its window will be the foreground when
+    /// it comes.
+    /// </summary>
+    private async Task FocusGameWindowAsync(Game game, CancellationToken ct)
+    {
+        var started = DateTime.UtcNow;
+        while (!ct.IsCancellationRequested && DateTime.UtcNow - started < TimeSpan.FromSeconds(30))
+        {
+            var fg = NativeMethods.GetForegroundWindow();
+            if (fg != IntPtr.Zero)
+            {
+                NativeMethods.GetWindowThreadProcessId(fg, out var fgPid);
+                if (PidBelongsToGame(fgPid)) return;
+                // Ours after the first second means an overlay is up. Right at the start it is
+                // only the launcher not having finished hiding yet.
+                if (fgPid == (uint)Environment.ProcessId && DateTime.UtcNow - started > TimeSpan.FromSeconds(1)) return;
+            }
+
+            var hwnd = FindGameWindow();
+            if (hwnd != IntPtr.Zero)
+            {
+                ForceForeground(hwnd);
+                var got = NativeMethods.GetForegroundWindow() == hwnd;
+                Log.Info($"Brought {game.Title}'s window to the front" + (got ? "" : " (refused; the game keeps whatever focus it has)"));
+                return;
+            }
+
+            try { await Task.Delay(250, ct); }
+            catch (TaskCanceledException) { return; }
+        }
+    }
+
+    /// <summary>The first visible top-level window of the game's that is big enough to be the
+    /// game rather than a splash or a tooltip, or zero.</summary>
+    private IntPtr FindGameWindow()
+    {
+        var found = IntPtr.Zero;
+        NativeMethods.EnumWindows((hwnd, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+            if (!PidBelongsToGame(pid)) return true;
+            var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE);
+            if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0) return true;
+            if (!NativeMethods.GetWindowRect(hwnd, out var r)) return true;
+            if (r.Right - r.Left < 200 || r.Bottom - r.Top < 150) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>
+    /// SetForegroundWindow for a window that is not ours, in the form Windows grants: the same
+    /// input-queue join MainWindow.TakeForeground uses for the launcher, because this process is
+    /// no more entitled to hand the foreground to a game than to take it for itself.
+    /// </summary>
+    private static void ForceForeground(IntPtr hwnd)
+    {
+        if (NativeMethods.IsIconic(hwnd)) NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+        if (NativeMethods.SetForegroundWindow(hwnd) && NativeMethods.GetForegroundWindow() == hwnd) return;
+
+        var fg = NativeMethods.GetForegroundWindow();
+        var fgThread = fg == IntPtr.Zero ? 0 : NativeMethods.GetWindowThreadProcessId(fg, out _);
+        var ours = NativeMethods.GetCurrentThreadId();
+        var attached = fgThread != 0 && fgThread != ours && NativeMethods.AttachThreadInput(ours, fgThread, true);
+        try
+        {
+            NativeMethods.BringWindowToTop(hwnd);
+            NativeMethods.SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            if (attached) NativeMethods.AttachThreadInput(ours, fgThread, false);
         }
     }
 
