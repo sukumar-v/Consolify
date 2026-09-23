@@ -180,6 +180,7 @@ function repaintFocus() {
   else if (collectOpen) renderCollect();
   else if (manageOpen) renderManage();
   else if (choiceState) renderChoice();
+  else if (modsState) renderMods();
   else if (confirmState) renderConfirm();
   else if (view === "library") updateLibraryFocus(true);
   else if (view === "detail") updateDetailFocus();
@@ -857,284 +858,6 @@ function watchScrolled(scroller) {
 }
 
 /*
- * Menu icons — inline stroke SVG on a 24x24 grid. Drawn rather than pulled from a font or
- * emoji so they stay crisp at 10-foot distance, inherit currentColor (muted normally, accent
- * when focused) and add nothing to load.
- */
-const ICONS = {
-  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/>',
-  filter: '<path d="M3 4h18l-7 8.5V20l-4-2v-5.5L3 4z"/>',
-  sort: '<path d="M4 6h10M4 12h7M4 18h4"/><path d="M17 5v14M20.5 15.5 17 19l-3.5-3.5"/>',
-  sortAsc: '<path d="M4 6h4M4 12h8M4 18h12"/><path d="M18 5v14M21 16l-3 3-3-3"/>',
-  sortDesc: '<path d="M4 6h12M4 12h8M4 18h4"/><path d="M18 5v14M21 16l-3 3-3-3"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
-  timer: '<path d="M10 2h4M12 8v6l4 2"/><circle cx="12" cy="14" r="8"/>',
-  chevronsDown: '<path d="m7 6 5 5 5-5M7 13l5 5 5-5"/>',
-  chevronsUp: '<path d="m7 18 5-5 5 5M7 11l5-5 5 5"/>',
-  gamepad: '<path d="M7 11h4M9 9v4M15.5 12h.01M18 10h.01"/><rect x="2" y="6" width="20" height="12" rx="5"/>',
-  checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
-  download: '<path d="M12 3v11M8 10.5l4 4 4-4M4 20h16"/>',
-  star: '<path d="M12 3l2.7 5.5 6 .9-4.35 4.2 1.03 6L12 16.8 6.62 19.6l1.03-6L3.3 9.4l6-.9L12 3z"/>',
-  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
-  eyeOff: '<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M10.7 5.7A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15 15 0 0 1-2 2.8M6.5 6.9A14.6 14.6 0 0 0 2.5 12S6 18.5 12 18.5a9 9 0 0 0 4.3-1.1"/><path d="m3 3 18 18"/>',
-  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8h.01"/>',
-  folder: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/>',
-  folderPlus: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/><path d="M12 10.5v5M9.5 13h5"/>',
-  image: '<rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15.5-4.5-4.5L6.5 21"/>',
-  refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
-  trash: '<path d="M3.5 6.5h17M9 6.5V4h6v2.5M18.5 6.5 17.5 20h-11L5.5 6.5M10 11v5M14 11v5"/>',
-  terminal: '<path d="m5 8 4 4-4 4M12 16h7"/><rect x="2" y="4" width="20" height="16" rx="1.5"/>',
-  file: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8l-5-5z"/><path d="M14 3v5h5"/>',
-  store: '<path d="M21 12a9 9 0 1 1-2.6-6.35M21 3.5v5h-5"/>',
-  /* A cartridge, for anything emulated: the one shape every system from the 2600 to the DS had
-     in common, and the thing a ROM file stands for. */
-  cartridge: '<path d="M6.5 3.5h11A1.5 1.5 0 0 1 19 5v11.5l-2 2.5H7l-2-2.5V5a1.5 1.5 0 0 1 1.5-1.5z"/>'
-           + '<rect x="8" y="6.5" width="8" height="5.5" rx="0.8"/><path d="M9 15.5h6"/>',
-  /* A pencil, for renaming. */
-  edit: '<path d="M4 20h4.5L19 9.5a1.8 1.8 0 0 0 0-2.6l-1.9-1.9a1.8 1.8 0 0 0-2.6 0L4 15.5V20z"/><path d="m13 6.5 4.5 4.5"/>',
-  /* A chip, for a core. */
-  chip: '<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.8"/>'
-      + '<path d="M9 2.5v3.5M15 2.5v3.5M9 18v3.5M15 18v3.5M2.5 9h3.5M2.5 15h3.5M18 9h3.5M18 15h3.5"/>',
-  /* A folder with a cartridge in it, for a ROM folder. */
-  romFolder: '<path d="M4 19h16a1.5 1.5 0 0 0 1.5-1.5V9A1.5 1.5 0 0 0 20 7.5h-7.2L11 5H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 19z"/>'
-           + '<path d="M9.5 11h5v5h-5z"/>',
-
-  /* ---- store marks, for the detail page. Each is the silhouette of the real thing reduced to
-     this set's stroke weight: Steam's ringed valve, Epic's arched E, GOG's rounded wordmark
-     frame, Xbox's sphere and cross. The store's name is printed beside them either way. ---- */
-  steam: '<circle cx="12" cy="12" r="9"/><circle cx="15.2" cy="8.8" r="2.6"/>'
-       + '<circle cx="8.2" cy="15.4" r="2.1"/><path d="M3.3 13.4 6.2 14.6M10.1 14.1l3.1-3"/>',
-  epic: '<path d="M5 4.6h14v11.1l-7 3.7-7-3.7z"/><path d="M9.6 8.4h4.8M9.6 12h3.6M9.6 15.4h4.8M9.6 8.4v7"/>',
-  gog: '<rect x="2.4" y="6" width="19.2" height="12" rx="3.2"/>'
-     + '<text x="12" y="15.5" text-anchor="middle" font-size="7.4" font-weight="700"'
-     + ' letter-spacing="0.4" fill="currentColor" stroke="none">GOG</text>',
-  xbox: '<circle cx="12" cy="12" r="9"/><path d="M6.6 5.9C9 9 13.5 15.3 16.4 18.8M17.4 5.9C15 9 10.5 15.3 7.6 18.8"/>',
-
-  /* ---- overlay-menu actions. Drawn to match the action rather than borrowed from a
-     lookalike: an X closes, a moon sleeps, and "switch window" copies the two overlapping
-     panes of the Xbox View button, which is the control that does this on a console. ---- */
-  play: '<path d="M8 5.4v13.2L18.5 12 8 5.4z"/>',
-  x: '<path d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6"/>',
-  viewBtn: '<rect x="2.5" y="8" width="11.5" height="9.5" rx="1.6"/>'
-         + '<path d="M7.4 8V6.5A1.5 1.5 0 0 1 8.9 5h10.1a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H17"/>',
-  moon: '<path d="M20.2 14.8A8.6 8.6 0 0 1 9.2 3.8a8.6 8.6 0 1 0 11 11z"/>',
-  keyboard: '<rect x="2" y="5.5" width="20" height="13" rx="2"/>'
-          + '<path d="M6 9.5h.01M10 9.5h.01M14 9.5h.01M18 9.5h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M8.5 16.5h7"/>',
-  pointer: '<path d="M12 2.5v3.2M12 18.3v3.2M2.5 12h3.2M18.3 12h3.2"/>'
-         + '<path d="M9.4 9.4l7 2.9-3 1.1-1.1 3-2.9-7z"/>',
-  home: '<path d="M3.5 10.4 12 3.8l8.5 6.6V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-6v6H5A1.5 1.5 0 0 1 3.5 19v-8.6z"/>',
-  apps: '<rect x="3.2" y="3.2" width="7.2" height="7.2" rx="1.6"/><rect x="13.6" y="3.2" width="7.2" height="7.2" rx="1.6"/>'
-      + '<rect x="3.2" y="13.6" width="7.2" height="7.2" rx="1.6"/><rect x="13.6" y="13.6" width="7.2" height="7.2" rx="1.6"/>',
-  power: '<path d="M12 3.2v8.4"/><path d="M7.3 6.4a7.6 7.6 0 1 0 9.4 0"/>',
-  monitor: '<rect x="2.5" y="4" width="19" height="12.5" rx="1.6"/><path d="M8.5 20.5h7M12 16.5v4"/>',
-  volume: '<path d="M4 9.4h3.6L12 5.4v13.2L7.6 14.6H4z"/><path d="M15.8 9.6a3.8 3.8 0 0 1 0 4.8M18.6 7.2a7.6 7.6 0 0 1 0 9.6"/>',
-  lock: '<rect x="4.4" y="10.4" width="15.2" height="10.1" rx="1.8"/><path d="M8 10.4V7.6a4 4 0 0 1 8 0v2.8"/>',
-  bars: '<path d="M4.5 20V9.5M9.5 20V4.5M14.5 20v-7M19.5 20v-4"/>',
-  gear: '<circle cx="12" cy="12" r="3.1"/>'
-      + '<path d="M12 2.6v2.8M12 18.6v2.8M2.6 12h2.8M18.6 12h2.8M5.3 5.3l2 2M16.7 16.7l2 2M18.7 5.3l-2 2M7.3 16.7l-2 2"/>',
-
-  /* Controller status. A gamepad silhouette with grips reads as a controller at a glance far
-     better than the rounded rectangle used elsewhere; the slashed one is the same shape, so
-     "connected" and "not connected" are obviously two states of one thing. */
-  controller: '<path d="M8.6 8h6.8a5.4 5.4 0 0 1 5.2 4l1.1 4.4a2.4 2.4 0 0 1-4.4 1.8L15.6 16H8.4l-1.7 2.2a2.4 2.4 0 0 1-4.4-1.8L3.4 12A5.4 5.4 0 0 1 8.6 8z"/>'
-            + '<path d="M6.6 11.4v2.2M5.5 12.5h2.2M15.4 11.6h.01M17.6 13.4h.01"/>',
-  controllerOff: '<path d="M8.6 8h6.8a5.4 5.4 0 0 1 5.2 4l1.1 4.4a2.4 2.4 0 0 1-4.4 1.8L15.6 16H8.4l-1.7 2.2a2.4 2.4 0 0 1-4.4-1.8L3.4 12A5.4 5.4 0 0 1 8.6 8z"/>'
-               + '<path d="m2.6 2.6 18.8 18.8"/>',
-};
-
-function iconSvg(name) {
-  const body = ICONS[name];
-  if (!body) return "";
-  return `<svg class="ov-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
-         `stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
-}
-
-/* ============================== buttons, by controller ==============================
- *
- * Every hint in the launcher is drawn as the button itself, never named in a badge: the A on an
- * Xbox pad is a green disc, on a DualSense it is a cross, on a Switch Pro controller it is the
- * B -- which sits where an Xbox A does, and the host maps by position -- on a pad we know nothing
- * about it is the bottom of a four-button diamond, and on a keyboard it is the Enter key.
- *
- * The launcher's own button names (A, B, X, Y, LB, RB, LT, RT, View, Menu, LS, RS, Guide) stay as
- * they are in the code and in settings.json. Only what is DRAWN changes, and it changes with the
- * last thing the user touched: a press on a pad carries that pad's family with it, a keypress or a
- * mouse click switches to the keyboard, and the whole page is repainted through its slots.
- *
- * Two families are tracked. `inputFamily` is what the legends draw. `padFamily` is the last GAMEPAD
- * seen, and the rows in Settings that name gamepad buttons always draw that one -- "Left click
- * button: Enter" would be nonsense.
- */
-let inputFamily = "xbox";
-let padFamily = "xbox";
-
-/* What each button is called on each pad, for the places that have to say it in words: a
-   confirm dialog's body, a settings hint. The Switch is by position, like the host's map. */
-const BTN_NAMES = {
-  xbox: { A: "A", B: "B", X: "X", Y: "Y", LB: "LB", RB: "RB", LT: "LT", RT: "RT", View: "View", Menu: "Menu", LS: "LS", RS: "RS", Guide: "the Xbox button" },
-  playstation: { A: "Cross", B: "Circle", X: "Square", Y: "Triangle", LB: "L1", RB: "R1", LT: "L2", RT: "R2", View: "Create", Menu: "Options", LS: "L3", RS: "R3", Guide: "the PS button" },
-  switch: { A: "B", B: "A", X: "Y", Y: "X", LB: "L", RB: "R", LT: "ZL", RT: "ZR", View: "−", Menu: "+", LS: "the left stick", RS: "the right stick", Guide: "Home" },
-  generic: { A: "the bottom face button", B: "the right face button", X: "the left face button", Y: "the top face button", LB: "L1", RB: "R1", LT: "L2", RT: "R2", View: "Select", Menu: "Start", LS: "L3", RS: "R3", Guide: "Home" },
-  keyboard: { A: "Enter", B: "Esc", X: "X", Y: "Y", LB: "[", RB: "]", LT: "LT", RT: "RT", View: "/", Menu: "M", LS: "LS", RS: "RS", Guide: "Guide" },
-};
-
-/* settings.json spells two of them the XInput way. */
-function canonBtn(btn) {
-  return btn === "Start" ? "Menu" : btn === "Back" ? "View" : btn === "Xbox" || btn === "PS" ? "Guide" : btn;
-}
-
-function btnName(btn, family) {
-  const names = BTN_NAMES[family || inputFamily] || BTN_NAMES.xbox;
-  return names[canonBtn(btn)] || btn;
-}
-
-/* "LS + RS" in words, for the pad in hand: "L3 + R3" on a DualSense. */
-function comboName(combo, family) {
-  if (!combo || combo === "Off") return "Off";
-  return combo.split("+").map(p => btnName(p.trim(), family)).join(" + ");
-}
-
-/* ---- the drawings ----
-   Each is an inline svg 40 units tall; the width varies with the shape and the page sizes them by
-   height, so a pill and a disc sit on one baseline. Brand colours are literal here, like the
-   accent swatches: the point is to look like the button. */
-const SVG_FONT = "Manrope, Segoe UI, system-ui, sans-serif";
-const SVG_MONO = "IBM Plex Mono, Consolas, monospace";
-const DISC_DARK = "#26262C";
-const DISC_RING = "rgba(255,255,255,0.28)";
-
-function svgIcon(w, body) {
-  return `<svg class="btn-icon" viewBox="0 0 ${w} 40" width="${w}" height="40" aria-hidden="true">${body}</svg>`;
-}
-function svgText(x, t, size, fill, opts = {}) {
-  return `<text x="${x}" y="20.5" text-anchor="middle" dominant-baseline="central" ` +
-    `font-family="${opts.mono ? SVG_MONO : SVG_FONT}" font-size="${size}" font-weight="${opts.weight || 700}" fill="${fill}">${esc(t)}</text>`;
-}
-/* A face button: a disc with a letter or a shape on it. */
-function disc(fill, inner, ring) {
-  return svgIcon(40, `<circle cx="20" cy="20" r="18" fill="${fill}"${ring ? ` stroke="${ring}" stroke-width="1.5"` : ""}/>${inner}`);
-}
-/* A shoulder, a trigger, Options, Start: a pill with its name on it. */
-function pill(label) {
-  const w = Math.max(44, 20 + label.length * 11);
-  return svgIcon(w, `<rect x="1.5" y="6.5" width="${w - 3}" height="27" rx="13.5" fill="var(--ink)" fill-opacity="0.08" ` +
-    `stroke="var(--ink)" stroke-opacity="0.45" stroke-width="1.5"/>` +
-    svgText(w / 2, label, label.length > 3 ? 12 : 15, "var(--ink)", { weight: 600 }));
-}
-/* A key on the keyboard: a cap with the key's name and a shade along its bottom edge. */
-function keycap(label) {
-  const w = Math.max(40, 22 + label.length * 10.5);
-  return svgIcon(w, `<rect x="1.5" y="3.5" width="${w - 3}" height="33" rx="7" fill="var(--ink)" fill-opacity="0.12" ` +
-    `stroke="var(--ink)" stroke-opacity="0.5" stroke-width="1.5"/>` +
-    `<rect x="6" y="30.5" width="${w - 12}" height="3" rx="1.5" fill="var(--bg-deep)" fill-opacity="0.55"/>` +
-    svgText(w / 2, label, label.length > 3 ? 12.5 : 15, "var(--ink)", { weight: 600, mono: true }));
-}
-/* The D-pad, with the arms that matter lit: "v" for up and down, "h" for left and right. */
-function dpad(arms) {
-  const on = (a) => (arms === "all" || arms === a ? 0.95 : 0.26);
-  return svgIcon(40,
-    `<rect x="15" y="2" width="10" height="12" rx="2" fill="currentColor" fill-opacity="${on("v")}"/>` +
-    `<rect x="15" y="26" width="10" height="12" rx="2" fill="currentColor" fill-opacity="${on("v")}"/>` +
-    `<rect x="2" y="15" width="12" height="10" rx="2" fill="currentColor" fill-opacity="${on("h")}"/>` +
-    `<rect x="26" y="15" width="12" height="10" rx="2" fill="currentColor" fill-opacity="${on("h")}"/>` +
-    `<rect x="14" y="14" width="12" height="12" fill="currentColor" fill-opacity="0.26"/>`);
-}
-/* A pad we have no names for: the four face buttons as a diamond, the one meant filled in. */
-function diamond(pos) {
-  const dots = { top: [20, 7], right: [33, 20], bottom: [20, 33], left: [7, 20] };
-  return svgIcon(40, Object.entries(dots).map(([k, [x, y]]) =>
-    `<circle cx="${x}" cy="${y}" r="5.5" fill="currentColor" fill-opacity="${k === pos ? 1 : 0.2}" ` +
-    `stroke="currentColor" stroke-opacity="0.55" stroke-width="1.2"/>`).join(""));
-}
-
-const GLYPH = {
-  // Xbox's View: two overlapping panes. Menu: three bars. Both are what is printed on the pad.
-  view: `<rect x="10" y="15.5" width="12" height="10" rx="1.6" fill="none" stroke="#fff" stroke-width="2"/>` +
-        `<path d="M15.5 15.5V13a1.5 1.5 0 0 1 1.5-1.5h11.5a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`,
-  lines: `<path d="M12.5 14h15M12.5 20h15M12.5 26h15" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>`,
-  nexus: `<circle cx="20" cy="20" r="11" fill="none" stroke="#fff" stroke-width="2.2"/>` +
-         `<path d="M13.5 13c4.2 2.6 9.2 8.8 13 14M26.5 13c-4.2 2.6-9.2 8.8-13 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
-  cross: `<path d="M13.5 13.5l13 13M26.5 13.5l-13 13" stroke="#7C9BE6" stroke-width="3.2" stroke-linecap="round"/>`,
-  circle: `<circle cx="20" cy="20" r="7.5" fill="none" stroke="#E0554F" stroke-width="3.2"/>`,
-  square: `<rect x="12.5" y="12.5" width="15" height="15" rx="1.5" fill="none" stroke="#E68AC0" stroke-width="3.2"/>`,
-  triangle: `<path d="M20 11.5 28.8 26.5H11.2z" fill="none" stroke="#63C58F" stroke-width="3.2" stroke-linejoin="round"/>`,
-  // The two small buttons either side of the DualSense's touchpad, drawn the way the pad prints
-  // them and the way the common icon packs do: the slanted pill of the button itself with its
-  // mark above it -- three short rays for Create, three bars for Options. Each leans towards
-  // the touchpad, so the two lean opposite ways.
-  sonyCreate: `<rect x="15" y="17" width="10" height="21" rx="5" fill="var(--ink)" transform="rotate(14 20 27.5)"/>` +
-              `<path d="M20 13V4.5M17.8 13.6 13.2 6.5M22.2 13.6l4.6-7.1" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/>`,
-  sonyOptions: `<rect x="15" y="17" width="10" height="21" rx="5" fill="var(--ink)" transform="rotate(-14 20 27.5)"/>` +
-               `<path d="M15 5.5h10M15 9.5h10M15 13.5h10" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>`,
-  minus: `<path d="M12 20h16" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
-  plus: `<path d="M12 20h16M20 12v16" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
-  home: `<path d="M11 19.5 20 11.5l9 8V28a1 1 0 0 1-1 1h-5.5v-6h-5v6H12a1 1 0 0 1-1-1z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`,
-};
-
-const BUTTON_ART = {
-  xbox: {
-    A: () => disc("#3AA03C", svgText(20, "A", 21, "#fff")),
-    B: () => disc("#D3433C", svgText(20, "B", 21, "#fff")),
-    X: () => disc("#3C7CD3", svgText(20, "X", 21, "#fff")),
-    Y: () => disc("#E2B128", svgText(20, "Y", 21, "#101012")),
-    LB: () => pill("LB"), RB: () => pill("RB"), LT: () => pill("LT"), RT: () => pill("RT"),
-    LS: () => pill("LS"), RS: () => pill("RS"),
-    View: () => disc(DISC_DARK, GLYPH.view, DISC_RING),
-    Menu: () => disc(DISC_DARK, GLYPH.lines, DISC_RING),
-    Guide: () => disc("#107C10", GLYPH.nexus),
-  },
-  playstation: {
-    A: () => disc(DISC_DARK, GLYPH.cross, DISC_RING),
-    B: () => disc(DISC_DARK, GLYPH.circle, DISC_RING),
-    X: () => disc(DISC_DARK, GLYPH.square, DISC_RING),
-    Y: () => disc(DISC_DARK, GLYPH.triangle, DISC_RING),
-    LB: () => pill("L1"), RB: () => pill("R1"), LT: () => pill("L2"), RT: () => pill("R2"),
-    LS: () => pill("L3"), RS: () => pill("R3"),
-    View: () => svgIcon(40, GLYPH.sonyCreate),
-    Menu: () => svgIcon(40, GLYPH.sonyOptions),
-    Guide: () => disc(DISC_DARK, svgText(20, "PS", 13, "#fff"), DISC_RING),
-  },
-  // By position: the launcher's "A" is the bottom button, which Nintendo prints a B on.
-  switch: {
-    A: () => disc("#1B1B1F", svgText(20, "B", 20, "#fff"), DISC_RING),
-    B: () => disc("#1B1B1F", svgText(20, "A", 20, "#fff"), DISC_RING),
-    X: () => disc("#1B1B1F", svgText(20, "Y", 20, "#fff"), DISC_RING),
-    Y: () => disc("#1B1B1F", svgText(20, "X", 20, "#fff"), DISC_RING),
-    LB: () => pill("L"), RB: () => pill("R"), LT: () => pill("ZL"), RT: () => pill("ZR"),
-    LS: () => pill("LS"), RS: () => pill("RS"),
-    View: () => disc("#1B1B1F", GLYPH.minus, DISC_RING),
-    Menu: () => disc("#1B1B1F", GLYPH.plus, DISC_RING),
-    Guide: () => disc("#1B1B1F", GLYPH.home, DISC_RING),
-  },
-  generic: {
-    A: () => diamond("bottom"), B: () => diamond("right"), X: () => diamond("left"), Y: () => diamond("top"),
-    LB: () => pill("L1"), RB: () => pill("R1"), LT: () => pill("L2"), RT: () => pill("R2"),
-    LS: () => pill("L3"), RS: () => pill("R3"),
-    View: () => pill("SELECT"), Menu: () => pill("START"), Guide: () => pill("HOME"),
-  },
-  keyboard: {
-    A: () => keycap("Enter"), B: () => keycap("Esc"), X: () => keycap("X"), Y: () => keycap("Y"),
-    LB: () => keycap("["), RB: () => keycap("]"), LT: () => keycap("LT"), RT: () => keycap("RT"),
-    LS: () => keycap("LS"), RS: () => keycap("RS"),
-    View: () => keycap("/"), Menu: () => keycap("M"), Guide: () => keycap("Guide"),
-  },
-};
-
-/** The picture of a button, for a family (the current one by default). */
-function btnIcon(btn, family) {
-  const fam = family || inputFamily;
-  btn = canonBtn(btn);
-  if (btn === "DpadV" || btn === "DpadH" || btn === "Dpad") {
-    if (fam === "keyboard")
-      return btn === "DpadV" ? keycap("↑") + keycap("↓") : btn === "DpadH" ? keycap("←") + keycap("→") : keycap("↑↓←→");
-    return dpad(btn === "DpadV" ? "v" : btn === "DpadH" ? "h" : "all");
-  }
-  const art = BUTTON_ART[fam] || BUTTON_ART.xbox;
-  const draw = art[btn] || BUTTON_ART.xbox[btn];
-  return draw ? draw() : pill(btn);
-}
-
-/*
  * A slot is where a button is drawn. It carries the button's name, so paintButtons can redraw
  * every one on the page when the pad in hand changes without anything being re-rendered.
  * `padOnly` marks a slot that is about a gamepad whatever is in use: the button rows in Settings.
@@ -1310,7 +1033,8 @@ let gridRows = [];
 /* ============================== helpers ============================== */
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// esc() lives in glyphs.js: the drawings escape their labels with it, and the browse window's
+// bar loads only that file.
 
 function artUrl(name) {
   if (!name) return null;
@@ -2069,7 +1793,7 @@ function updateContinueScroll(follow) {
 let hWheelAccum = 0;
 
 function overlayOpen() {
-  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!choiceState || !!confirmState || guideOpen;
+  return inputOpen || filterOpen || !!gameMenu || collectOpen || manageOpen || !!choiceState || !!modsState || !!confirmState || guideOpen;
 }
 
 window.addEventListener("wheel", (e) => {
@@ -2913,14 +2637,30 @@ function allSettingsRows() {
     action: () => send({ cmd: "emuAdd" }),
   });
 
-  rows.push({ section: "STEAM ACCOUNT", cat: "library" });
-  rows.push(toggleRow("Show games you own but haven't installed", steamAccountHint(),
-    () => !!s.steamShowOwned, v => set(() => s.steamShowOwned = v)));
-  rows.push(secretRow("Steam Web API key", s,
-    "Optional. Only needed if your Steam profile keeps its game details private. Free from steamcommunity.com/dev/apikey — any domain name will do",
-    () => s.steamApiKey, v => set(() => s.steamApiKey = v)));
+  // The manager is one program for the whole library, so its row is here; each game's own mods
+  // are under that game's Options. The row is where "is it installed, and where" gets answered
+  // without opening a game.
+  rows.push({ section: "MODS", cat: "library" });
+  const vx = S.mods || null;
+  rows.push({
+    name: "Vortex",
+    hint: vx && vx.installed
+      ? `Nexus Mods' mod manager · ${vx.path}${vx.version ? " · v" + vx.version : ""}${vx.running ? " · running" : ""}. Each game's mods are under Options → Mods`
+      : "Nexus Mods' free mod manager. Consolify drives it to download mods, install them and switch them on and off, for over 250 games. Not installed on this PC yet: this opens the download page",
+    type: "action", label: vx && vx.installed ? "Open" : "Get Vortex",
+    action: () => send({ cmd: vx && vx.installed ? "modsShowVortex" : "modsGetVortex" }),
+  });
+  rows.push({
+    name: "Vortex location",
+    hint: "Optional. Only if Vortex is somewhere the launcher does not look: a portable copy, or another drive. Its folder, or Vortex.exe itself",
+    type: "action", label: s.vortexPath ? s.vortexPath : "Automatic",
+    action: () => openInput("VORTEX LOCATION", s.vortexPath || "", v => set(() => s.vortexPath = v.trim())),
+  });
 
-  rows.push({ section: "EPIC, GOG & XBOX", cat: "library" });
+  // Every store in one place: the accounts and switches first, the optional keys after them.
+  rows.push({ section: "STORES & LAUNCHERS", cat: "library" });
+  rows.push(toggleRow("Steam: show games you own but haven't installed", steamAccountHint(),
+    () => !!s.steamShowOwned, v => set(() => s.steamShowOwned = v)));
   rows.push(storeRow("epic", "Epic Games account",
     "Sign in to list every game you own on the Epic Games Store. Anything not installed shows greyed out and installs from here"));
   rows.push(storeRow("gog", "GOG account",
@@ -2929,6 +2669,9 @@ function allSettingsRows() {
     "Sign in with your Microsoft account to list the PC games on your Xbox profile — the ones it has seen you play"));
   rows.push(toggleRow("Show the PC Game Pass catalogue", gamePassHint(),
     () => !!s.gamePassCatalog, v => set(() => s.gamePassCatalog = v)));
+  rows.push(secretRow("Steam Web API key", s,
+    "Optional. Only needed if your Steam profile keeps its game details private. Free from steamcommunity.com/dev/apikey — any domain name will do",
+    () => s.steamApiKey, v => set(() => s.steamApiKey = v)));
   rows.push(secretRow("Xbox sign-in app id", s,
     "Optional. Only if Microsoft stops accepting the Xbox app's own sign-in: the client id of an app registration of your own. See the README",
     () => s.xboxClientId, v => set(() => s.xboxClientId = v)));
@@ -3577,12 +3320,18 @@ function gameMenuItems() {
     ...top,
     { label: g.favorite ? "Remove from favorites" : "Add to favorites", icon: "star", action: () => send({ cmd: "toggleFavorite", id: g.id }) },
     { label: "Add to collection", icon: "folderPlus", action: () => { closeGameMenu(); openCollect(g.id); } },
+  ];
+  // Mods need a game on this disk for a manager to deploy into; a ROM's files are the emulator's
+  // business and an uninstalled game has nowhere to put them.
+  if (canHaveMods(g)) items.push({ label: "Mods", icon: "chip", sub: "Switch mods on and off, remove them, find more — through Vortex",
+    action: () => { closeGameMenu(); openMods(g.id); } });
+  items.push(
     // Hiding is done to the whole game: hiding only the Steam copy would just bring the Xbox one
     // out from behind it as a tile of its own.
     { label: g.hidden ? "Unhide" : "Hide", icon: g.hidden ? "eye" : "eyeOff",
       sub: g.hidden ? "Show in the library again" : "Not a game? Keep it out of the library",
       action: () => { send({ cmd: "setHidden", ids: editionsOf(g).map(m => m.id), hidden: !g.hidden }); closeGameMenu(); } },
-  ];
+  );
   if (running) items.push({ label: "Close game", icon: "x", danger: true,
     action: () => { closeGameMenu(); send({ cmd: "closeGame" }); } });
   // Deleting the entry for the game you are in the middle of playing is never what you meant,
@@ -3753,6 +3502,10 @@ function manageItems() {
     });
     if (g.preferDirectLaunch && (g.platform === "Steam" || g.platform === "Epic"))
       items.push({ label: `Launch through ${g.platform} again`, icon: "store", action: () => { send({ cmd: "launchViaStore", id: g.id }); closeManage(); } });
+    if (canHaveMods(g)) items.push({
+      label: "Mods", icon: "chip", sub: "Switch mods on and off, remove them, find more — through Vortex",
+      action: () => { closeManage(); openMods(g.id); },
+    });
   }
   // Two pictures, two entries. They are different shapes and they appear in different places, so
   // one "change artwork" that set both would put whichever file was chosen into a slot it is the
@@ -3808,6 +3561,252 @@ function manageInput(btn) {
     case "A": if (focusVisible() && items[manageIdx]) items[manageIdx].action(); break;
     case "B": closeManage(); break;
   }
+}
+
+/* ============================== mods overlay ==============================
+ *
+ * One game's mods, through Vortex. The host does the talking (see the mods* commands in
+ * UiBridge) and answers with one "mods" message that carries the whole screen: a state, the
+ * sentence that explains it, and the list. This side only draws what it is handed and asks for
+ * the next thing. Every state that is not "ready" is a short note above a couple of rows that
+ * say what to do about it -- install Vortex, restart it, set the game up in it -- because the
+ * one thing a list across the room must never be is silently empty.
+ */
+let modsState = null;   // { gameId, idx, view: the last "mods" message or null, busy: a sentence or null }
+
+function canHaveMods(g) { return !!g && g.installed && !g.emulated; }
+
+function openMods(gameId) {
+  modsState = { gameId, idx: 0, view: null, busy: "Talking to Vortex…" };
+  $("overlay-mods").classList.add("active");
+  renderMods();
+  send({ cmd: "modsOpen", id: gameId });
+}
+
+function closeMods() { modsState = null; $("overlay-mods").classList.remove("active"); }
+
+/* Ask the host for something and say so on screen until its answer replaces the list. */
+function modsAsk(cmd, extra, busy) {
+  if (!modsState) return;
+  modsState.busy = busy || null;
+  renderMods();
+  send({ cmd, id: modsState.gameId, ...(extra || {}) });
+}
+
+const MODS_BROWSE_SUB = "nexusmods.com opens over the launcher. “Mod manager download” on a mod sends it straight to Vortex";
+const MODS_OPEN_SUB = "Vortex comes to the TV. Bring the launcher back the way you would after a game";
+
+/* A question Vortex is showing, as a row whose A opens its buttons as a list. "Install this
+   anyway?" from the fallback installer is the one nearly every unusual archive raises, and it
+   used to mean walking to the desk; now it is two presses. A dialog that wants more than a
+   button -- a folder, a checkbox -- only offers Vortex's window. */
+function promptRows(v) {
+  const rows = [];
+  (v.prompts || []).forEach(p => {
+    const title = p.title || "Vortex is asking something";
+    rows.push({
+      label: `Vortex asks: ${title}`, icon: "info", prompt: p,
+      sub: p.message ? p.message : (p.answerable ? "Choose an answer" : "Needs Vortex's own window"),
+      action: () => {
+        if (!p.answerable) { send({ cmd: "modsShowVortex" }); return; }
+        const gameId = modsState.gameId;
+        openChoice(title, (p.actions || []).map(a => ({
+          label: a, icon: a === p.defaultAction ? "checkCircle" : "circle", checked: a === p.defaultAction ? true : undefined,
+          action: () => modsAsk("modsAnswer", { dialogId: p.id, action: a }, "Answering Vortex…"),
+        })).concat([{ label: "Open Vortex instead", icon: "tornado", action: () => send({ cmd: "modsShowVortex" }) }]),
+        { onBack: () => { if (modsState && modsState.gameId === gameId) renderMods(); } });
+      },
+    });
+  });
+  (v.notices || []).forEach(n => rows.push({ label: "Vortex says", icon: "info", sub: n, action: () => send({ cmd: "modsShowVortex" }) }));
+  return rows;
+}
+
+function modsItems() {
+  if (!modsState || !modsState.view) return [];
+  const v = modsState.view;
+  const gameId = modsState.gameId;
+  const items = promptRows(v);
+  const again = (label) => ({ label: label || "Check again", icon: "refresh", action: () => modsAsk("modsOpen", {}, "Talking to Vortex…") });
+  const openVortex = (sub) => ({ label: "Open Vortex", icon: "tornado", sub: sub || MODS_OPEN_SUB, action: () => send({ cmd: "modsShowVortex" }) });
+  // What the state calls for comes first. The standing rows -- Vortex's own window, a fresh
+  // look -- sit together under MORE on every screen, so no row is ever a section of one.
+  const more = [];
+  switch (v.state) {
+    case "notInstalled":
+      items.push({ label: "Open the download page", icon: "download",
+        sub: "In your browser, on the desktop. Come back to the launcher the way you would after a game",
+        action: () => send({ cmd: "modsGetVortex" }) });
+      more.push(again("I've installed it — check again"));
+      break;
+    case "needsRestart":
+      items.push({ label: "Restart Vortex", icon: "refresh", sub: "Closes it and opens it again so the Consolify bridge loads. Nothing is lost",
+        action: () => modsAsk("modsRestartVortex", {}, "Restarting Vortex…") });
+      more.push(openVortex(), again("Try again"));
+      break;
+    // Setting up is done from here: Vortex gets its first profile for the game and switches to
+    // it, and whatever it asks on the way -- deployment method, staging folder -- lands at the
+    // top of this list as a question with its buttons. Its own window is a last resort.
+    case "notManaged":
+      items.push({ label: "Set it up in Vortex", icon: "tornado",
+        sub: "Vortex makes a profile for the game and switches to it. Anything it asks appears here",
+        action: () => modsAsk("modsManage", {}, "Setting the game up in Vortex…") });
+      more.push(openVortex(), again());
+      break;
+    // Vortex has the game's extension but has never been told where the game is. The launcher
+    // knows, so the same row does both: the folder first, then the profile and the switch.
+    case "notDiscovered":
+      items.push({ label: "Set it up in Vortex", icon: "tornado",
+        sub: "Consolify gives Vortex the game's folder, then Vortex makes a profile and switches to it. Anything it asks appears here",
+        action: () => modsAsk("modsManage", {}, "Setting the game up in Vortex…") });
+      more.push(openVortex(), again());
+      break;
+    case "unsupported": {
+      // Vortex learns a game through an extension. Its catalogue's candidates are offered by
+      // name -- the exact match first -- and installing one is a click in Vortex's own extension
+      // browser, which opens on the TV on that extension; or the extension's page on Nexus Mods,
+      // whose "Mod manager download" installs it the same way a mod is.
+      const exts = v.extensions || [];
+      if (exts.length) items.push({ cat: "EXTENSIONS FOR IT" });
+      exts.forEach(e => items.push({
+        label: `Install “${e.name}”`, icon: "download",
+        sub: (e.exact ? "Vortex's extension for this game" : `For ${e.gameName || "another game"}`)
+          + (e.author ? ` · by ${e.author}` : "") + (e.version ? ` · v${e.version}` : "")
+          + ". Vortex opens on it: choose Install there, then restart Vortex",
+        action: () => send({ cmd: "modsExtension", id: gameId, modId: e.modId }),
+      }));
+      items.push({ label: exts.length ? "Get it from Nexus Mods instead" : "Look for an extension on Nexus Mods", icon: "search",
+        sub: (exts.length ? "The first extension above, on the site. " : "The site's Vortex extensions. ")
+          + "Mod manager download installs one into Vortex",
+        action: () => send({ cmd: "modsBrowse", id: gameId, extensionModId: exts.length ? exts[0].modId : null, site: !exts.length }) });
+      more.push(openVortex("Look under Games there; Vortex may need to scan again, or to be pointed at the folder"), again());
+      break;
+    }
+    case "ready": {
+      const mods = v.mods || [];
+      const on = mods.filter(m => m.enabled).length;
+      if (mods.length) items.push({ cat: `${mods.length} MOD${mods.length === 1 ? "" : "S"} · ${on} ENABLED` });
+      mods.forEach(m => {
+        const installed = m.state === "installed";
+        const bits = [m.version ? "v" + m.version : null, m.author || null,
+          m.state === "downloaded" ? "downloaded, not installed yet" : m.state === "installing" ? "installing…" : null].filter(Boolean);
+        items.push({
+          mod: m, label: m.name, icon: "chip", checked: installed && m.enabled, sub: bits.join(" · ") || undefined,
+          action: () => {
+            if (!installed) { toast("Vortex has not finished installing it. Open Vortex to see why"); return; }
+            modsAsk("modsToggle", { modId: m.id, enabled: !m.enabled }, `${m.enabled ? "Disabling" : "Enabling"} ${m.name}…`);
+          },
+        });
+      });
+      more.push({ label: "Find mods on Nexus Mods", icon: "search", sub: MODS_BROWSE_SUB,
+        action: () => send({ cmd: "modsBrowse", id: gameId }) });
+      more.push(openVortex("For load order, conflicts and everything else this list does not do"));
+      more.push(again("Refresh the list"));
+      break;
+    }
+    default:   // error, unavailable
+      more.push(again("Try again"), openVortex());
+      break;
+  }
+  if (more.length) {
+    items.push({ cat: v.state === "ready" && !(v.mods || []).length ? "GET STARTED" : "MORE" });
+    items.push(...more);
+  }
+  return items;
+}
+
+/* The row's own page on Nexus Mods, when the mod came from there; the game's section otherwise. */
+function modsBrowseCurrent(items) {
+  const cur = items[modsState.idx];
+  const m = cur && cur.mod;
+  if (m && m.nexusModId) send({ cmd: "modsBrowse", id: modsState.gameId, nexusModId: m.nexusModId, nexusDomain: m.nexusDomain || null });
+  else send({ cmd: "modsBrowse", id: modsState.gameId });
+}
+
+/* The note above the list: the state in words, and for a missing Vortex the whole story. */
+function modsNoteHtml() {
+  if (!modsState) return "";
+  if (modsState.busy) return `<div class="mods-busy"><span class="mods-spinner"></span>${esc(modsState.busy)}</div>`;
+  const v = modsState.view;
+  if (!v) return "";
+  const msg = v.message ? esc(v.message) : "";
+  switch (v.state) {
+    case "notInstalled":
+      return `<div><b>Vortex isn't installed.</b> Vortex is Nexus Mods' free mod manager. Consolify drives it to download mods, install them, and switch them on and off for over 250 games. To set it up:</div>
+        <ol class="mods-steps">
+          <li>Download the installer from <span class="mods-url">nexusmods.com/site/mods/1</span>, on its <b>Files</b> tab. It is free. A Nexus Mods account is free too, and is only needed to download mods.</li>
+          <li>Run the installer. It installs for your own Windows account, needs no administrator, and opens Vortex when it is done.</li>
+          <li>In Vortex, sign in to Nexus Mods (the button at the top right). Then come back here and choose <b>check again</b>.</li>
+        </ol>`;
+    case "needsRestart":
+      return `<div class="mods-warn">${msg}</div><div>Vortex only loads its extensions when it starts, and the Consolify bridge was just added to it.</div>`;
+    case "notManaged":
+    case "notDiscovered":
+    case "unsupported":
+      return `<div>${msg}</div>`;
+    case "ready": {
+      const parts = [];
+      if (msg) parts.push(`<div class="mods-warn">${msg}</div>`);
+      if (!(v.mods || []).length) parts.push(`<div>Vortex has no mods for this game yet. Find some on Nexus Mods below; each one you send it appears here.</div>`);
+      return parts.join("");
+    }
+    default:
+      return `<div class="mods-warn">${msg || "Vortex could not be reached"}</div>`;
+  }
+}
+
+function renderMods() {
+  if (!modsState) return;
+  const g = gameById(modsState.gameId);
+  $("modsTitle").textContent = `${g ? g.title : "GAME"} · MODS`.toUpperCase();
+  const note = $("modsNote");
+  const html = modsNoteHtml();
+  note.hidden = !html;
+  note.innerHTML = html;
+  const items = modsItems();
+  const focusable = items.map((r, i) => r.cat ? -1 : i).filter(i => i >= 0);
+  if (!focusable.includes(modsState.idx)) modsState.idx = focusable[0] ?? 0;
+  const ready = modsState.view && modsState.view.state === "ready";
+  const onMod = ready && items[modsState.idx] && items[modsState.idx].mod;
+  const onNexusMod = onMod && !!items[modsState.idx].mod.nexusModId;
+  $("overlay-mods").classList.toggle("busy", !!modsState.busy);
+  renderMenu($("modsList"), $("modsFoot"), items, modsState.idx,
+    ready ? foot(["A", onMod ? "Toggle" : "Select"], ["X", "Remove"], ["Y", onNexusMod ? "Mod page" : "Nexus Mods"], ["B", "Back"]) : foot(["A", "Select"], ["B", "Back"]),
+    (i) => { if (modsState && modsState.idx !== i) { modsState.idx = i; renderMods(); } },
+    (i) => { if (!modsState || modsState.busy) return; const it = items[i]; if (it && it.action) { modsState.idx = i; it.action(); } });
+}
+
+function askRemoveMod(m) {
+  confirmState = {
+    title: `Remove ${m.name}?`,
+    body: "Vortex takes it out of the game and deletes its installed files. The downloaded archive stays in Vortex, so it can be put back from there.",
+    yesLabel: "Remove", icon: "trash", danger: true,
+    onYes: () => modsAsk("modsRemove", { modId: m.id }, `Removing ${m.name}…`),
+  };
+  confirmIdx = 0;
+  $("overlay-confirm").classList.add("active");
+  renderConfirm();
+}
+
+function modsInput(btn) {
+  const items = modsItems();
+  const cur = items[modsState.idx];
+  switch (btn) {
+    case "Up": case "Down": modsState.idx = menuStep(btn, modsState.idx, items.length); renderMods(); break;
+    case "A": if (focusVisible() && cur && cur.action && !modsState.busy) cur.action(); break;
+    case "X": if (cur && cur.mod && !modsState.busy) askRemoveMod(cur.mod); break;
+    case "Y": if (modsState.view && modsState.view.state === "ready" && !modsState.busy) modsBrowseCurrent(items); break;
+    case "B": closeMods(); break;
+  }
+}
+
+/* The host's answer. Only for the game on screen: a slow answer for one that was closed, or for
+   the game before this one, is dropped rather than drawn over the wrong title. */
+function onModsMessage(m) {
+  if (!modsState || modsState.gameId !== m.gameId) return;
+  modsState.view = m;
+  modsState.busy = null;
+  renderMods();
 }
 
 /* ============================== choice overlay ==============================
@@ -4271,7 +4270,9 @@ function switchView(v) {
 const DIRECTIONS = new Set(["Up", "Down", "Left", "Right"]);
 
 function handleInput(btn, src) {
-  if (inputOpen) return; // the text field (and the touch keyboard's own pad support) owns input
+  // The text field (and the touch keyboard's own pad support) owns input -- except B, which is
+  // how every other screen is left and has to be how this one is left too.
+  if (inputOpen) { if (btn === "B") closeInput(false); return; }
   // Only a direction hands control back to the pad. A face button must never re-arm a
   // highlight the pointer has cleared, so A over empty space does nothing.
   if (DIRECTIONS.has(btn)) setInputMode("pad");
@@ -4286,6 +4287,7 @@ function handleInput(btn, src) {
   if (collectOpen) { collectInput(btn); return; }
   if (manageOpen) { manageInput(btn); return; }
   if (choiceState) { choiceInput(btn); return; }
+  if (modsState) { modsInput(btn); return; }
 
   if (view === "library") libraryInput(btn);
   else if (view === "detail") detailInput(btn);
@@ -4378,8 +4380,10 @@ document.querySelectorAll(".overlay").forEach(ov => {
 function renderInputHint() {
   const el = $("inputHint");
   if (!el) return;
+  // Confirm stays the Enter key: A on a pad is the touch keyboard's own key press. Cancel is
+  // drawn for whatever is in hand, since B on a pad now cancels too.
   el.innerHTML = `<div class="legend-item" id="inputOk">${keycap("Enter")}<span>Confirm</span></div>` +
-    `<div class="legend-item" id="inputCancel">${keycap("Esc")}<span>Cancel</span></div>`;
+    `<div class="legend-item" id="inputCancel">${slot("B")}<span>Cancel</span></div>`;
   $("inputOk").addEventListener("click", () => closeInput(true));
   $("inputCancel").addEventListener("click", () => closeInput(false));
 }
@@ -4413,6 +4417,7 @@ function handleHostMessage(m) {
       S.steamAccount = m.steamAccount || null;
       S.stores = m.stores || null;
       S.emulation = m.emulation || null;
+      S.mods = m.mods || null;
       if (S.settings) S.settings.launchOnStartup = m.startupRegistered;
       applyTheme();
       // First real library: let clampFocus drop the highlight onto the first game rather
@@ -4426,6 +4431,7 @@ function handleHostMessage(m) {
       if (gameMenu) renderGameMenu();
       if (filterOpen) renderFilter();
       if (choiceState) renderChoice();
+      if (modsState) renderMods();
       if (firstState && S.settings && !S.settings.tvDeviceName && S.displays.length > 1) {
         switchView("settings");
         toast("Welcome — pick which display is your TV");
@@ -4531,6 +4537,15 @@ function handleHostMessage(m) {
       else if (cb && romWizard) wizardPickEmulator();
       break;
     }
+    case "mods":
+      onModsMessage(m);
+      break;
+    // B on the built-in keyboard closes the keyboard, and the press never reaches the page. With
+    // a text field open behind it, that B means "I'm done with this field" as well.
+    case "keyboardDismissed":
+      if (inputOpen) closeInput(false);
+      else if (searchOpen) closeSearch(false);
+      break;
     case "toast":
       toast(m.message);
       break;
@@ -4574,6 +4589,71 @@ const mockEmulation = {
     { id: "arcade", name: "Arcade", shortName: "Arcade", extensions: ["zip", "7z", "chd"], hasCores: true },
   ],
 };
+
+/* Mods, as Vortex would answer them. Which state a game lands in follows its store, so every
+   screen the overlay can show is one tile away: Steam games are ready with a list (Cassette Run
+   with an empty one), Epic has no Vortex at all, GOG is known but not set up, Xbox needs a
+   restart, Manual is a game Vortex has not found. */
+function mockMods(msg) {
+  const g = S.games.find(x => x.id === msg.id);
+  if (!g) return;
+  mockHandle._mods = mockHandle._mods || {};
+  const vortex = {
+    installed: g.platform !== "Epic", path: "C:\\Users\\couch\\AppData\\Local\\Programs\\Vortex\\Vortex.exe",
+    version: "1.13.7", running: true, bridgeReady: g.platform !== "Xbox", needsRestart: g.platform === "Xbox", error: null,
+  };
+  const reply = (extra) => setTimeout(() => handleHostMessage({
+    type: "mods", gameId: g.id, vortex, downloadUrl: "https://www.nexusmods.com/site/mods/1?tab=files",
+    prompts: [], notices: [], extensions: [], game: null, mods: [], message: null, ...extra,
+  }), 450);
+  mockHandle._prompts = mockHandle._prompts || {};
+  if (msg.cmd === "modsAnswer") { mockHandle._prompts[g.id] = []; toast(`(preview) answered “${msg.action}”`); }
+  const slug = g.id.replace(/\W/g, "");
+  if (g.platform === "Epic") return reply({ state: "notInstalled", message: "Vortex, the Nexus Mods manager, is not installed on this PC" });
+  if (g.platform === "Xbox") return reply({ state: "needsRestart", message: "Vortex is running but has not loaded the Consolify bridge yet. Restart Vortex once" });
+  if (g.platform === "Manual") return reply({ state: "unsupported",
+    message: `Vortex has no extension for ${g.title} yet. An extension is what teaches Vortex a game; these look like they are for it`,
+    extensions: [
+      { modId: 1234, fileId: 1, name: `${g.title} Support`, gameName: g.title, gameDomain: slug, author: "a modder", version: "1.0.0", exact: true },
+      { modId: 1235, fileId: 2, name: `${g.title}: Remastered Support`, gameName: `${g.title}: Remastered`, gameDomain: slug + "remastered", author: "someone else", version: "0.2", exact: false },
+    ] });
+  const managed = g.platform === "Steam" || !!(mockHandle._managed && mockHandle._managed[g.id]);
+  const vg = { id: slug, name: g.title, path: g.installDir || "C:\\Games\\" + g.title, managed, nexusDomain: slug, hidden: false };
+  // Salt & Tide is the GOG game Vortex knows by name only; the other GOG games it has located.
+  if (g.title === "Salt & Tide" && !managed) return reply({ state: "notDiscovered", game: { ...vg, path: null },
+    message: `Vortex has the extension for ${g.title} but has not been told where the game is. Consolify knows: C:\\Games\\${g.title}` });
+  if (!vg.managed) return reply({ state: "notManaged", game: vg,
+    message: `Vortex knows ${g.title} but has not been set up for it. That first step -- a folder for the mods, how they are deployed -- is done in Vortex's own window, once` });
+  let mods = mockHandle._mods[g.id];
+  if (!mods) mods = mockHandle._mods[g.id] = g.title === "Cassette Run" ? [] : [
+    { id: "m1", name: "SkyUI", version: "5.2SE", author: "SkyUI Team", category: "42", nexusModId: 12604, nexusDomain: "skyrimspecialedition", state: "installed", enabled: true },
+    { id: "m2", name: "Unofficial Patch", version: "4.3.3", author: "Arthmoor", category: null, nexusModId: 266, state: "installed", enabled: true },
+    { id: "m0", name: "Hand-installed Fix", version: null, author: null, category: null, nexusModId: null, state: "installed", enabled: true },
+    { id: "m3", name: "A Quality World Map", version: "9.0.1", author: "IcePenguin", category: null, nexusModId: 5804, state: "installed", enabled: false },
+    { id: "m4", name: "Static Mesh Improvement Mod", version: "2.08", author: "Brumbek", category: null, nexusModId: 659, state: "installed", enabled: true },
+    { id: "m5", name: "Immersive Citizens", version: "0.4.0.3", author: "Shurah", category: null, nexusModId: 8429, state: "downloaded", enabled: false },
+    { id: "m6", name: "Cathedral Weathers", version: "2.25", author: "JonnyWang", category: null, nexusModId: 24791, state: "installed", enabled: false },
+  ];
+  if (msg.cmd === "modsToggle") { const m = mods.find(x => x.id === msg.modId); if (m) m.enabled = !!msg.enabled; }
+  if (msg.cmd === "modsRemove") { const i = mods.findIndex(x => x.id === msg.modId); if (i >= 0) mods.splice(i, 1); }
+  // Hollowmark carries the fallback installer's question (the labels are Vortex's own) and a
+  // warning, so the prompt rows and the answer list can be walked in the preview.
+  const justManaged = msg.cmd === "modsManage";
+  const prompts = mockHandle._prompts[g.id] !== undefined && !justManaged ? mockHandle._prompts[g.id]
+    : justManaged ? [{
+        id: "dlgDeploy", type: "question", title: "Deployment Method",
+        message: "Vortex needs to know how to deploy mods for this game. Hardlink deployment is recommended.",
+        actions: ["Cancel", "Hardlink Deployment", "Symlink Deployment", "Move Deployment"], defaultAction: "Hardlink Deployment", answerable: true,
+      }]
+    : g.title === "Hollowmark: Second Ascent" ? [{
+        id: "dlg1", type: "question", title: "You Have Reached The Fallback Installer!",
+        message: "The archive does not match any layout the Cyberpunk 2077 extension knows. Install it as it is?",
+        actions: ["No, Cancel Installation", "Yes, Install To Staging Anyway", "Yes, Install And Don't Ask Again"],
+        defaultAction: null, answerable: true,
+      }] : [];
+  reply({ state: "ready", game: vg, mods: mods.map(m => ({ ...m })), prompts,
+    notices: g.title === "Hollowmark: Second Ascent" ? ["Unsolved conflicts: 2 mods conflict"] : [] });
+}
 
 function mockHandle(msg) {
   const pushState = () => {
@@ -4654,6 +4734,7 @@ function mockHandle(msg) {
         gamePass: { count: 0, fetchedAt: null, error: null },
       },
       emulation: mockEmulation,
+      mods: { installed: true, path: "C:\\Users\\couch\\AppData\\Local\\Programs\\Vortex\\Vortex.exe", version: "1.13.7", running: true },
       settings: S.settings || {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
@@ -4691,6 +4772,24 @@ function mockHandle(msg) {
     const cur = (S.games.find(g => g.id === msg.id) || {}).hidden;
     mockHandle._hidden[msg.id] = !cur;
     pushState();
+  } else if (msg.cmd === "modsOpen" || msg.cmd === "modsToggle" || msg.cmd === "modsRemove" || msg.cmd === "modsRestartVortex" || msg.cmd === "modsAnswer") {
+    mockMods(msg);
+  } else if (msg.cmd === "modsGetVortex") {
+    toast("(preview) would open the Vortex download page in the browser");
+  } else if (msg.cmd === "modsShowVortex") {
+    toast("(preview) would bring Vortex to the TV");
+  } else if (msg.cmd === "modsManage") {
+    // Setting up lands the game in the ready state with Vortex's one question on top.
+    mockHandle._managed = mockHandle._managed || {};
+    mockHandle._managed[msg.id] = true;
+    mockMods(msg);
+  } else if (msg.cmd === "modsBrowse") {
+    toast(msg.extensionModId ? `(preview) would open the extension's page, site mod #${msg.extensionModId}`
+      : msg.site ? "(preview) would open the site's Vortex extensions"
+      : msg.nexusModId ? `(preview) would open mod #${msg.nexusModId} on ${msg.nexusDomain || "the game's section"}`
+      : "(preview) would open the game's section on nexusmods.com");
+  } else if (msg.cmd === "modsExtension") {
+    toast(`(preview) would open Vortex's extension browser on #${msg.modId} and bring Vortex to the TV`);
   } else if (msg.cmd === "addManual") {
     toast("(preview) would open the file picker");
   } else if (msg.cmd === "createCollection") {

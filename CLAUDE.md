@@ -46,6 +46,11 @@ Stop the scrolled grid from clipping through the All games header
   find the window by enumerating top-level windows for the pid.
 - **Never send clicks** while testing: a stray click once launched a real game.
   Only kill launcher instances started within the session.
+- A PowerShell 5.1 driver for that (`Start-Process --windowed`, find the window by pid, take the
+  foreground, `SendInput` keys, `CopyFromScreen`) has two traps: `Add-Type` compiles with the C# 5
+  compiler, so no `out _`; and the parameter type is `[uint16]`, not `[ushort]`. Both failed AFTER
+  the app had been started, which is how a test instance got left running. Put the whole run in
+  `try/finally` with the `Stop-Process` in the `finally`.
 
 ## Architecture
 
@@ -808,6 +813,127 @@ Stop the scrolled grid from clipping through the All games header
 - The preview's `mockHandle` answers every emulation command and ships a slice of the catalogue
   (`mockEmulation`), so the wizard, the options lists and the Manage rows can be walked in the
   browser. Keys: X opens the filter, M opens Settings, Enter is A.
+
+## Mods and Vortex
+
+- **Vortex has no external API at all.** It is Electron, its state is a LevelDB only it can open,
+  and the one way in is an extension running inside it. `Consolify/vortex-bridge/index.js` is that
+  extension: an HTTP server on `127.0.0.1:47391` that turns JSON requests into Vortex API calls.
+  `VortexBackend.SyncPlugin` copies it into `%APPDATA%\Vortex\plugins\consolify-bridge`, keyed on
+  the version in `info.json` like the bundled themes -- bump it whenever the extension changes.
+- **Vortex loads extensions at startup only.** A Vortex that was already running when the folder
+  appeared answers nothing, which is the `needsRestart` state and the Restart Vortex row; the
+  restart is a WM_CLOSE to its main window and a `--start-minimized` start, never a kill. The
+  same state is raised when the bridge that answers `/status` is an older version than the one
+  shipped: an updated extension on disk is not the one running, and a route the new build asks
+  for would otherwise come back 404 and read as an empty answer. Bump `info.json` and
+  `BRIDGE_VERSION` together whenever the extension changes.
+- The token is new on every Consolify start and written to `bridge.json` beside the extension,
+  which re-reads the file on EVERY request. That is what lets a Consolify restart not strand Vortex
+  on a stale token. The Host header must be loopback (DNS rebinding from a browser tab).
+- **Downloads and installs never go through the bridge.** `Vortex.exe --install <url>` is Vortex's
+  own command line, and a second instance forwards its argv to the running one (`src/main/src/
+  ipcHandlers.ts`), so it works with or without the extension. The Nexus browse window cancels
+  `LaunchingExternalUriScheme` for the `nxm://` link and hands it there; that is what stops a
+  protocol prompt from appearing on a desktop nobody is looking at.
+- What the extension calls, taken from Vortex's source at master in Sept 2026: the
+  `setModsEnabled(api, profileId, modIds, enabled)` helper, the `deploy-mods` event with an error
+  callback, `remove-mod(gameId, modId, cb)`, and `setNextProfile(profileId)` for switching. Every
+  write goes through `ensureActive` first, because enabling and deploying only act on the active
+  profile.
+- **Never raise `activate-game` for a game with no profile.** Vortex's handler answers it with a
+  "Choose profile" dialog listing the game's profiles -- none -- whose Activate button then does
+  nothing (`user selected profile {}` in vortex.log). That is what "Set it up in Vortex does
+  nothing" was, on Silksong. Vortex's own Manage button does `manageGameDiscovered`: dispatch
+  `setProfile({ id: shortid(), gameId, name: "Default", modState: {} })`, then `setNextProfile`,
+  and the switch itself makes the staging folder and asks the deployment question. `/activate` does
+  exactly that now; the switch's wait ends on a question raised BY the switch (dialogs that were
+  already open do not count) so the launcher can show it. Verified live: Silksong went from
+  located to managed and active in one call, with no question. State is read by raw path (`persistent.mods[game]`, `persistent.profiles`,
+  `settings.profiles.activeProfileId`, `session.gameMode.known`, `settings.gameMode.discovered`)
+  rather than through selectors, so the harness can stub the store without stubbing selectors.
+  **The first cut read `persistent.profile.profiles`, which does not exist**: every game came
+  back unmanaged and the active profile id pointed at nothing, against a real Vortex 2.7 with
+  Cyberpunk managed. `GET /state-keys?path=persistent` on the bridge lists the keys and types at
+  any point of the tree (never values) and is how to check a path before trusting it.
+- **Verified against Vortex 2.7.0 on this PC (Sept 2026)**, with Cyberpunk 2077 (GOG) managed: the
+  extension loads and listens, `/games` and `/mods` read the real state, `--install-archive`
+  installs, `/answer` presses a dialog's button, `/enable` deploys and undeploys (checked on the
+  file in the game folder), `/remove` takes the mod out. Two things were wrong on the first
+  contact and are the pattern to expect from anything else taken from the source: a state path
+  (`persistent.profiles`) and a function's signature (`setModsEnabled(api, profileId, modIds,
+  enabled)` is a helper that dispatches itself and returns a promise, NOT an action creator --
+  called the old way it fails with "api.getState is not a function"). The harness models both the
+  real way. `node tools\vortex-bridge-harness.js` is the extension's regression check; a scratch
+  console project referencing `bin\Release\...\Consolify.dll` and calling `ModService` directly is
+  how the host side was run without the launcher window (the single-instance mutex stops a second
+  copy while the user's is up).
+- Vortex 2.7's all-users install is `C:\Program Files\Vortex\Vortex.exe`, with an uninstall entry
+  whose `InstallLocation` is empty and whose `DisplayIcon` carries the path -- so the registry
+  walk has to read DisplayIcon, and the plain Program Files path is a candidate of its own.
+- **A Vortex started `--start-minimized` has no visible window**, so `Process.CloseMainWindow`
+  closes nothing and neither does a search for a visible one. WM_CLOSE posted to its hidden
+  top-level window titled "Vortex" exits it cleanly within a second (`VortexBackend.CloseWindows`);
+  that is what the Restart Vortex row does.
+- **Reinstalling an archive whose name is already in Vortex's downloads raises "File exists"**,
+  because removing a mod keeps its archive on purpose. Every such question is a dialog in
+  `session.notifications.dialogs` with its buttons as labels, and `api.closeDialog(id, label)`
+  presses one; that is the whole of `/answer`. Answering a dialog's "don't ask again" button is
+  a permanent choice in Vortex: a test once pressed "Yes, Install And Don't Ask Again" on the
+  fallback installer's question by picking the last button, and the question has not come back
+  since. Pick a button by its meaning, never by position.
+- Games are matched to Vortex's by **install path only** (`ModService.Match`): equal first, then
+  one nested in the other. Vortex's names and the stores' names differ, and a title match would
+  list another game's mods with nothing about it looking wrong.
+- Every answer to the page is one `mods` message carrying the whole screen (`ModsView`): a state,
+  the sentence explaining it, the list. `modsState.view` on the page is that message and nothing
+  else, and an answer for a game other than the one on screen is dropped. Opening the screen may
+  start Vortex minimized; `_modsCts` cancels the previous request so a slow start cannot answer
+  for a screen that has moved on.
+- The preview lands each store on a different state so every screen is one tile away: Steam ready
+  (Cassette Run with an empty list, Hollowmark with a Vortex warning), Epic not installed, GOG not
+  set up, Xbox needs a restart, Manual unsupported.
+- Vortex deploys with hardlinks into the game folder, so nothing about the launch changes. Its
+  per-game "primary tool" (SKSE and the like) is deliberately NOT honoured yet -- it would change
+  how a game starts for anyone who has Vortex without ever opening the Mods screen.
+- **The browse window has no title bar.** A stick-click on the title bar's X -- the one control
+  in that window Windows drew rather than we did -- left the user's pad doing nothing until a
+  real mouse closed the window, while a click on Done was fine. WM_CLOSE posted to the window
+  (what the X sends) reproduced nothing: the launcher got the foreground back every time. The
+  difference is somewhere in how an injected click lands on a caption button, and the fix that
+  needs no theory is to have no caption: `WindowStyle.None`, and Back, Forward, Keyboard and Done
+  as buttons in the window's own bar, each drawn with the pad button that also does it.
+- **B is Back, X is Forward and Y is Done in the browse window, not LB and RB.** RB is the keyboard toggle by
+  default and the keyboard is how anything gets typed into the site; B is only a right click on
+  the desktop, and context menus are off in that WebView anyway. `GamepadService.ModalButtonHandler`
+  is the hook: set while the window is open, asked about each face or shoulder press while the
+  launcher is not in front, and a button it takes is not also a click. It checks that the window
+  is the foreground one itself, because the same pad drives whatever else is on the desktop.
+- Y on a mod row opens THAT mod's page: `attributes.modId` and `attributes.downloadGame` (the
+  Nexus section it was fetched from, which can differ from the game's own) travel as
+  `nexusModId`/`nexusDomain`, and `ModService.ModUrl` refuses a section that is not plain letters
+  and digits rather than put it in a URL. A mod installed from a file has neither and Y falls
+  back to the game's section.
+- **The browse window's bar is a second WebView**, a page built in `StoreLoginWindow.BarHtml` with
+  `ui/glyphs.js` inlined into it. glyphs.js is the icons and the button pictures split out of
+  app.js (loaded before it; the two family variables live there and app.js assigns them), so the
+  B and X on Back and Forward are the launcher's own drawings and follow the pad in hand through
+  `MainWindow.WatchPadFamily`. Drawing them again in WPF would have been a second set to keep in
+  step. The bar talks to the host with `chrome.webview.postMessage({cmd})` and is told
+  `{family, canBack, canForward}` back.
+- **Locating a game in Vortex without its folder dialog**: `/discover` dispatches the same
+  `addDiscoveredGame` (new) or `setGamePath` (re-pointed) that Vortex's own "manually set
+  location" does, after checking every `requiredFiles` entry is in the folder. The launcher
+  reaches it from `ManageAsync` when the game is known to Vortex only by name -- the one place a
+  title is matched, exactly via `TitleMatch.IsConfident`, and only on the user's press of the row
+  that says what it will do (the `notDiscovered` state).
+- **Installing a game extension is not on Vortex's API.** `state.session.extensions.available`
+  is Vortex's catalogue (fetched by Vortex, needs the network; `type === "game"` entries carry
+  `gameName`/`gameDomain`); `show-extension-page(modId)` opens Vortex's own extension browser on
+  one; the install itself is a click there, or an `nxm://site/...` link from the extension's page
+  on Nexus Mods, which Vortex routes through `install-extension-from-download`. The bridge's
+  `/extensions?query=` matches loosely on the game's name and flags the exact match; the user
+  picks from names, so a near miss costs a glance.
 
 ## Finding emulators and ROMs on their own
 

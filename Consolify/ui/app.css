@@ -983,6 +983,31 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
 .ov-text .ov-sub { line-height: 1.35; white-space: normal; overflow: visible; }
 .ov-label > .ov-text { overflow: visible; }
 
+/* ---- mods ----
+   A wider card than a menu: a mod's name, its version and its author share a row with the
+   toggle. The note above the list is the state in words -- and, with no Vortex on the PC, the
+   three steps to getting one -- so a list that cannot be shown is never simply empty. */
+.mods-card { width: 820px; }
+.mods-note {
+  font-size: 19px; line-height: 1.5; color: color-mix(in srgb, var(--ink) 66%, transparent);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.mods-note b { color: var(--ink); font-weight: 600; }
+.mods-note .mods-warn { color: var(--danger); }
+.mods-note .mods-url { font-family: "IBM Plex Mono", Consolas, monospace; font-size: 17px; color: var(--accent); }
+.mods-steps { margin: 0; padding-left: 28px; display: flex; flex-direction: column; gap: 8px; }
+.mods-busy { display: flex; align-items: center; gap: 14px; color: color-mix(in srgb, var(--ink) 80%, transparent); }
+.mods-spinner {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ink) 20%, transparent); border-top-color: var(--accent);
+  animation: mods-spin 0.9s linear infinite;
+}
+@keyframes mods-spin { to { transform: rotate(360deg); } }
+.mods-scroll { max-height: 560px; }
+/* While Vortex is working the rows stay put but dim, so a press that did nothing reads as
+   "not yet" rather than "broken". */
+#overlay-mods.busy .ov-scroll { opacity: 0.55; }
+
 /* ---- confirm dialog ----
    A heading, the details, and the two buttons that answer it. Nothing in it takes the highlight:
    A goes ahead and B backs out, and the chips say so. They are also what a mouse clicks. */

@@ -102,6 +102,14 @@ internal class GamepadService : IDisposable
     /// </summary>
     public volatile string[] UiClaimedButtons = Array.Empty<string>();
 
+    /// <summary>
+    /// A window of ours that is in front instead of the launcher -- the Nexus browse window --
+    /// and wants some of the pad's buttons: given the name of each face or shoulder button as it
+    /// is pressed, on this thread, and says whether it took it. A button it takes is not also a
+    /// mouse click. Null whenever no such window is open.
+    /// </summary>
+    public volatile Func<string, bool>? ModalButtonHandler;
+
     public bool Connected { get; private set; }
 
     /// <summary>The family of the pad that last produced input: xbox, playstation, switch or generic.</summary>
@@ -563,6 +571,15 @@ internal class GamepadService : IDisposable
             }
             else
             {
+                // ---- a window of ours in front ----
+                // The Nexus browse window takes B and X for Back and Forward (see
+                // StoreLoginWindow.HandlePadButton). Not while the keyboard is driving: B is its
+                // Close then. A button the window took is not also a click below.
+                ushort modalTaken = 0;
+                if (ModalButtonHandler is { } modal && !keyboardDriving)
+                    foreach (var (mask, name) in FaceButtons)
+                        if ((pressed & mask) != 0 && modal(name)) modalTaken |= mask;
+
                 // ---- desktop mouse clicks ----
                 // Not while a key is lit: A is that key's own press there, and a stray click would
                 // land on the app underneath instead. With nothing lit the pointer is in charge,
@@ -576,9 +593,9 @@ internal class GamepadService : IDisposable
                         if (lMask == NativeMethods.XINPUT_GAMEPAD_B) lMask = 0;
                         if (rMask == NativeMethods.XINPUT_GAMEPAD_B) rMask = 0;
                     }
-                    if ((pressed & lMask) != 0 && !leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTDOWN); leftDown = true; }
+                    if ((pressed & lMask) != 0 && !leftDown && (modalTaken & lMask) == 0) { SendClick(NativeMethods.MOUSEEVENTF_LEFTDOWN); leftDown = true; }
                     if ((released & lMask) != 0 && leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
-                    if ((pressed & rMask) != 0 && !rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTDOWN); rightDown = true; }
+                    if ((pressed & rMask) != 0 && !rightDown && (modalTaken & rMask) == 0) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTDOWN); rightDown = true; }
                     if ((released & rMask) != 0 && rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
                 }
             }

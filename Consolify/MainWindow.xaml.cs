@@ -65,6 +65,7 @@ public partial class MainWindow : Window
         {
             _bridge?.PushPadLayout(layout, padName);
             _kb?.SetLayout(layout);
+            _padFamilyWatcher?.Invoke(layout);
         });
         _gamepad.ConnectedChanged += c => Dispatcher.BeginInvoke(() => _bridge?.PushPadConnected(c));
         _gamepad.TouchClick += () => Dispatcher.BeginInvoke(() => _bridge?.PushPadClick());
@@ -363,6 +364,19 @@ public partial class MainWindow : Window
     /// <summary>See GamepadService.UiClaimedButtons.</summary>
     public void SetUiClaimedButtons(string[] buttons) => _gamepad.UiClaimedButtons = buttons;
 
+    /// <summary>See GamepadService.ModalButtonHandler: a window of ours in front of the launcher
+    /// that wants some of the pad's buttons, or null once it has closed.</summary>
+    public void SetModalPadHandler(Func<string, bool>? handler) => _gamepad.ModalButtonHandler = handler;
+
+    /// <summary>The family of the pad in hand -- xbox, playstation, switch, generic -- for a window
+    /// of ours that draws button hints of its own.</summary>
+    public string PadFamily => _gamepad.ActiveLayout;
+
+    private Action<string>? _padFamilyWatcher;
+
+    /// <summary>Told the pad family whenever it changes, for as long as the watcher is set.</summary>
+    public void WatchPadFamily(Action<string>? watcher) => _padFamilyWatcher = watcher;
+
     public void BeginModalDialog()
     {
         _suppressRefocus = true;
@@ -505,7 +519,12 @@ public partial class MainWindow : Window
             case "CaretLeft":  _kb.CaretLeft(); break;
             case "CaretRight": _kb.CaretRight(); break;
             case "Layer":      _kb.ToggleLayer(); break;
-            case "Close":      HideBuiltinKeyboard(); break;
+            case "Close":
+                HideBuiltinKeyboard();
+                // Over the launcher, B also leaves the text field the keyboard was typing into.
+                // Over another app it only closes the keyboard.
+                if (NativeMethods.GetForegroundWindow() == _hwnd) _bridge?.PushKeyboardDismissed();
+                break;
         }
     }
 

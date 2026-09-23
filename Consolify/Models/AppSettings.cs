@@ -59,6 +59,12 @@ public class AppSettings
     /// out if Microsoft ever stops accepting that. See the README.</summary>
     public string XboxClientId { get; set; } = "";
 
+    // Mods
+    /// <summary>Optional. Where Vortex is, for a portable copy or one installed somewhere its
+    /// installer does not put it. Empty means look in the usual places: the per-user Programs
+    /// folder, the uninstall entries, Program Files.</summary>
+    public string VortexPath { get; set; } = "";
+
     // Emulation
     /// <summary>Look for installed emulators and for ROMs on every scan -- RetroArch's playlists,
     /// an Emulation\roms layout, folders named after a system -- and add what is found. On by

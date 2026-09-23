@@ -196,6 +196,62 @@ its window goes to the TV, the in-game menu closes it, and playtime is recorded 
 Per game, Manage offers **Rename**, **Run with** (a different emulator for this one game) and
 its own launch arguments.
 
+## Mods
+
+Consolify does not manage mods itself. It drives **[Vortex](https://www.nexusmods.com/site/mods/1)**,
+Nexus Mods' free mod manager, which knows how to mod over 250 PC games — the Bethesda games,
+Cyberpunk 2077, Baldur's Gate 3, The Witcher 3, Stardew Valley, Elden Ring, The Sims 4 and the
+rest — and puts the parts of it you want from a sofa on the TV. Press **Y** on any installed game
+and choose **Mods**:
+
+- **Switch mods on and off.** Each row is one mod, with its version and author; A toggles it and
+  Vortex deploys the change straight away.
+- **Remove a mod.** X on the row. Vortex takes it out of the game and keeps the downloaded
+  archive, so it can be put back from there.
+- **Find mods.** *Find mods on Nexus Mods* opens the game's section of nexusmods.com in a window
+  over the launcher; **Y** on a mod that came from Nexus opens that mod's own page. The window
+  is driven the same way the store sign-ins are: the stick is the mouse, and its bar has
+  **Back (B)**, **Forward (X)**, **Keyboard** (the same button as the keyboard toggle) and
+  **Done (Y)**, each drawn with the button of the pad in hand. Choose **Mod manager download** on a mod and it goes straight to Vortex, which
+  downloads and installs it in the background; it appears in the list when you come back.
+- **Teach Vortex a game it does not know.** Vortex learns each game through an extension. For a
+  game it has none for, the Mods screen lists the extensions in Vortex's catalogue that look
+  like they are for it, exact match first: choosing one opens Vortex's own extension browser on
+  it, on the TV, where Install is one click; or the extension's page on Nexus Mods, where **Mod
+  manager download** installs it. After a restart of Vortex the game is known to it but not yet
+  located, and **Set it up in Vortex** does the rest: Consolify hands Vortex the game's folder
+  (Vortex checks the game's files are in it) and Vortex opens on the game for its first-time
+  questions, which are answered from the Mods screen like any other.
+- **Answer Vortex's questions.** When Vortex stops to ask something — "this archive is not a
+  layout I know, install it anyway?", "this file exists, replace it?" — the question appears at
+  the top of the list with its own buttons, so it is answered from the sofa. A question that
+  wants more than a button, such as a folder, still needs Vortex's window.
+- **Open Vortex.** For load order, conflicts, mod options and anything else the list does not
+  do, Vortex's own window is brought to the TV. Come back to the launcher the way you do after a
+  game (the minimize combo, Guide by default).
+
+The first time, two one-off steps happen in Vortex's own window: Vortex has to be restarted
+once so it loads the small extension Consolify installs into it (the screen says so and offers
+to do it), and each game has to be *managed* in Vortex once — a folder for the mods, how they
+are deployed. **Set it up in Vortex** on the Mods screen starts that and puts Vortex on the TV.
+Opening the Mods screen starts Vortex minimized if it is not already running.
+
+**If Vortex is not installed**, the Mods screen says so and explains how to get it: the
+installer is on the Files tab of [nexusmods.com/site/mods/1](https://www.nexusmods.com/site/mods/1),
+it installs for your own Windows account with no administrator step, and a free Nexus Mods
+account (signed into inside Vortex) is only needed to download mods. **Open the download page**
+opens it in your browser on the desktop. The same row lives under **Settings → Library → Mods**,
+with an optional **Vortex location** for a portable copy or one on another drive.
+
+How it works: Vortex has no way in from outside, so Consolify ships a tiny Vortex extension
+(`vortex-bridge`) that it copies into `%APPDATA%\Vortex\plugins\consolify-bridge`. The extension
+listens on the local machine only (`127.0.0.1`, a fresh secret per run) and turns a handful of
+requests into calls on Vortex's own API — list, enable, disable, remove, deploy, switch game.
+Downloads go through Vortex's own command line (`Vortex.exe --install <link>`). Vortex deploys
+mods into the game folder itself, so the game launches exactly as it did before; nothing about
+the launch changes. Mods for emulated games, and mod managers other than Vortex, are not
+supported.
+
 ## Build & run
 
 Requirements: **.NET 8 SDK**, **WebView2 Runtime** (preinstalled on Windows 11).

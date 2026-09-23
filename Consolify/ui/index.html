@@ -199,6 +199,20 @@
     </div>
   </div>
 
+  <!-- ============ MODS ============
+       One game's mods, through Vortex. The note above the list carries whatever state is not a
+       list -- Vortex missing, needing a restart, the game not set up yet -- and the rows under it
+       are what can be done about that. Wider than a menu: a mod's name and its version and author
+       are three things, and they have to fit beside a toggle. -->
+  <div class="overlay" id="overlay-mods" data-focus-scope>
+    <div class="quick-card menu-card mods-card">
+      <div class="quick-title mono" id="modsTitle">MODS</div>
+      <div class="mods-note" id="modsNote" hidden></div>
+      <div class="ov-scroll mods-scroll" id="modsList"></div>
+      <div class="ov-foot" id="modsFoot"></div>
+    </div>
+  </div>
+
   <!-- ============ CHOICE ============
        A general pick-one list: which system a ROM folder is for, which emulator runs it, what
        to do with an emulator. Same card as Manage; the title and rows come from the caller. -->
@@ -284,6 +298,8 @@
 
 <script src="nav.js"></script>
 <script src="theme.js"></script>
+<!-- The icons and button pictures, before the app: the browse window's bar draws from the same file. -->
+<script src="glyphs.js"></script>
 <script src="app.js"></script>
 <script src="radial.js"></script>
 </body>

@@ -35,6 +35,12 @@ public class UiBridge
     /// <summary>The stores one signs in to, keyed as the page names them. Filled in the
     /// constructor because Xbox reads a setting.</summary>
     private readonly Dictionary<string, IStoreAccount> _accounts = new();
+    /// <summary>The mod manager side: Vortex, through the bridge extension. Built here because it
+    /// reads the Vortex path setting.</summary>
+    private readonly ModService _mods;
+    /// <summary>The Mods screen's request in flight. Opening another game's list cancels the last
+    /// one, so a slow Vortex start cannot answer for a screen that has since moved on.</summary>
+    private CancellationTokenSource? _modsCts;
     private bool _signingIn;
     private System.Threading.Timer? _installPoll;
     private string? _pendingInstall;
@@ -64,6 +70,7 @@ public class UiBridge
                      new XboxAccountClient(() => _settings.Settings.XboxClientId),
                  })
             _accounts[account.Store] = account;
+        _mods = new ModService(() => _settings.Settings.VortexPath);
         StartInstallWatcher();
     }
 
@@ -527,6 +534,95 @@ public class UiBridge
                 Log.Info($"UI: {msg["msg"]?.GetValue<string>()}");
                 break;
 
+            // ---- Mods ----
+            // Every answer is one "mods" push carrying the whole screen for one game: which state
+            // it is in (Vortex missing, needs a restart, game not set up, ready…), the sentence
+            // that explains it, and the list. The page never has to assemble it from pieces.
+
+            case "modsOpen":
+                if (ModsGame(msg) is { } gOpen) _ = ModsRunAsync(gOpen, ct => _mods.OpenAsync(gOpen, ct));
+                break;
+
+            case "modsToggle":
+            {
+                var modId = msg["modId"]?.GetValue<string>();
+                var enabled = msg["enabled"]?.GetValue<bool>() ?? true;
+                if (ModsGame(msg) is { } gTog && modId is not null)
+                    _ = ModsRunAsync(gTog, ct => _mods.SetEnabledAsync(gTog, modId, enabled, ct));
+                break;
+            }
+
+            case "modsRemove":
+            {
+                var modId = msg["modId"]?.GetValue<string>();
+                if (ModsGame(msg) is { } gRem && modId is not null)
+                    _ = ModsRunAsync(gRem, ct => _mods.RemoveAsync(gRem, modId, ct));
+                break;
+            }
+
+            // One of the buttons on a question Vortex is showing -- "install this anyway?" is the
+            // usual one -- pressed from the sofa instead of walking to the desk.
+            case "modsAnswer":
+            {
+                var dialogId = msg["dialogId"]?.GetValue<string>();
+                var action = msg["action"]?.GetValue<string>();
+                if (ModsGame(msg) is { } gAns && dialogId is not null && action is not null)
+                    _ = ModsRunAsync(gAns, ct => _mods.AnswerAsync(gAns, dialogId, action, ct));
+                break;
+            }
+
+            // Vortex's own window, on the TV: for the one-time setup of a game, and for anything
+            // Vortex is asking about that a list across the room cannot answer.
+            case "modsManage":
+                if (ModsGame(msg) is { } gMan) _ = ModsManageAsync(gMan);
+                break;
+
+            case "modsShowVortex":
+                _ = ShowVortexAsync();
+                break;
+
+            case "modsRestartVortex":
+                if (ModsGame(msg) is { } gRes) _ = ModsRestartAsync(gRes);
+                break;
+
+            // The page where the installer is, in the default browser. Not downloaded and run
+            // from here: an installer is the one thing worth a mouse in hand.
+            case "modsGetVortex":
+                try
+                {
+                    _window.Park();
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(VortexBackend.DownloadUrl) { UseShellExecute = true });
+                    Log.Info("Opened the Vortex download page");
+                }
+                catch (Exception ex)
+                {
+                    _window.Unpark();
+                    Push(new { type = "toast", message = $"Could not open the browser: {ex.Message}" });
+                }
+                break;
+
+            // Where on nexusmods.com to open: a mod's own page when the page names one, an
+            // extension's page for a game Vortex cannot see yet, else the game's section.
+            case "modsBrowse":
+            {
+                if (ModsGame(msg) is not { } gBr) break;
+                var vg = _mods.Cached(gBr);
+                string? url = null;
+                if (LongOf(msg["extensionModId"]) is > 0 and var ext) url = VortexBackend.ExtensionUrl(ext);
+                else if (msg["site"]?.GetValue<bool>() == true) url = "https://www.nexusmods.com/site/mods/";
+                else if (LongOf(msg["nexusModId"]) is > 0 and var nexusId)
+                    url = ModService.ModUrl(vg, nexusId, msg["nexusDomain"]?.GetValue<string>());
+                _ = BrowseModsAsync(gBr, url ?? ModService.NexusUrl(vg));
+                break;
+            }
+
+            // Vortex's extension browser, on the extension that would teach it this game, and
+            // Vortex on the TV so its Install button can be pressed.
+            case "modsExtension":
+                if (ModsGame(msg) is { } gExt && LongOf(msg["modId"]) is > 0 and var extId)
+                    _ = ModsExtensionAsync(gExt, extId);
+                break;
+
             // ---- Emulators and ROM folders ----
             // The host owns these lists outright: every change comes through one of the commands
             // below and is saved into library.json, and the page never sends them back. They are
@@ -660,6 +756,201 @@ public class UiBridge
                     : $"{game.Title} now runs with {now.Name}" });
                 break;
             }
+        }
+    }
+
+    // ---- Mods ----
+
+    /// <summary>A whole number off the page, or null for anything else -- including JSON null,
+    /// which GetValue throws on.</summary>
+    private static long? LongOf(JsonNode? node)
+    {
+        try { return node?.GetValue<long>(); }
+        catch { return null; }
+    }
+
+    private Game? ModsGame(JsonNode msg)
+    {
+        var game = _library.Find(msg["id"]?.GetValue<string>() ?? "");
+        if (game is null) return null;
+        if (!ModService.Eligible(game))
+        {
+            Push(new { type = "toast", message = game.Installed ? "Mods are for games on this PC's disk" : $"{game.Title} is not installed" });
+            return null;
+        }
+        return game;
+    }
+
+    /// <summary>Run one Mods request off the UI thread and push its screen. A newer request for
+    /// any game cancels this one; the page ignores an answer for a game it is no longer showing.</summary>
+    private async Task ModsRunAsync(Game game, Func<CancellationToken, Task<ModsView>> work)
+    {
+        _modsCts?.Cancel();
+        var cts = _modsCts = new CancellationTokenSource();
+        try
+        {
+            var view = await Task.Run(() => work(cts.Token), cts.Token);
+            if (!cts.IsCancellationRequested) PushMods(view);
+        }
+        catch (OperationCanceledException) { /* superseded */ }
+        catch (Exception ex)
+        {
+            Log.Info($"Mods: {ex}");
+            if (!cts.IsCancellationRequested)
+                PushMods(new ModsView { GameId = game.Id, State = "error", Message = ex.Message, Vortex = _mods.Status() });
+        }
+    }
+
+    private void PushMods(ModsView v) => Push(new
+    {
+        type = "mods",
+        gameId = v.GameId, state = v.State, message = v.Message,
+        vortex = v.Vortex, game = v.Game, mods = v.Mods, prompts = v.Prompts, notices = v.Notices,
+        extensions = v.Extensions, downloadUrl = v.DownloadUrl,
+    });
+
+    /// <summary>
+    /// Set the game up in Vortex and switch to it. Vortex's first-time questions come back as
+    /// prompt rows on the Mods screen, so its window is only brought to the TV when it stopped
+    /// on something the screen cannot carry.
+    /// </summary>
+    private async Task ModsManageAsync(Game game)
+    {
+        _modsCts?.Cancel();
+        var cts = _modsCts = new CancellationTokenSource();
+        try
+        {
+            var (view, needsWindow) = await Task.Run(() => _mods.ManageAsync(game, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested) return;
+            PushMods(view);
+            if (needsWindow) await ShowVortexAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Log.Info($"Mods manage: {ex}");
+            if (!cts.IsCancellationRequested)
+                PushMods(new ModsView { GameId = game.Id, State = "error", Message = ex.Message, Vortex = _mods.Status() });
+        }
+    }
+
+    /// <summary>
+    /// Vortex's window to the TV and the foreground, with the launcher parked behind it the way it
+    /// is for a store's install dialog. A Vortex sitting in the tray has no window to find, so it
+    /// is started again -- its second instance only shows the first -- and given a moment.
+    /// </summary>
+    private async Task ShowVortexAsync()
+    {
+        if (_mods.Vortex.ExePath is null && _mods.Vortex.Locate() is null)
+        {
+            Push(new { type = "toast", message = "Vortex is not installed" });
+            return;
+        }
+        var hwnd = VortexBackend.MainWindow();
+        if (hwnd == IntPtr.Zero)
+        {
+            _mods.Vortex.Start("");
+            var until = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+            while (hwnd == IntPtr.Zero && DateTime.UtcNow < until)
+            {
+                await Task.Delay(500);
+                hwnd = VortexBackend.MainWindow();
+            }
+        }
+        if (hwnd == IntPtr.Zero)
+        {
+            Push(new { type = "toast", message = "Vortex's window did not appear" });
+            return;
+        }
+        _window.Park();
+        if (_settings.Settings.TvDeviceName is { } tv && _windows.DisplayOf(hwnd) != tv) _windows.MoveToDisplay(hwnd, tv);
+        _windows.Focus(hwnd);
+        Log.Info("Brought Vortex to the TV");
+    }
+
+    private async Task ModsRestartAsync(Game game)
+    {
+        Push(new { type = "toast", message = "Restarting Vortex…" });
+        var ok = await Task.Run(() => _mods.Vortex.RestartAsync(CancellationToken.None));
+        if (!ok) Push(new { type = "toast", message = "Vortex did not close. Close it yourself, then try again" });
+        await ModsRunAsync(game, ct => _mods.OpenAsync(game, ct));
+    }
+
+    /// <summary>
+    /// nexusmods.com for the game, in a window of its own over the launcher, driven the way the
+    /// store sign-ins are: the stick is the mouse, the keyboard toggle types. A "Mod manager
+    /// download" click on the site is an nxm:// link, which the window hands to Vortex instead of
+    /// letting Windows put up a protocol prompt; Vortex downloads and installs it, and the list is
+    /// re-read when the window closes.
+    /// </summary>
+    private async Task BrowseModsAsync(Game game, string url)
+    {
+        if (_signingIn) return;
+        if (_mods.Vortex.ExePath is null && _mods.Vortex.Locate() is null)
+        {
+            Push(new { type = "toast", message = "Install Vortex first: it is what downloads and installs the mods" });
+            return;
+        }
+        _signingIn = true;
+        _window.BeginModalDialog();
+        var sent = 0;
+        try
+        {
+            var s = _settings.Settings;
+            await StoreLoginWindow.RunAsync(_window, $"Nexus Mods — {game.Title}", AccountStore.ProfileDir("nexus"), url,
+                _ => Task.FromResult(false), visible: true, timeout: TimeSpan.FromHours(4),
+                browse: new BrowseOptions
+                {
+                    Hint = "Mod manager download on a mod's Files tab sends it straight to Vortex. Done when you have what you want.",
+                    CloseLabel = "Done",
+                    OnExternalUri = uri =>
+                    {
+                        if (_mods.Vortex.Install(uri)) { sent++; Push(new { type = "toast", message = "Sent to Vortex. It downloads and installs in the background" }); }
+                        else Push(new { type = "toast", message = "That link is not one Vortex can take" });
+                    },
+                    ShowKeyboard = () => _keyboard.Toggle(),
+                    KeyboardButton = s.KeyboardToggleButton,
+                    KeyboardHold = string.Equals(s.KeyboardToggleMode, "Hold", StringComparison.OrdinalIgnoreCase),
+                    RegisterPadHandler = h => _window.SetModalPadHandler(h),
+                    PadFamily = _window.PadFamily,
+                    WatchPadFamily = w => _window.WatchPadFamily(w),
+                });
+        }
+        catch (Exception ex) { Log.Info($"Nexus browse: {ex}"); }
+        finally
+        {
+            _window.SetModalPadHandler(null);
+            _window.WatchPadFamily(null);
+            _window.EndModalDialog();
+            _signingIn = false;
+        }
+        Log.Info($"Nexus browse closed; {sent} link(s) handed to Vortex; foreground is now {NativeMethodsForeground()}");
+        await ModsRunAsync(game, ct => _mods.OpenAsync(game, ct));
+    }
+
+    /// <summary>For the log line after a browse window closes: which window Windows handed the
+    /// foreground to, since "the pad stopped working" reports come down to exactly that.</summary>
+    private static string NativeMethodsForeground()
+    {
+        var fg = Consolify.Interop.NativeMethods.GetForegroundWindow();
+        if (fg == IntPtr.Zero) return "nothing";
+        Consolify.Interop.NativeMethods.GetWindowThreadProcessId(fg, out var pid);
+        return pid == (uint)Environment.ProcessId ? "the launcher" : $"another process (pid {pid})";
+    }
+
+    private async Task ModsExtensionAsync(Game game, long modId)
+    {
+        Push(new { type = "toast", message = "Asking Vortex…" });
+        try
+        {
+            var ok = await Task.Run(() => _mods.ShowExtensionAsync(modId, CancellationToken.None));
+            if (!ok) { Push(new { type = "toast", message = "Vortex is not answering; try again in a moment" }); return; }
+            await ShowVortexAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"Mods extension: {ex}");
+            Push(new { type = "toast", message = $"Vortex could not be asked: {ex.Message}" });
         }
     }
 
@@ -812,6 +1103,7 @@ public class UiBridge
         t.GamePassCatalog = s.GamePassCatalog;
         t.XboxClientId = (s.XboxClientId ?? "").Trim();
         t.DetectEmulators = s.DetectEmulators;
+        t.VortexPath = (s.VortexPath ?? "").Trim();
         t.TvDeviceName = s.TvDeviceName;
         t.SwitchPrimaryOnLaunch = s.SwitchPrimaryOnLaunch;
         t.RepositionGameWindow = s.RepositionGameWindow;
@@ -1269,6 +1561,9 @@ public class UiBridge
                 xbox = _accounts["xbox"].Status,
                 gamePass = _gamePass.Status,
             },
+            // Whether Vortex is here and where, for the Settings row. The Mods screen itself asks
+            // afresh through modsOpen, which is what may start Vortex.
+            mods = _mods.Status(),
             // The page draws the emulator and ROM folder rows from these, and the system picker
             // from the catalogue; it never sends any of it back (see the emu* commands).
             emulation = new
@@ -1375,6 +1670,9 @@ public class UiBridge
 
     /// <summary>The right stick's scroll speed, notches per second, up positive. See GamepadService.UiScroll.</summary>
     public void PushStickScroll(double v) => Push(new { type = "stickScroll", v = Math.Round(v, 2) });
+
+    /// <summary>The built-in keyboard was closed with B while the launcher was in front.</summary>
+    public void PushKeyboardDismissed() => Push(new { type = "keyboardDismissed" });
 
     public void PushPadConnected(bool connected) => Push(new { type = "padConnected", connected });
 

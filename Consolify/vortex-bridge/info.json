@@ -1,0 +1,6 @@
+{
+  "name": "Consolify bridge",
+  "author": "Consolify",
+  "version": "1.0.5",
+  "description": "Lets the Consolify launcher list, enable, disable and remove this PC's mods from the TV. Listens on the local machine only; nothing leaves it."
+}
