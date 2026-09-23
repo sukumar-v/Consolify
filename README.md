@@ -68,6 +68,17 @@ a menu remote:
 - **The pointer knows when to disappear.** Touch the D-pad and the cursor hides and stops
   stealing focus; nudge the stick or a real mouse and it comes straight back. Optionally
   system-wide, so it stays hidden out on the desktop too.
+- **Any controller.** Xbox pads through XInput; a DualSense, a DualShock 4, a Switch Pro
+  controller (over Bluetooth) or a generic pad through Raw Input, so they keep working while a
+  game is in front. The button hints along the bottom, in every menu and in Settings are drawn as
+  the buttons of the pad in your hand: the green A becomes a cross the moment you pick up a
+  DualSense, and turns into a key cap when you touch the keyboard. A DualSense's touchpad works
+  like a laptop's: the pointer, tap and press to click, tap-and-drag, two-finger scroll and
+  right-click, and pinch to zoom.
+- **A keyboard and mouse work too.** Arrows move, Enter selects, Esc goes back, X and Y are
+  themselves, `/` searches and M opens Settings. The mouse hovers and clicks anywhere; a right
+  click on a game opens its menu and a right click anywhere else goes back, a click on the dimmed
+  screen closes a menu, and the hint bar is itself clickable.
 
 The result is a machine you genuinely never have to walk over to. Games are the reason you sit
 down; everything else stops being a reason to stand up.
@@ -175,12 +186,15 @@ Consolify/
     GameLaunchService.cs  Launch orchestration, process tracking, window repositioning, playtime
     LibraryScanner.cs     Steam (ACF/VDF + librarycache art), Epic (.item manifests),
                           GOG (registry), Xbox (MicrosoftGame.config + AppModel repository)
-    GamepadService.cs     XInput polling: UI navigation events + gamepad-mouse (SendInput/SetCursorPos)
+    GamepadService.cs     Gamepad polling: UI navigation events + gamepad-mouse (SendInput/SetCursorPos),
+                          merging XInput with the HID reader; publishes which pad family is in use
+    HidGamepadReader.cs   Raw Input + hid.dll: DualSense, Switch Pro and generic pads, in XInput's shape
     VirtualKeyboardService.cs  Touch keyboard (TabTip) via ITipInvocation COM
     CursorService.cs      Optional system-wide pointer hiding while the D-pad drives
     StartupService.cs     HKCU Run key registration
     Storage.cs            JSON persistence in %APPDATA%\Consolify (settings, library, log, covers)
   Interop/NativeMethods.cs   All P/Invoke declarations
+  Interop/HidNative.cs       Raw Input and hid.dll, for the HID gamepad reader
 ```
 
 ## Feature notes
@@ -215,7 +229,39 @@ Consolify/
   soon as the D-pad drives; moving the stick or a real mouse brings it straight back. Inside the
   launcher this is free; Settings → "Hide pointer system-wide" extends it to the rest of Windows
   by swapping the system cursors (restored on exit, on crash and on process exit).
-- **Gamepad** (XInput, pad 0):
+- **Gamepad** (XInput pad 0, plus any HID pad):
+  - Xbox and XInput-compatible pads are read through XInput. Everything else -- Sony's
+    DualShock 4 and DualSense, Nintendo's Switch Pro controller, generic HID pads -- is read
+    through Raw Input (`RIDEV_INPUTSINK`, so input arrives even with a game in front) and parsed
+    with hid.dll from the pad's own descriptor. Sony pads are mapped by their well-known button
+    order; the Switch Pro is mapped by *position* (its B is the bottom button, so it does what
+    A does on an Xbox pad, and the legend draws a B next to "Select"); anything unrecognised
+    gets the Sony order, which most generic pads follow. Two pads can be attached at once: the
+    one that moved last is the one driving.
+  - The **on-screen hints follow the pad in hand**: Xbox letters, PlayStation shapes, Switch
+    letters, a four-button diamond for a generic pad, and key caps once a keyboard or mouse is
+    used. Settings rows that name gamepad buttons always draw the last gamepad used.
+  - **The touchpad on a DualSense (and DualShock 4) is a precision touchpad**, with a laptop's
+    gestures:
+
+    | Gesture | Does |
+    |---|---|
+    | One finger | Moves the pointer, faster for a flick and slower for a nudge |
+    | Tap, or press the pad | Left click (a press is held for as long as it is held, so it drags) |
+    | Tap twice | Double click |
+    | Tap, then touch and hold | Holds the left button while the finger moves: drag a window, select text. Lift and touch again quickly to carry on; tap to let go |
+    | Two-finger tap, or press with two fingers down | Right click |
+    | Two-finger swipe | Scrolls, up and down or sideways, and coasts after a flick |
+    | Pinch or spread | Zooms (Ctrl + wheel) |
+
+    The pad reports two touch points, so three- and four-finger gestures are not possible. The
+    pointer holds still around a press, so clicking does not nudge it. Sensitivity, tap-to-click,
+    tap-and-drag, scroll direction and scroll speed are under Settings → Controller. The touch data sits in the vendor part of
+    the pad's report, so Sony pads are read from their full report directly; on Bluetooth the
+    launcher asks the pad for that report the way Steam does.
+  - Known limits: a Switch Pro controller over USB sends nothing until it has been through
+    Nintendo's handshake, so connect it over Bluetooth. Battery is shown for Bluetooth pads
+    only, and for a pad on the cable it is whatever Windows last saw over Bluetooth.
   - Launcher focused → D-pad/A/B/X/Y drive the UI exactly as the on-screen legend shows;
     the left stick moves the mouse cursor (hover focuses, so stick and D-pad stay in sync),
     right stick scrolls.
@@ -229,6 +275,12 @@ Consolify/
     deflection) are sliders in Settings.
   - The header shows a controller **battery gauge** — only for wireless pads that actually
     report a battery; wired controllers show nothing.
+- **Keyboard and mouse** — the page has keyboard focus whenever the launcher is the active
+  window. Arrows navigate, Enter (or Space) is A, Esc (or Backspace) is B, X and Y are X and Y,
+  `[` and `]` are the shoulders, `/` opens search and M opens Settings. With the mouse, hovering
+  highlights and clicking selects; a right click on a game opens its options and a right click
+  elsewhere is Back; clicking the dimmed screen around a menu closes it; the arrows on a settings
+  row step its value; and every entry in a hint bar can be clicked to press that button.
 - **Virtual keyboard** — the Windows *touch* keyboard (TabTip) via the ITipInvocation COM
   interface; osk.exe is only a last-resort fallback when TabTip doesn't exist. Hold Start
   (button + hold time configurable) to toggle; text inputs in the UI (collection names, launch

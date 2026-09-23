@@ -31,7 +31,7 @@
       <label class="lib-search" id="libSearch" data-focusable data-nav-skip data-focus-key="search" data-action="search">
         <svg class="lib-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/></svg>
         <input id="searchField" type="text" placeholder="Search your library" autocomplete="off" spellcheck="false" tabindex="-1">
-        <span class="lib-search-key btn-pill mono">VIEW</span>
+        <span class="lib-search-key btn-slot" data-btn="View"></span>
       </label>
       <div class="topbar-right mono">
         <span id="scanStatus"></span>
@@ -54,7 +54,7 @@
           <div class="playing-info">
             <div class="playing-name" id="playingName">—</div>
             <div class="playing-meta mono" id="playingMeta"></div>
-            <div class="playing-hint"><span class="btn-badge btn-a">A</span><span>Resume</span><span class="btn-badge">Y</span><span>Options</span></div>
+            <div class="playing-hint"><span class="btn-slot" data-btn="A"></span><span>Resume</span><span class="btn-slot" data-btn="Y"></span><span>Options</span></div>
           </div>
         </div>
       </section>
@@ -90,13 +90,9 @@
       </section>
     </div>
 
-    <footer class="legend" data-region="legend">
-      <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Launch</span></div>
-      <div class="legend-item"><div class="btn-badge">X</div><span>Filter</span></div>
-      <div class="legend-item"><div class="btn-badge">Y</div><span>Options</span></div>
-      <div class="legend-item"><div class="btn-pill mono">VIEW</div><span>Search</span></div>
-      <div class="legend-item"><div class="btn-pill mono">MENU</div><span>Settings</span></div>
-    </footer>
+    <!-- Filled by renderLibraryLegend: the buttons are drawn for whatever pad (or keyboard) was
+         last used, so nothing here can be static markup. -->
+    <footer class="legend" data-region="legend" id="libraryFoot"></footer>
   </div>
 
   <!-- ============ DETAIL ============ -->
@@ -136,7 +132,7 @@
 
         <div class="detail-actions" id="detailActions">
           <div class="pill-btn pill-primary" data-act="play" data-focusable data-focus-key="detail:play">
-            <div class="pill-a-badge">A</div>
+            <div class="pill-a-badge btn-slot" data-btn="A"></div>
             <span id="playLabel">Play</span>
           </div>
           <div class="pill-btn pill-secondary" data-act="collect" data-focusable data-focus-key="detail:collect">Add to Collection</div>
@@ -144,11 +140,7 @@
         </div>
       </div>
 
-      <footer class="legend">
-        <div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>
-        <div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>
-        <div class="legend-item"><div class="btn-badge">X</div><span id="favLegend">Favorite</span></div>
-      </footer>
+      <footer class="legend" id="detailFoot"></footer>
     </div>
   </div>
 
@@ -215,8 +207,8 @@
       <div class="dialog-title" id="confirmTitle">Are you sure?</div>
       <div class="dialog-body" id="confirmBody"></div>
       <div class="dialog-actions">
-        <div class="dialog-btn dialog-yes" id="confirmYes"><span class="btn-badge btn-a">A</span><span id="confirmYesLabel">Confirm</span></div>
-        <div class="dialog-btn dialog-no" id="confirmNo"><span class="btn-badge">B</span><span>Cancel</span></div>
+        <div class="dialog-btn dialog-yes" id="confirmYes"><span class="btn-slot" data-btn="A"></span><span id="confirmYesLabel">Confirm</span></div>
+        <div class="dialog-btn dialog-no" id="confirmNo"><span class="btn-slot" data-btn="B"></span><span>Cancel</span></div>
       </div>
     </div>
   </div>
@@ -263,7 +255,7 @@
     <div class="quick-card">
       <div class="quick-title mono" id="inputTitle">NAME</div>
       <input id="inputField" class="text-input" type="text" autocomplete="off" spellcheck="false">
-      <div class="guide-foot mono input-hint">ENTER CONFIRM · ESC CANCEL</div>
+      <div class="input-hint" id="inputHint"></div>
     </div>
   </div>
 
@@ -272,7 +264,7 @@
     <div class="guide-card">
       <div class="quick-title mono">COUCH SETUP GUIDE</div>
       <div class="guide-body" id="guideBody"></div>
-      <div class="guide-foot"><div class="btn-badge">B</div><span>Close</span></div>
+      <div class="guide-foot"><div class="legend-item" data-press="B"><span class="btn-slot" data-btn="B"></span><span>Close</span></div></div>
     </div>
   </div>
 

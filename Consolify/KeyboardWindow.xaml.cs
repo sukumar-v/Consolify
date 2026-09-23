@@ -344,32 +344,99 @@ public partial class KeyboardWindow : Window
     private static readonly Brush PillInk = new SolidColorBrush(Color.FromRgb(0xF3, 0xF2, 0xF0));
 
     /// <summary>
-    /// The pad button drawn in a key's corner. The face buttons get their real Xbox shape and
-    /// colour and the shoulders/sticks a pill, because "A" as a green disc is read at a glance
-    /// from the sofa where the word "Menu" in 11px is not.
+    /// The pad button drawn in a key's corner. The face buttons get their real shape and colour
+    /// and the shoulders/sticks a pill, because "A" as a green disc is read at a glance from the
+    /// sofa where the word "Menu" in 11px is not. Which shape depends on the pad in hand: the
+    /// hints are bound by position (see KeyboardButtons in GamepadService), so the badge on
+    /// Backspace is a blue X on an Xbox pad and a pink square on a DualSense.
     /// </summary>
-    private static readonly Dictionary<string, Color> FaceColors = new()
+    private string _padLayout = "xbox";
+
+    /// <summary>The family of the pad in use; the badges are redrawn if the keyboard is up.</summary>
+    public void SetLayout(string layout)
     {
-        ["A"] = Color.FromRgb(0x3A, 0xA0, 0x3C),
-        ["B"] = Color.FromRgb(0xD3, 0x43, 0x3C),
-        ["X"] = Color.FromRgb(0x3C, 0x7C, 0xD3),
-        ["Y"] = Color.FromRgb(0xE2, 0xB1, 0x28),
-    };
+        if (string.IsNullOrEmpty(layout) || _padLayout == layout) return;
+        _padLayout = layout;
+        if (IsVisible) Build();
+    }
+
+    private static readonly Color DarkDisc = Color.FromRgb(0x2B, 0x2B, 0x31);
+    private static readonly Color PillInkColor = Color.FromRgb(0xF3, 0xF2, 0xF0);
+    private static readonly Color DarkInk = Color.FromRgb(0x08, 0x08, 0x0A);
+
+    /// <summary>What a hint looks like on the pad in use: its text, the disc colour for a face button (null for a pill), and the ink.</summary>
+    private (string text, Color? disc, Color ink) HintFace(string hint)
+    {
+        var white = Colors.White;
+        switch (_padLayout)
+        {
+            case "playstation":
+                return hint switch
+                {
+                    "A" => ("✕", DarkDisc, Color.FromRgb(0x7C, 0x9B, 0xE6)),
+                    "B" => ("○", DarkDisc, Color.FromRgb(0xE0, 0x55, 0x4F)),
+                    "X" => ("□", DarkDisc, Color.FromRgb(0xE6, 0x8A, 0xC0)),
+                    "Y" => ("△", DarkDisc, Color.FromRgb(0x63, 0xC5, 0x8F)),
+                    "LB" => ("L1", null, PillInkColor), "RB" => ("R1", null, PillInkColor),
+                    "LT" => ("L2", null, PillInkColor), "RT" => ("R2", null, PillInkColor),
+                    "LS" => ("L3", null, PillInkColor), "RS" => ("R3", null, PillInkColor),
+                    "Menu" => ("☰", null, PillInkColor), "View" => ("❐", null, PillInkColor),
+                    _ => (hint, null, PillInkColor),
+                };
+            case "switch":
+                // By position: Nintendo's B is the bottom button, which is what "A" means here.
+                return hint switch
+                {
+                    "A" => ("B", Color.FromRgb(0x1B, 0x1B, 0x1F), white),
+                    "B" => ("A", Color.FromRgb(0x1B, 0x1B, 0x1F), white),
+                    "X" => ("Y", Color.FromRgb(0x1B, 0x1B, 0x1F), white),
+                    "Y" => ("X", Color.FromRgb(0x1B, 0x1B, 0x1F), white),
+                    "LB" => ("L", null, PillInkColor), "RB" => ("R", null, PillInkColor),
+                    "LT" => ("ZL", null, PillInkColor), "RT" => ("ZR", null, PillInkColor),
+                    "Menu" => ("+", null, PillInkColor), "View" => ("−", null, PillInkColor),
+                    _ => (hint, null, PillInkColor),
+                };
+            case "generic":
+                // No letters to show for a pad we know nothing about: the position is the name.
+                return hint switch
+                {
+                    "A" => ("▼", DarkDisc, white), "B" => ("▶", DarkDisc, white),
+                    "X" => ("◀", DarkDisc, white), "Y" => ("▲", DarkDisc, white),
+                    "LB" => ("L1", null, PillInkColor), "RB" => ("R1", null, PillInkColor),
+                    "LT" => ("L2", null, PillInkColor), "RT" => ("R2", null, PillInkColor),
+                    "LS" => ("L3", null, PillInkColor), "RS" => ("R3", null, PillInkColor),
+                    "Menu" => ("START", null, PillInkColor), "View" => ("SEL", null, PillInkColor),
+                    _ => (hint, null, PillInkColor),
+                };
+            default:
+                return hint switch
+                {
+                    "A" => ("A", Color.FromRgb(0x3A, 0xA0, 0x3C), white),
+                    "B" => ("B", Color.FromRgb(0xD3, 0x43, 0x3C), white),
+                    "X" => ("X", Color.FromRgb(0x3C, 0x7C, 0xD3), white),
+                    // Yellow needs dark ink; the other three carry white.
+                    "Y" => ("Y", Color.FromRgb(0xE2, 0xB1, 0x28), DarkInk),
+                    // Menu (three bars) and View are glyphs on the pad itself, so draw them, not their names.
+                    "Menu" => ("☰", null, PillInkColor), "View" => ("❐", null, PillInkColor),
+                    _ => (hint, null, PillInkColor),
+                };
+        }
+    }
 
     private UIElement HintBadge(string hint)
     {
-        bool face = FaceColors.TryGetValue(hint, out var color);
-        // Menu (three bars) and View are glyphs on the pad itself, so draw them, not their names.
-        string text = hint == "Menu" ? "☰" : hint == "View" ? "❐" : hint;
+        var (text, disc, ink) = HintFace(hint);
+        bool face = disc is not null;
         double h = Math.Round(_keySize * 0.28);
         // Inset past the key's own corner radius, or the badge rides out over the rounded edge.
         double inset = Math.Round(_keySize * 0.10);
+        bool glyph = text.Length == 1 && !char.IsLetterOrDigit(text[0]);
 
         var badge = new Border
         {
             Height = h,
             MinWidth = h,
-            Background = face ? new SolidColorBrush(color) : PillFill,
+            Background = face ? new SolidColorBrush(disc!.Value) : PillFill,
             CornerRadius = new CornerRadius(h / 2),
             BorderThickness = new Thickness(face ? 0 : 1),
             BorderBrush = face ? Brushes.Transparent : new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)),
@@ -380,11 +447,10 @@ public partial class KeyboardWindow : Window
             Child = new TextBlock
             {
                 Text = text,
-                FontSize = Math.Round(_keySize * (hint == "Menu" ? 0.16 : 0.17)),
+                FontSize = Math.Round(_keySize * (glyph ? 0.16 : 0.17)),
                 FontFamily = KeyFont,
                 FontWeight = face ? FontWeights.SemiBold : FontWeights.Normal,
-                // Yellow needs dark ink; the other three carry white.
-                Foreground = hint == "Y" ? FocusInk : PillInk,
+                Foreground = new SolidColorBrush(ink),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },

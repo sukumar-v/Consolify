@@ -6,7 +6,13 @@ using Consolify.Models;
 namespace Consolify.Services;
 
 /// <summary>
-/// Background XInput polling loop (~125 Hz).
+/// Background gamepad polling loop (~125 Hz).
+///
+/// Two sources, one loop. Xbox pads come from XInput; everything else -- a DualSense, a Switch
+/// Pro controller, a generic HID pad -- comes from HidGamepadReader, already translated into
+/// XInput's shape. Whichever pad moved most recently is the one driving, and its family
+/// ("xbox", "playstation", "switch", "generic") is published so the UI can draw the right
+/// glyphs next to "Select".
 ///
 /// Two roles:
 ///  • UI navigation — when the launcher window is foreground, D-pad and face buttons are
@@ -17,16 +23,23 @@ namespace Consolify.Services;
 ///    whole service idles unless GamepadMouseDuringGame is enabled, so games with native
 ///    controller support never see phantom mouse input.
 /// </summary>
-public class GamepadService : IDisposable
+internal class GamepadService : IDisposable
 {
     private readonly SettingsStore _settings;
     private readonly Func<bool> _isLauncherForeground;
     private readonly Func<bool> _isGameFocused;
+    private readonly HidGamepadReader? _hid;
     private Thread? _thread;
     private volatile bool _running;
 
     /// <summary>UI navigation event: Up, Down, Left, Right, A, B, X, Y, Menu, View.</summary>
     public event Action<string>? UiEvent;
+    /// <summary>
+    /// A pad produced input: which family it is and what it calls itself. Raised when the driving
+    /// pad changes, and again when a pad is picked up after a pause -- the UI switches its legend
+    /// to the keyboard on a keypress, and this is what switches it back.
+    /// </summary>
+    public event Action<string, string>? PadUsed;
     /// <summary>Raised when the keyboard-toggle chord is held.</summary>
     public event Action? KeyboardToggleRequested;
     /// <summary>Combo tapped: minimize/restore, or the in-game menu while a game runs.</summary>
@@ -42,6 +55,15 @@ public class GamepadService : IDisposable
     public event Action<double, double>? StickDirection;
     /// <summary>A button was pressed while suspended: wake the displays and swallow the press.</summary>
     public event Action? WakeRequested;
+    /// <summary>
+    /// A touchpad press is about to be sent as a real mouse click. The page treats a mouse click as
+    /// "the keyboard and mouse are in use" and swaps its legend to key caps; this tells it that
+    /// this one click is the pad.
+    /// </summary>
+    public event Action? TouchClick;
+    /// <summary>The right stick's scroll speed while the launcher is in front, in wheel notches per
+    /// second, up positive; 0 when it is let go. The page scrolls by it every frame.</summary>
+    public event Action<double>? UiScroll;
 
     /// <summary>
     /// Set while any overlay menu is up. Those menus are pad-driven and hide the cursor, so the
@@ -82,6 +104,13 @@ public class GamepadService : IDisposable
 
     public bool Connected { get; private set; }
 
+    /// <summary>The family of the pad that last produced input: xbox, playstation, switch or generic.</summary>
+    public string ActiveLayout { get; private set; } = "xbox";
+    /// <summary>What that pad calls itself, for the toast.</summary>
+    public string ActiveName { get; private set; } = "";
+    /// <summary>The driving pad's device node when it is a HID pad, for the battery lookup; null for XInput.</summary>
+    private volatile string? _activeHidInstance;
+
     /// <summary>Latest reading, so the UI can ask for it after the bridge is up. The pad is
     /// usually detected before the WebView exists, and that first push has nowhere to go.</summary>
     public BatteryState CurrentBattery { get; private set; }
@@ -95,12 +124,23 @@ public class GamepadService : IDisposable
     // and the deferred single tap then opened the launcher instead.
     private const int DoubleTapMs = 550;
     private const byte TriggerThreshold = 40;  // analog triggers count as "pressed" past this
+    /// <summary>A pad that has been quiet this long is "picked up again" on its next input.</summary>
+    private const int PadQuietMs = 1500;
+    /// <summary>
+    /// How far a stick has to travel from where it last registered before that counts as the pad
+    /// being used. A DualSense streams a report every 4ms and its sticks jitter by a few counts
+    /// at rest, and a wobble must not steal the legend from the pad someone is actually holding.
+    /// Measured from the last registered position rather than the last tick, so a slow push still
+    /// crosses it. About 5% of the travel; the cursor deadzone is 18%.
+    /// </summary>
+    private const int StickNoise = 1600;
 
-    public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused)
+    public GamepadService(SettingsStore settings, Func<bool> isLauncherForeground, Func<bool> isGameFocused, HidGamepadReader? hid = null)
     {
         _settings = settings;
         _isLauncherForeground = isLauncherForeground;
         _isGameFocused = isGameFocused;
+        _hid = hid;
     }
 
     public void Start()
@@ -151,6 +191,31 @@ public class GamepadService : IDisposable
         long nextBatteryPoll = 0, nextStickPush = 0;
         CurrentBattery = new BatteryState(false, -1, false, -99);   // impossible, so the first read always pushes
         int missCount = 0;
+        bool xinputMissing = false;
+        // Which pad is driving, and where each one last registered a movement (see StickNoise).
+        bool activeIsHid = false;
+        var anchorX = default(NativeMethods.XINPUT_GAMEPAD);
+        var anchorHid = default(NativeMethods.XINPUT_GAMEPAD);
+        bool anchorXSet = false, anchorHidSet = false;
+        long lastPadInputAt = long.MinValue / 2;
+
+        // The right stick's scroll speed for the launcher page (see the right-stick section). Sent
+        // when it changes, at most every 16 ms, and re-sent every 100 ms while it is not zero: the
+        // page stops by itself on a speed older than 250 ms, so a push lost on the way -- the
+        // launcher hidden mid-scroll, the pad unplugged -- can never leave the list scrolling.
+        double uiScrollSent = 0;
+        long uiScrollSentAt = long.MinValue / 2;
+        void PushUiScroll(double v, long now)
+        {
+            if (v == 0 && uiScrollSent == 0) return;
+            bool changed = Math.Abs(v - uiScrollSent) >= 0.2 || (v == 0) != (uiScrollSent == 0);
+            bool due = now - uiScrollSentAt >= (changed ? 16 : 100);
+            if (!due && v != 0) return;
+            if (!changed && !due) return;
+            uiScrollSent = v;
+            uiScrollSentAt = now;
+            UiScroll?.Invoke(v);
+        }
 
         void SetInputMode(string mode)
         {
@@ -159,19 +224,39 @@ public class GamepadService : IDisposable
             InputModeChanged?.Invoke(mode);
         }
 
+        // The touchpad as a precision touchpad. Reset on every path that stops reading it as a
+        // mouse, so a held click or a drag can never outlive its context as a stuck button.
+        var touch = new TouchpadGestures
+        {
+            PointerMoved = () => SetInputMode("pointer"),
+            Clicking = () => TouchClick?.Invoke(),
+        };
+
         while (_running)
         {
             Thread.Sleep(8);
             long now = sw.ElapsedMilliseconds;
             double dt = Math.Min((now - lastTick) / 1000.0, 0.1);
             lastTick = now;
+            double uiScroll = 0;    // set by the right stick while the launcher is in front
 
-            NativeMethods.XINPUT_STATE state;
+            NativeMethods.XINPUT_STATE xs = default;
             int rc = 1;
-            try { rc = NativeMethods.XInputGetStateAny(0, out state); }
-            catch (DllNotFoundException) { break; }
+            if (!xinputMissing)
+            {
+                try { rc = NativeMethods.XInputGetStateAny(0, out xs); }
+                catch (DllNotFoundException)
+                {
+                    // No XInput at all is unusual, but a HID pad can still drive everything.
+                    xinputMissing = true;
+                    Log.Info("XInput is not available; only HID pads will be read");
+                }
+            }
+            bool xOk = rc == 0;
+            var hid = _hid?.Snapshot() ?? default;
+            bool hOk = hid.Present;
 
-            if (rc != 0)
+            if (!xOk && !hOk)
             {
                 if (Connected && ++missCount > 60) { Connected = false; ConnectedChanged?.Invoke(false); }
                 // Still report the battery while nothing is attached, or the UI never hears that
@@ -185,16 +270,58 @@ public class GamepadService : IDisposable
                 prevButtons = 0;
                 if (leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
                 if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
+                touch.Reset();
                 Thread.Sleep(400); // don't hammer XInput when no pad is attached
                 continue;
             }
             missCount = 0;
             if (!Connected) { Connected = true; ConnectedChanged?.Invoke(true); nextBatteryPoll = 0; }
 
+            // ---- which pad is driving ----
+            // The one that moved. Two pads can be attached at once -- a DualSense on the cable
+            // and an Xbox pad on Bluetooth is exactly this PC -- and the one in somebody's hands
+            // is the one whose buttons and sticks are changing. A pad that has gone away hands
+            // over to whatever is left.
+            // The first reading only sets the anchor: a DualSense's sticks rest a few percent
+            // off centre, and against a zero anchor that read as the pad being picked up before
+            // anyone had touched it.
+            if (xOk && !anchorXSet) { anchorX = xs.Gamepad; anchorXSet = true; }
+            if (hOk && !anchorHidSet) { anchorHid = hid.Pad; anchorHidSet = true; }
+            bool xMoved = xOk && Moved(xs.Gamepad, anchorX);
+            if (xMoved) anchorX = xs.Gamepad;
+            // A finger on the touchpad is the pad being used as much as a stick is.
+            bool hMoved = hOk && (Moved(hid.Pad, anchorHid) || hid.TouchDx != 0 || hid.TouchDy != 0 || hid.TouchSpread != 0 || hid.TouchClick);
+            if (hMoved) anchorHid = hid.Pad;
+            if (hMoved && !xMoved) activeIsHid = true;
+            else if (xMoved && !hMoved) activeIsHid = false;
+            if (activeIsHid && !hOk) activeIsHid = false;
+            if (!activeIsHid && !xOk) activeIsHid = true;
+
+            var state = activeIsHid ? new NativeMethods.XINPUT_STATE { Gamepad = hid.Pad } : xs;
+            // Announce on input -- and once at the start when the only pad attached is a HID one,
+            // or the legend would show Xbox letters to somebody holding a DualSense until they
+            // pressed something.
+            if (xMoved || hMoved || (activeIsHid && ActiveName.Length == 0))
+            {
+                string layout = activeIsHid ? hid.Layout : "xbox";
+                string name = activeIsHid ? hid.Name : "Xbox controller";
+                bool changed = layout != ActiveLayout || name != ActiveName;
+                if (changed)
+                {
+                    ActiveLayout = layout;
+                    ActiveName = name;
+                    _activeHidInstance = activeIsHid ? hid.InstanceId : null;
+                    nextBatteryPoll = 0;   // the gauge should follow the pad in hand, not the last one
+                    Log.Info($"Pad in use: {name} ({layout})");
+                }
+                if (changed || now - lastPadInputAt > PadQuietMs) PadUsed?.Invoke(layout, name);
+                lastPadInputAt = now;
+            }
+
             if (now >= nextBatteryPoll)
             {
                 nextBatteryPoll = now + 10_000;
-                var batt = ControllerBattery.Read(0, Connected);
+                var batt = ControllerBattery.Read(0, Connected, _activeHidInstance);
                 if (batt != CurrentBattery)
                 {
                     CurrentBattery = batt;
@@ -389,6 +516,8 @@ public class GamepadService : IDisposable
                 prevButtons = buttons;
                 if (leftDown) { SendClick(NativeMethods.MOUSEEVENTF_LEFTUP); leftDown = false; }
                 if (rightDown) { SendClick(NativeMethods.MOUSEEVENTF_RIGHTUP); rightDown = false; }
+                touch.Reset();
+                PushUiScroll(0, now);
                 continue;
             }
 
@@ -466,6 +595,7 @@ public class GamepadService : IDisposable
                     nextStickPush = now + 60;
                     StickDirection?.Invoke(rnx, rny);
                 }
+                touch.Reset();
             }
             else if (s.GamepadMouseEnabled)
             {
@@ -505,14 +635,34 @@ public class GamepadService : IDisposable
                 if (Math.Abs(ry) >= Math.Abs(rx))
                 {
                     hScrollAccum = 0;
-                    scrollAccum = StickScroll(ry, s.Deadzone, dt, boost, scrollAccum, n => SendWheel(n * 120));
+                    // Over the launcher the page is told the stick's speed and scrolls by exactly
+                    // that much every frame. Whole wheel notches -- 120 units, a 100px jump each,
+                    // arriving up to 18 times a second on whatever poll crossed the line -- were
+                    // the jitter: the list moved in uneven lurches however smoothly the stick was
+                    // pushed. Everywhere else a wheel notch is still what Windows apps expect.
+                    if (launcherFg && !keyboardDriving)
+                    {
+                        scrollAccum = 0;
+                        uiScroll = StickSpeed(ry, s.Deadzone, boost);
+                    }
+                    else scrollAccum = StickScroll(ry, s.Deadzone, dt, boost, scrollAccum, n => SendWheel(n * 120));
                 }
                 else
                 {
                     scrollAccum = 0;
                     hScrollAccum = StickScroll(rx, s.Deadzone, dt, boost, hScrollAccum, n => SendHWheel(n * 120));
                 }
+
+                // ---- touchpad ----
+                // A DualSense or DualShock 4 as a precision touchpad: pointer, clicks, taps,
+                // tap-and-drag, two-finger scroll and pinch. See TouchpadGestures. Only for the pad
+                // that is driving: a hand resting on a second pad's touchpad must not move anything.
+                if (s.TouchpadMouse && activeIsHid)
+                    touch.Update(new TouchFrame(hid.TouchDx, hid.TouchDy, hid.TouchSpread, hid.TouchFingers, hid.TouchClick), s, now, dt);
+                else touch.Reset();
             }
+            else touch.Reset();
+            PushUiScroll(uiScroll, now);
 
             prevButtons = buttons;
         }
@@ -555,6 +705,16 @@ public class GamepadService : IDisposable
         (NativeMethods.XINPUT_GAMEPAD_RIGHT_SHOULDER, "RB"),
     };
 
+    /// <summary>Has this pad been touched since it last registered? Buttons count at once; the analog parts past the noise.</summary>
+    private static bool Moved(in NativeMethods.XINPUT_GAMEPAD a, in NativeMethods.XINPUT_GAMEPAD b) =>
+        a.wButtons != b.wButtons
+        || Math.Abs(a.bLeftTrigger - b.bLeftTrigger) > 24
+        || Math.Abs(a.bRightTrigger - b.bRightTrigger) > 24
+        || Math.Abs(a.sThumbLX - b.sThumbLX) > StickNoise
+        || Math.Abs(a.sThumbLY - b.sThumbLY) > StickNoise
+        || Math.Abs(a.sThumbRX - b.sThumbRX) > StickNoise
+        || Math.Abs(a.sThumbRY - b.sThumbRY) > StickNoise;
+
     private static bool IsDpad(ushort mask) => mask is NativeMethods.XINPUT_GAMEPAD_DPAD_UP
         or NativeMethods.XINPUT_GAMEPAD_DPAD_DOWN or NativeMethods.XINPUT_GAMEPAD_DPAD_LEFT
         or NativeMethods.XINPUT_GAMEPAD_DPAD_RIGHT;
@@ -563,6 +723,15 @@ public class GamepadService : IDisposable
     /// One axis of stick-driven scrolling: rescales past the deadzone, accumulates notches per
     /// elapsed time and emits whole notches. Returns the carried-over remainder.
     /// </summary>
+    /// <summary>The same curve as StickScroll, as a speed in notches per second (up positive) rather than whole notches.</summary>
+    private static double StickSpeed(double axis, double deadzone, double boost)
+    {
+        double mag = Math.Abs(axis);
+        if (mag <= deadzone) return 0;
+        double t = Math.Min((mag - deadzone) / (1 - deadzone), 1.0);
+        return Math.Sign(axis) * MaxScrollNotchesPerSec * Math.Pow(t, 1.5) * boost;
+    }
+
     private static double StickScroll(double axis, double deadzone, double dt, double boost, double accum, Action<int> emit)
     {
         double mag = Math.Abs(axis);

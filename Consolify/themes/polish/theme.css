@@ -429,8 +429,9 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
 .tv-foot { flex: 0 0 72px; }
 .tv .legend { padding: 0 var(--gutter); height: 72px; gap: 36px; opacity: 0.72; }
 .tv .legend-item > span { font-size: 19px; }
-.tv .legend .btn-badge { width: 34px; height: 34px; font-size: 17px; }
-.tv .legend .btn-pill { height: 34px; font-size: 15px; }
+/* The buttons are drawn as svg for whatever pad is in hand (see btnIcon in app.js); a theme
+   only ever sets their height. */
+.tv .legend .btn-icon { height: 34px; }
 
 /* ---------------------------------------------------------- other screens --
    Not relaid out -- only softened to match, so moving between them is not a jolt. */

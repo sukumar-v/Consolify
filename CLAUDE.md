@@ -29,16 +29,16 @@ Stop the scrolled grid from clipping through the All games header
   reachable at `/themes/<id>/…` — which is what makes a theme previewable at all.
   Push one in by hand: a `{type:"themes", themes:[…]}` message with those URLs,
   then `S.settings.theme = "<id>"` and `applyTheme()`.
-- The preview never fires `requestAnimationFrame`, so **CSS transitions freeze at
-  their start value** and `scrollTo({behavior:"smooth"})` does nothing. Neither is a
-  bug in the page. To check an animated end state, disable transitions
-  (`* { transition: none !important }`) and measure; to check scroll-follow, record
-  the `scrollTo` calls.
-- The published app takes no keyboard input: it is gamepad-driven, nothing in the
-  page is focused, and `keydown` never fires. Win32 `SetFocus` on the WebView2
-  render window is not enough — WebView2 needs the host's `MoveFocus`. Drive
-  navigation in the preview instead (same `handleInput` path the pad uses) and use
-  the published app for how it renders.
+- The preview runs `requestAnimationFrame` **once and then never again**, so CSS
+  transitions freeze at their start value. Not a bug in the page. To check an animated end
+  state, disable transitions (`* { transition: none !important }`) and measure. The scroll
+  animator's watchdog snaps to the target after 150 ms without a frame, so scroll-follow can be
+  checked in the preview by waiting ~400 ms and reading `scrollTop`.
+- The published app takes keyboard input now (the WebView gets focus on `Activated`). To drive
+  it, **check `GetForegroundWindow() == launcher` before every key you send**: a plain
+  `SetForegroundWindow` from PowerShell is often refused, and the keys then go to whatever the
+  user has open -- a held-arrow test once scrolled the user's browser. Take the foreground with
+  `AttachThreadInput` + `BringWindowToTop` + `SetForegroundWindow`, verify, and abort if lost.
 - For anything touching input, focus, the cursor or window behaviour, run the
   published app: `publish\Consolify.exe --windowed` gives a 1280x720
   non-topmost window. Drive it with real `SendInput` and screen captures.
@@ -241,6 +241,136 @@ Stop the scrolled grid from clipping through the All games header
   never also reaches the UI. That is why Start is a bad choice for it -- Start is the Menu button
   -- and why the Settings row warns about exactly that. Hold leaves the tap free, which is the
   point of having both.
+
+## Controllers and the button glyphs
+
+- Non-XInput pads (DualSense, DualShock 4, Switch Pro, generic) come in through **Raw Input on the
+  main window** (`HidGamepadReader`, registered in `OnSourceInitialized` with `RIDEV_INPUTSINK`)
+  and are parsed with hid.dll into `XINPUT_GAMEPAD`, so `GamepadService` runs one loop for every
+  pad. INPUTSINK is the whole reason it is Raw Input and not Windows.Gaming.Input: the menu combo,
+  keyboard toggle and screenshot key all have to work with a game in front.
+- Xbox pads show up in Raw Input too, with `IG_` in their device path. They are skipped there and
+  left to XInput, which has the Guide button and the battery; reading both doubles every press.
+- Through hid.dll, only the report whose id matches the X axis's caps is parsed. **Sony pads are
+  read by hand instead** (`ParseSony`, `SonyLayout`): the touchpad lives in the vendor bytes after
+  the described part, which hid.dll cannot name. The DualSense's USB report is 0x01/64 bytes with
+  the body at offset 1; its Bluetooth full report is 0x31/78 bytes with the same body at offset 2.
+  Touch points are at body+32 and +36: a contact byte whose top bit is SET while nothing touches,
+  then x (12 bits) and y (12 bits) packed into three bytes. Verified on USB: an idle pad logs
+  `96 73 57 15 80 00 00 00`, i.e. no finger, last position x=1907 y=341. The DualShock 4 layout
+  (body at 1 on USB, 3 on Bluetooth report 0x11; touch at +34) is unverified.
+- A DualSense on Bluetooth sends a 10-byte 0x01 with no touch data until something reads its
+  calibration feature report 0x05, which flips it to 0x31 for good. Steam does that read, which
+  used to leave the pad unreadable here; now `EnableFullReports` does it ourselves on open
+  (read/write handle, `HidD_GetFeature`), and 0x31 is parsed natively. Unverified on hardware:
+  this PC's DualSense was on the cable. The short report still goes through hid.dll if the switch
+  is refused, so the pad works either way, minus the touchpad. A Switch Pro on USB sends nothing
+  at all without Nintendo's handshake; Bluetooth is the way.
+- Touch travel is only counted while the same numbered contact continues, and the reader
+  accumulates it under its lock; `Snapshot()` drains it, so a poll that skips the touchpad branch
+  (menu up, service inactive) simply drops that travel. A touchpad press is a real `SendInput`
+  click, held while the pad is held so a drag works; two fingers make it a right click.
+  `ReleaseTouch` runs on every path that stops reading the pad as a mouse, so a press can never
+  outlive its context as a stuck button.
+- **The pointer moved when the pad was pressed**, because a finger rocks a few units as it works
+  the switch. Three things hold it still: a rest deadband (`RestDeadband`, 14 units, ~0.4 mm) that
+  a stopped finger has to cross before the pointer follows it again, with that travel dropped
+  rather than replayed; a freeze on movement for 160 ms after a press and 120 ms after a release;
+  and the deadband accumulator being leaky (x0.9 per poll), so a resting thumb's jitter never adds
+  up to a false start while a slow deliberate push still gets through. Gain follows speed
+  (0.45x to 2.2x of `TouchpadSensitivity`), which is what made "too sensitive" go away without
+  making a flick slow.
+- **All touchpad behaviour lives in `TouchpadGestures`**, one state machine per touch: pointer,
+  press, tap (deferred 230 ms so it can become a double click or a drag), tap-and-drag with a
+  350 ms drag lock across lifts, two-finger tap, two-finger scroll with rails and coasting, and
+  pinch as Ctrl+wheel. `GamepadService` only feeds it a `TouchFrame` per poll and calls `Reset()`
+  on every path that stops reading the pad as a mouse.
+- The reader reports the fingers' **average** travel over the contacts that carried on from the
+  last report, plus the change in distance between two fingers (the spread). A finger landing or
+  lifting never shows up as travel.
+- **Test gestures with the harness, not by hand**: `Output` and `MoveCursor` on the class are
+  replaceable, and a scratch console project that compiles `TouchpadGestures.cs`, `AppSettings.cs`
+  and `NativeMethods.cs` can replay scripted finger traces at 8 ms and record what would be sent,
+  without a single real click. Apply finger noise **per poll**; noise drawn once per segment is a
+  steady slow slide, which correctly moves the pointer and made half the first run look broken.
+  21 cases pass under 8 noise seeds.
+- Scroll rails: a two-finger swipe that starts with one axis over twice the other is locked to it
+  for the gesture. Without them the fingers' wobble scrolled a page sideways while reading down it.
+  A coast stops below 250 wheel units a second: slower than that it only dribbles out a step every
+  tenth of a second, which reads as stutter.
+- Tap-to-click measures the touch's NET travel (start to end), not the sum of its deltas: at
+  250 reports a second a still finger's jitter sums to more than a tap's allowance in 200 ms,
+  and a tap that never registers looks like a broken pad. A tap is refused if the pad was pressed
+  down during the touch, so a click never doubles.
+- Every DualSense touch contact carries an incrementing id; the log's touch bytes from two runs on
+  one evening went from id 22 to ids 109 and 88 with different positions, which is the pad being
+  used between them. A cheap check that the decode is tracking real fingers.
+- **A touchpad click reaches the page as a real mousedown**, which is exactly what the page reads
+  as "the mouse is in use" to swap the legend to key caps. The host raises `TouchClick` just
+  before sending it, the bridge pushes `padClick`, and the page both stamps the moment and puts
+  the pad family back -- the two can arrive in either order, and that handles both.
+- Button maps are by HID button number. Sony's order (Square, Cross, Circle, Triangle, L1, R1, L2,
+  R2, Share, Options, L3, R3, PS) is verified against the DualSense's own descriptor and is also
+  the generic default. The Switch map (B, A, Y, X, L, R, ZL, ZR, −, +, LS, RS, Home) is from the
+  reverse-engineering notes for report 0x3F and is **unverified on hardware**; it maps by position,
+  so Nintendo's B is the launcher's A. Right stick is Z/Rz when both exist, else Rx/Ry; triggers
+  are Rx/Ry only in the first case.
+- "Which pad is driving" is decided by movement against an **anchor** (`StickNoise`, 5% of
+  travel), not the previous tick: a DualSense streams a report every 4 ms and its sticks rest a
+  few percent off centre, so a per-tick delta never crossed the threshold on a slow push and a
+  zero anchor announced an untouched pad at startup. The first reading seeds the anchor.
+- `PadUsed` fires on a change of pad *and* when a pad is picked up after 1.5 s of silence. The
+  page switches its legend to the keyboard on any keypress or mouse click, and that event is what
+  switches it back. Mouse **movement** never switches the legend: the left stick moves the real
+  Windows pointer.
+- The page keeps two families: `inputFamily` (what the legends draw) and `padFamily` (the last
+  gamepad seen). Settings rows that name gamepad buttons draw `padFamily` through `[data-pad]`
+  slots, or "Left click button: Enter" would appear. Every drawn button is a `[data-btn]` slot and
+  `paintButtons` repaints them all in place; nothing is re-rendered for a family change except
+  Settings, whose hints name buttons in words.
+- Stored button names stay XInput's (`A`, `RB`, `Start`, `Back`, `Guide`); `canonBtn` folds
+  Start/Back to Menu/View for drawing. Only the picture changes with the pad.
+- The published app now gives the WebView keyboard focus on `Activated` and after navigation, and
+  `AreBrowserAcceleratorKeysEnabled` is off so F5 cannot reload the launcher. That is what made
+  keydown fire at all.
+- The browser preview's `key` action for "Return" arrives with an empty `code` **and** an empty
+  `key`; use "Enter". Every other key arrives with `key` set and `code` empty, which is why
+  `KEYMAP_BY_KEY` exists beside `KEYMAP`.
+- A DualSense on the cable reports "connected, charge unknown" (a pad icon with an empty bar):
+  neither WinRT nor XInput can see it, and the Bluetooth lookup is only asked about the HID pad's
+  own container, so an Xbox pad on the same PC cannot answer for it.
+
+## Scrolling and held keys
+
+- **Nothing uses `scrollTo({behavior:"smooth"})`.** Each call restarts Chrome's eased animation from
+  standstill, so a run of steps lurched and stalled, and a held key could not keep up at all.
+  `animateScroll` is a critically damped spring (`SCROLL_OMEGA` 22, settles ~250 ms, no overshoot)
+  that is retargeted mid-flight without losing velocity; simulated at 60 fps it never drops below
+  ~1300 px/s during a held D-pad run and trails the highlight by under one row. A scroll it did not
+  make (wheel, stick, drag) is detected by `scrollTop` differing from what it last wrote and wins.
+- `revealOffset` measures against `scrollTarget` (where the list is heading), not `scrollTop`:
+  mid-glide the two differ, and the current position asked for the same scroll twice.
+- The backdrop is deferred during a fast run (`scheduleBackdrop`, 170 ms): each change decodes a
+  hero and re-blurs a screen-sized layer, the most expensive thing in the frame. Direct
+  `setBackdrop` calls (detail page, Settings) cancel a pending one.
+- Held keys are paced to one step per 85 ms and the repeats between are **dropped, not queued**.
+  Windows repeats at ~30 Hz; handling every one outran the paint and the screen froze until the
+  key was released. Measured: 31 repeats in a second became 11 steps; a step costs ~3 ms with
+  313 tiles.
+- **The right stick does not send wheel notches while the launcher is in front.** A notch is a
+  100 px jump and they came up to 18 a second on whichever poll crossed the line, so the list
+  lurched however smoothly the stick was held. `GamepadService` sends the stick's speed instead
+  (`UiScroll`, notches per second; pushed on change at most every 16 ms, re-sent every 100 ms,
+  0 on release), and `onStickScroll` moves the list by speed x frame time on every frame, easing
+  the speed over 80 ms. A speed older than 250 ms counts as zero, so a lost stop cannot leave it
+  running. Outside the launcher, and with the on-screen keyboard driving, it is still wheel
+  notches -- that is what Windows apps expect. Horizontal is still HWHEEL: the carousel steps
+  focus per notch, which is what it should do.
+- `nextFrame` is `requestAnimationFrame` raced against a 50 ms timeout, so a per-frame loop keeps
+  going in a hidden window and in the preview (20 fps there). Measure per-frame motion by wrapping
+  `window.nextFrame`; sampling `scrollTop` on a timer aliases against those frames.
+- `mousemove` is ignored unless `screenX/Y` changed: the browser raises it when content scrolls
+  under a parked cursor, and that flipped the page to pointer mode mid-run.
 
 ## Screens and the switcher
 

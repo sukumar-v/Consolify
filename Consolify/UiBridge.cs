@@ -549,6 +549,12 @@ public class UiBridge
         t.BoostButton = s.BoostButton;
         t.BoostMultiplier = Math.Clamp(s.BoostMultiplier, 1.5, 5.0);
         t.HideCursorSystemWide = s.HideCursorSystemWide;
+        t.TouchpadMouse = s.TouchpadMouse;
+        t.TouchpadSensitivity = Math.Clamp(s.TouchpadSensitivity, 0.25, 4.0);
+        t.TouchpadTapToClick = s.TouchpadTapToClick;
+        t.TouchpadTapDrag = s.TouchpadTapDrag;
+        t.TouchpadNaturalScroll = s.TouchpadNaturalScroll;
+        t.TouchpadScrollSpeed = Math.Clamp(s.TouchpadScrollSpeed, 0.25, 4.0);
         t.LeftClickButton = s.LeftClickButton;
         t.RightClickButton = s.RightClickButton;
         t.MinimizeCombo = s.MinimizeCombo;
@@ -1042,7 +1048,17 @@ public class UiBridge
     public void PushGameState() =>
         Push(new { type = "game", running = _launcher.GameRunning, id = _launcher.RunningGameId });
 
-    public void PushPadEvent(string button) => Push(new { type = "pad", button });
+    /// <summary>A press, and the family of the pad it came from: xbox, playstation, switch or generic.</summary>
+    public void PushPadEvent(string button, string layout) => Push(new { type = "pad", button, layout });
+
+    /// <summary>The pad in use changed, or was picked up again after a pause. The page redraws its legends from it.</summary>
+    public void PushPadLayout(string layout, string name) => Push(new { type = "padLayout", layout, name });
+
+    /// <summary>A real mouse click is on its way from a pad's touchpad, so the page does not read it as the mouse.</summary>
+    public void PushPadClick() => Push(new { type = "padClick" });
+
+    /// <summary>The right stick's scroll speed, notches per second, up positive. See GamepadService.UiScroll.</summary>
+    public void PushStickScroll(double v) => Push(new { type = "stickScroll", v = Math.Round(v, 2) });
 
     public void PushPadConnected(bool connected) => Push(new { type = "padConnected", connected });
 

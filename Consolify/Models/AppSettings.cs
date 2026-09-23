@@ -80,6 +80,22 @@ public class AppSettings
     /// <summary>Replace Windows' cursors with blank ones while the D-pad drives navigation.
     /// Global state, so off by default — see CursorService.</summary>
     public bool HideCursorSystemWide { get; set; }
+    /// <summary>The touchpad on a DualSense or DualShock 4 as a trackpad: swipe to move the
+    /// pointer, press the pad to click, press with two fingers for a right click.</summary>
+    public bool TouchpadMouse { get; set; } = true;
+    /// <summary>Scales the touchpad's gain. The gain itself follows the finger's speed -- see the
+    /// touchpad section of GamepadService -- and 1.0 is a laptop-like feel.</summary>
+    public double TouchpadSensitivity { get; set; } = 1.0;   // 0.25 .. 4.0
+    /// <summary>A short, still touch is a click, and a two-finger one a right click. The pad's own
+    /// press always clicks regardless.</summary>
+    public bool TouchpadTapToClick { get; set; } = true;
+    /// <summary>Tap, then touch and hold: the left button stays down while the finger moves, to drag a
+    /// window or select text. Costs every tap a short wait, which is why it can be turned off.</summary>
+    public bool TouchpadTapDrag { get; set; } = true;
+    /// <summary>Two-finger scrolling moves the content with the fingers, as Windows' touchpads do by default.</summary>
+    public bool TouchpadNaturalScroll { get; set; } = true;
+    /// <summary>Scales two-finger scrolling. 1.0 scrolls about twelve notches over the pad's height.</summary>
+    public double TouchpadScrollSpeed { get; set; } = 1.0;   // 0.25 .. 4.0
 
     // Button bindings (used outside the launcher UI; inside it A/B/Y/X/MENU follow the on-screen legend)
     public string LeftClickButton { get; set; } = "A";

@@ -72,9 +72,21 @@ public static class ControllerBattery
         return null;
     }
 
-    public static BatteryState Read(int userIndex, bool connected)
+    /// <param name="hidInstanceId">Set when the pad in use is one the launcher reads itself over
+    /// HID (a DualSense, say). Neither WinRT nor XInput knows that pad exists, and asking them
+    /// would hand back the charge of whatever Xbox pad is also attached.</param>
+    public static BatteryState Read(int userIndex, bool connected, string? hidInstanceId = null)
     {
         if (!connected) return new BatteryState(false, null, false, 0);
+
+        if (hidInstanceId is not null)
+        {
+            // Bluetooth is the one place its charge can be read; on the cable it is "connected,
+            // charge unknown", which the UI draws as a pad with no number.
+            if (Interop.NativeMethods.TryGetBluetoothBatteryPercent(out int hidBt, hidInstanceId))
+                return new BatteryState(true, hidBt, false, PercentToCoarse(hidBt));
+            return new BatteryState(true, null, false, -1);
+        }
 
         var winrt = ReadWinRt();
 

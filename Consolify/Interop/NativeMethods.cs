@@ -551,16 +551,26 @@ internal static class NativeMethods
     /// is not reporting). Gamepads are picked out by the "IG_" in their HID instance id, which is
     /// how XInput itself marks the devices it drives.
     /// </summary>
-    public static bool TryGetBluetoothBatteryPercent(out int percent)
+    /// <param name="hidInstanceId">A specific pad's device node. When given, only that pad's radio
+    /// is consulted, so an Xbox pad on the same PC cannot answer for a DualSense.</param>
+    public static bool TryGetBluetoothBatteryPercent(out int percent, string? hidInstanceId = null)
     {
         percent = 0;
         try
         {
             var pads = new List<Guid>();
-            foreach (var id in PresentDevices("HID"))
-                if (id.Contains("IG_", StringComparison.OrdinalIgnoreCase)
-                    && DevNodeProperty(id, DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID) is { Length: 16 } g)
-                    pads.Add(new Guid(g));
+            if (hidInstanceId is not null)
+            {
+                if (DevNodeProperty(hidInstanceId, DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID) is { Length: 16 } hg)
+                    pads.Add(new Guid(hg));
+            }
+            else
+            {
+                foreach (var id in PresentDevices("HID"))
+                    if (id.Contains("IG_", StringComparison.OrdinalIgnoreCase)
+                        && DevNodeProperty(id, DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID) is { Length: 16 } g)
+                        pads.Add(new Guid(g));
+            }
 
             if (pads.Count == 0) return false;
 

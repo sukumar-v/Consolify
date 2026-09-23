@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly VirtualKeyboardService _keyboard;
     private readonly GameLaunchService _launcher;
     private readonly GamepadService _gamepad;
+    private readonly HidGamepadReader _hid = new();
     private readonly CursorService _cursor;
     private readonly ThemeService _themes = new();
     private readonly WindowService _windows;
@@ -52,12 +53,22 @@ public partial class MainWindow : Window
             // screen but the pad still went to the game -- a menu that looked frozen until a
             // mouse click handed Windows' foreground over.
             isLauncherForeground: () => _overlayActive || NativeMethods.GetForegroundWindow() == _hwnd,
-            isGameFocused: () => !_overlayActive && _launcher.IsGameForeground());
+            isGameFocused: () => !_overlayActive && _launcher.IsGameForeground(),
+            hid: _hid);
 
         _launcher.GameStarted += _ => Dispatcher.Invoke(OnGameStarted);
         _launcher.GameExited += _ => Dispatcher.Invoke(OnGameExited);
-        _gamepad.UiEvent += name => Dispatcher.BeginInvoke(() => _bridge?.PushPadEvent(name));
+        // The family rides along with every press, so the page never draws a legend for a pad
+        // other than the one that was just used.
+        _gamepad.UiEvent += name => Dispatcher.BeginInvoke(() => _bridge?.PushPadEvent(name, _gamepad.ActiveLayout));
+        _gamepad.PadUsed += (layout, padName) => Dispatcher.BeginInvoke(() =>
+        {
+            _bridge?.PushPadLayout(layout, padName);
+            _kb?.SetLayout(layout);
+        });
         _gamepad.ConnectedChanged += c => Dispatcher.BeginInvoke(() => _bridge?.PushPadConnected(c));
+        _gamepad.TouchClick += () => Dispatcher.BeginInvoke(() => _bridge?.PushPadClick());
+        _gamepad.UiScroll += v => Dispatcher.BeginInvoke(() => _bridge?.PushStickScroll(v));
         _gamepad.KeyboardToggleRequested += () => Dispatcher.BeginInvoke(() => _keyboard.Toggle());
         _gamepad.MinimizeToggleRequested += () => Dispatcher.BeginInvoke(OnComboTap);
         _gamepad.RadialRequested += () => Dispatcher.BeginInvoke(() => _ = ShowOverlay("radial"));
@@ -87,6 +98,11 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
         Loaded += async (_, _) => await InitWebViewAsync();
         Deactivated += OnDeactivated;
+        // Keyboard focus into the page whenever the window is the active one. Nothing in the page
+        // is focused otherwise and keydown never fires -- which is why a keyboard used to do
+        // nothing in the launcher at all. WebView2 only takes focus through the control's own
+        // Focus(), never through a Win32 SetFocus on its render window.
+        Activated += (_, _) => FocusPageIfShown();
         // The keyboard is a second top-level window, and WPF shuts down on the last one closing,
         // so leaving it open would keep the process alive with no UI.
         Closed += (_, _) => { _kb?.Close(); _gamepad.Dispose(); _cursor.Dispose(); };
@@ -97,7 +113,28 @@ public partial class MainWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         _windows.SetOwnWindow(_hwnd);
         PositionOnTargetDisplay();
+        // Non-XInput pads report through this window as WM_INPUT, whoever is in front (see
+        // HidGamepadReader). Registered here because it needs the HWND, and before the poll
+        // loop starts so the first snapshot already knows what is attached.
+        _hid.Register(_hwnd);
+        HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
         _gamepad.Start();
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        // Not marked handled: WM_INPUT has to reach DefWindowProc so the system can release
+        // the buffer behind it.
+        if (msg == HidNative.WM_INPUT) _hid.OnInput(lParam);
+        else if (msg == HidNative.WM_INPUT_DEVICE_CHANGE) _hid.OnDeviceChange(wParam, lParam);
+        return IntPtr.Zero;
+    }
+
+    /// <summary>The page gets the keyboard whenever the launcher is the window in front.</summary>
+    private void FocusPageIfShown()
+    {
+        if (_parked || !IsActive) return;
+        WebView.Focus();
     }
 
     /// <summary>Place the window fullscreen on the configured TV display (pixel-exact via SetWindowPos).</summary>
@@ -151,6 +188,10 @@ public partial class MainWindow : Window
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        // The page has the keyboard now, so the browser's own shortcuts have to go: F5 would
+        // reload the launcher and Ctrl+F would open a find bar over it.
+        core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+        core.NavigationCompleted += (_, _) => FocusPageIfShown();
 #if !DEBUG
         core.Settings.AreDevToolsEnabled = false;
 #endif
@@ -429,6 +470,7 @@ public partial class MainWindow : Window
             // is handed back and the window hidden in one place.
             _kb.CloseRequested += () => Dispatcher.BeginInvoke(HideBuiltinKeyboard);
         }
+        _kb.SetLayout(_gamepad.ActiveLayout);
         var target = (_settings.Settings.TvDeviceName is { } name ? _displays.GetDisplay(name) : null)
                      ?? _displays.GetDisplays().FirstOrDefault(d => d.IsPrimary);
         if (target is not null) _kb.ShowOn(target, Math.Clamp(_settings.Settings.KeyboardScale, 0.6, 1.6));
@@ -479,6 +521,7 @@ public partial class MainWindow : Window
     {
         _bridge?.PushPadConnected(_gamepad.Connected);
         _bridge?.PushBattery(_gamepad.CurrentBattery);
+        _bridge?.PushPadLayout(_gamepad.ActiveLayout, _gamepad.ActiveName);
     }
 
     /// <summary>The UI changed input mode by itself; keep the pad service's copy in step.</summary>

@@ -249,7 +249,9 @@ function offsetWithin(el, container, axis) {
 function revealOffset(sc, el, axis) {
   const near = offsetWithin(el, sc, axis);
   const far = near + (axis === "x" ? el.offsetWidth : el.offsetHeight);
-  const viewNear = axis === "x" ? sc.scrollLeft : sc.scrollTop;
+  // Where the list is going, not where it is: mid-glide the two differ, and measuring against the
+  // current position asked for the same scroll twice or turned round for a row already on its way in.
+  const viewNear = scrollTarget(sc, axis);
   const size = axis === "x" ? sc.clientWidth : sc.clientHeight;
   const total = axis === "x" ? sc.scrollWidth : sc.scrollHeight;
   const viewFar = viewNear + size;
@@ -285,10 +287,89 @@ function revealFocus(el) {
     if (axis === "y") watchScrolled(sc);
     const next = revealOffset(sc, el, axis);
     if (next === null) continue;
-    const max = Math.max(0, (axis === "x" ? sc.scrollWidth - sc.clientWidth : sc.scrollHeight - sc.clientHeight));
-    const to = Math.max(0, Math.min(next, max));
-    sc.scrollTo(axis === "x" ? { left: to, behavior: "smooth" } : { top: to, behavior: "smooth" });
+    animateScroll(sc, axis, next);
   }
+}
+
+/*
+ * Scrolling that follows the highlight, as a critically damped spring.
+ *
+ * Not scrollTo({behavior: "smooth"}). That starts a fresh eased animation from standstill on every
+ * call, so a run of steps -- a held D-pad at 9 a second, a held arrow key at 30 -- kept throwing
+ * away the motion in progress and accelerating from zero again: the list lurched forward, stalled,
+ * lurched. With a held key it could not keep up at all and caught up in one jump when the key was
+ * let go. A spring can be retargeted mid-flight without losing its velocity, so a run of steps is
+ * one continuous glide, and a single step still eases in and out.
+ *
+ * A scroll the animator did not make -- the mouse wheel, the right stick, a drag -- hands control
+ * back at once rather than being fought.
+ */
+const SCROLL_OMEGA = 22;          // spring stiffness, rad/s: settles in about 250 ms
+const scrollAnims = new Map();    // "y"/"x" -> WeakMap(element -> state)
+["x", "y"].forEach(a => scrollAnims.set(a, new WeakMap()));
+
+function scrollProp(axis) { return axis === "x" ? "scrollLeft" : "scrollTop"; }
+
+/** Where a scroller is heading: the animation's target, or where it is when nothing is running. */
+function scrollTarget(sc, axis) {
+  const a = scrollAnims.get(axis).get(sc);
+  return a && a.running ? a.target : sc[scrollProp(axis)];
+}
+
+function stopScroll(sc, axis) {
+  const a = scrollAnims.get(axis || "y").get(sc);
+  if (a) a.running = false;
+}
+
+function animateScroll(sc, axis, to) {
+  const prop = scrollProp(axis);
+  const max = Math.max(0, axis === "x" ? sc.scrollWidth - sc.clientWidth : sc.scrollHeight - sc.clientHeight);
+  to = Math.max(0, Math.min(to, max));
+  const map = scrollAnims.get(axis);
+  let a = map.get(sc);
+  if (!a || !a.running) {
+    a = { pos: sc[prop], vel: 0, target: to, written: sc[prop], running: true, t: null, lastFrameAt: performance.now() };
+    map.set(sc, a);
+  } else {
+    a.target = to;
+    return;                       // already gliding: the next frame heads for the new target
+  }
+
+  const step = (now) => {
+    if (!a.running || map.get(sc) !== a) return;
+    a.lastFrameAt = performance.now();
+    // Somebody else moved it (wheel, stick, drag): let them have it.
+    if (Math.abs(sc[prop] - a.written) > 2) { a.running = false; return; }
+    // The first frame's timestamp is when that frame began, which can be BEFORE this animation
+    // was asked for; measured from it, the first step moved nothing at all. Give it one frame.
+    let dt = a.t === null ? 1 / 60 : Math.min(0.064, Math.max(0, (now - a.t) / 1000));
+    a.t = now;
+    while (dt > 0) {              // small fixed substeps keep the spring stable on a slow frame
+      const h = Math.min(dt, 0.008);
+      dt -= h;
+      a.vel += (SCROLL_OMEGA * SCROLL_OMEGA * (a.target - a.pos) - 2 * SCROLL_OMEGA * a.vel) * h;
+      a.pos += a.vel * h;
+    }
+    if (Math.abs(a.target - a.pos) < 0.5 && Math.abs(a.vel) < 20) { a.pos = a.target; a.running = false; }
+    sc[prop] = a.pos;
+    a.written = sc[prop];
+    if (a.running) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+
+  // Frames that stop coming -- the window hidden mid-glide, or the preview, which runs
+  // requestAnimationFrame once and then not again -- must still leave the list where it was going,
+  // not stranded halfway. Checked for as long as the glide runs, not just at its start.
+  const watch = () => {
+    if (!a.running || map.get(sc) !== a) return;
+    if (performance.now() - a.lastFrameAt > 150) {
+      a.running = false;
+      sc[prop] = a.target;
+      return;
+    }
+    setTimeout(watch, 150);
+  };
+  setTimeout(watch, 150);
 }
 
 /** Move the highlight one step. Returns false when there is nowhere to go. */
@@ -411,8 +492,74 @@ window.addEventListener("wheel", (e) => {
   if (!home || !canScrollY(home, e.deltaY)) return;
   e.preventDefault();
   const step = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * home.clientHeight : e.deltaY;
+  stopScroll(home, "y");
   home.scrollTop += step;
 }, { passive: false });
+
+/*
+ * The right stick, scrolled by the frame.
+ *
+ * Over the launcher the host sends the stick's speed (wheel notches a second, up positive) rather
+ * than wheel notches. A notch is a 100px jump, and they arrived up to 18 times a second on
+ * whichever poll crossed the line, so however smoothly the stick was held the list moved in uneven
+ * lurches. Here the list moves by speed x frame time on every frame, and the speed itself eases
+ * towards what the stick says, so pushing and letting go ramp rather than snap.
+ *
+ * Which list: the one under the pointer when the pointer is in use, otherwise the one the user is
+ * in (wheelHome). A speed older than 250 ms is treated as zero, so a lost "stop" cannot leave the
+ * list running.
+ */
+const STICK_PX_PER_NOTCH = 100;     // what one wheel notch scrolls, so the speed matches the old feel
+const STICK_EASE_SEC = 0.08;
+let stickTarget = 0, stickVel = 0, stickAt = 0, stickRunning = false;
+let stickEl = null, stickPos = 0;
+let lastClientX = NaN, lastClientY = NaN;
+
+/** The next frame, or 50 ms from now if frames have stopped (a hidden window, the preview). */
+function nextFrame(cb) {
+  let done = false;
+  const run = () => { if (done) return; done = true; cb(performance.now()); };
+  requestAnimationFrame(run);
+  setTimeout(run, 50);
+}
+
+function stickScrollEl() {
+  if (inputMode === "pointer" && !isNaN(lastClientX)) {
+    for (let p = document.elementFromPoint(lastClientX, lastClientY); p; p = p.parentElement)
+      if (p.scrollHeight > p.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return wheelHome();
+}
+
+function onStickScroll(notchesPerSec) {
+  stickTarget = -notchesPerSec * STICK_PX_PER_NOTCH;   // up on the stick is up the list: scrollTop falls
+  stickAt = performance.now();
+  if (notchesPerSec !== 0) wheelScrolled = true;       // the next D-pad step resumes from what is in view
+  if (stickRunning || notchesPerSec === 0) return;
+  stickRunning = true;
+  stickEl = null;
+  let last = performance.now();
+  const frame = (now) => {
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    const target = now - stickAt > 250 ? 0 : stickTarget;
+    stickVel += (target - stickVel) * (1 - Math.exp(-dt / STICK_EASE_SEC));
+    if (target === 0 && Math.abs(stickVel) < 8) { stickVel = 0; stickRunning = false; return; }
+
+    const el = stickScrollEl();
+    if (el !== stickEl) { stickEl = el; stickPos = el ? el.scrollTop : 0; }
+    if (el) {
+      // Something else moved it -- the D-pad's glide, a real wheel -- so carry on from there.
+      if (Math.abs(el.scrollTop - stickPos) > 2) stickPos = el.scrollTop;
+      stopScroll(el, "y");
+      const max = el.scrollHeight - el.clientHeight;
+      stickPos = Math.max(0, Math.min(max, stickPos + stickVel * dt));
+      el.scrollTop = stickPos;
+    }
+    nextFrame(frame);
+  };
+  nextFrame(frame);
+}
 
 /** The first focusable in view in the scroller the highlight has been scrolled out of, or null
     when the highlight is still on screen and an ordinary step should happen. */
@@ -472,7 +619,7 @@ function paintNav() {
 
   updateContinueScroll(true);
   const g = focusedGame();
-  setBackdrop(g);
+  scheduleBackdrop(g);
   updateFocusDetail(g);
 }
 
@@ -633,7 +780,15 @@ function applyThemeSheet() {
   link.setAttribute("href", href);
 }
 
+/* Only a pointer that actually moved counts. The browser also raises mousemove when the page
+   scrolls or relayouts under a cursor that is sitting still -- which is exactly what happens
+   while the arrow keys walk the grid past a parked pointer -- and treating that as the mouse
+   being picked up threw the page into pointer mode and let hover steal the highlight mid-run. */
+let lastMouseX = NaN, lastMouseY = NaN;
 window.addEventListener("mousemove", (e) => {
+  lastClientX = e.clientX; lastClientY = e.clientY;
+  if (e.screenX === lastMouseX && e.screenY === lastMouseY) return;
+  lastMouseX = e.screenX; lastMouseY = e.screenY;
   const wasPad = inputMode === "pad";
   setInputMode("pointer");
   setPointerOnItem(!!(e.target instanceof Element && e.target.closest(FOCUSABLE_SEL)));
@@ -673,37 +828,6 @@ function watchScrolled(scroller) {
     scroller.addEventListener("scroll", mark, { passive: true });
   }
   mark();
-}
-
-/**
- * Scroll a focused element into view, keeping REVEAL_MARGIN of clearance on the side it is
- * approaching from. `scrollIntoView({block:"nearest"})` stops the moment the element's *unscaled*
- * box is visible, which parks it flush against the edge and clips the growth — coming down the
- * grid it shaved the bottom of the new row, coming up it shaved the top.
- *
- * The first and last rows snap fully to the ends instead, so their outer edge is never cropped.
- */
-function revealIn(scroller, el, isFirst, isLast) {
-  if (!scroller || !el) return;
-  watchScrolled(scroller);
-  if (isFirst) { scroller.scrollTo({ top: 0, behavior: "smooth" }); return; }
-  if (isLast) { scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }); return; }
-
-  // offsetTop is relative to the scroller because it is `position: relative` -- deliberately, so
-  // this arithmetic stays in layout pixels. getBoundingClientRect would report post-transform
-  // pixels (the whole stage is scaled to the window) and would not match scrollTop.
-  const top = el.offsetTop;
-  const bottom = top + el.offsetHeight;
-  const viewTop = scroller.scrollTop;
-  const viewBottom = viewTop + scroller.clientHeight;
-
-  let next = null;
-  if (top - REVEAL_MARGIN < viewTop) next = top - REVEAL_MARGIN;
-  else if (bottom + REVEAL_MARGIN > viewBottom) next = bottom + REVEAL_MARGIN - scroller.clientHeight;
-  if (next === null) return;
-
-  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  scroller.scrollTo({ top: Math.max(0, Math.min(next, max)), behavior: "smooth" });
 }
 
 /*
@@ -786,6 +910,260 @@ function iconSvg(name) {
   return `<svg class="ov-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
          `stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 }
+
+/* ============================== buttons, by controller ==============================
+ *
+ * Every hint in the launcher is drawn as the button itself, never named in a badge: the A on an
+ * Xbox pad is a green disc, on a DualSense it is a cross, on a Switch Pro controller it is the
+ * B -- which sits where an Xbox A does, and the host maps by position -- on a pad we know nothing
+ * about it is the bottom of a four-button diamond, and on a keyboard it is the Enter key.
+ *
+ * The launcher's own button names (A, B, X, Y, LB, RB, LT, RT, View, Menu, LS, RS, Guide) stay as
+ * they are in the code and in settings.json. Only what is DRAWN changes, and it changes with the
+ * last thing the user touched: a press on a pad carries that pad's family with it, a keypress or a
+ * mouse click switches to the keyboard, and the whole page is repainted through its slots.
+ *
+ * Two families are tracked. `inputFamily` is what the legends draw. `padFamily` is the last GAMEPAD
+ * seen, and the rows in Settings that name gamepad buttons always draw that one -- "Left click
+ * button: Enter" would be nonsense.
+ */
+let inputFamily = "xbox";
+let padFamily = "xbox";
+
+/* What each button is called on each pad, for the places that have to say it in words: a
+   confirm dialog's body, a settings hint. The Switch is by position, like the host's map. */
+const BTN_NAMES = {
+  xbox: { A: "A", B: "B", X: "X", Y: "Y", LB: "LB", RB: "RB", LT: "LT", RT: "RT", View: "View", Menu: "Menu", LS: "LS", RS: "RS", Guide: "the Xbox button" },
+  playstation: { A: "Cross", B: "Circle", X: "Square", Y: "Triangle", LB: "L1", RB: "R1", LT: "L2", RT: "R2", View: "Create", Menu: "Options", LS: "L3", RS: "R3", Guide: "the PS button" },
+  switch: { A: "B", B: "A", X: "Y", Y: "X", LB: "L", RB: "R", LT: "ZL", RT: "ZR", View: "−", Menu: "+", LS: "the left stick", RS: "the right stick", Guide: "Home" },
+  generic: { A: "the bottom face button", B: "the right face button", X: "the left face button", Y: "the top face button", LB: "L1", RB: "R1", LT: "L2", RT: "R2", View: "Select", Menu: "Start", LS: "L3", RS: "R3", Guide: "Home" },
+  keyboard: { A: "Enter", B: "Esc", X: "X", Y: "Y", LB: "[", RB: "]", LT: "LT", RT: "RT", View: "/", Menu: "M", LS: "LS", RS: "RS", Guide: "Guide" },
+};
+
+/* settings.json spells two of them the XInput way. */
+function canonBtn(btn) {
+  return btn === "Start" ? "Menu" : btn === "Back" ? "View" : btn === "Xbox" || btn === "PS" ? "Guide" : btn;
+}
+
+function btnName(btn, family) {
+  const names = BTN_NAMES[family || inputFamily] || BTN_NAMES.xbox;
+  return names[canonBtn(btn)] || btn;
+}
+
+/* "LS + RS" in words, for the pad in hand: "L3 + R3" on a DualSense. */
+function comboName(combo, family) {
+  if (!combo || combo === "Off") return "Off";
+  return combo.split("+").map(p => btnName(p.trim(), family)).join(" + ");
+}
+
+/* ---- the drawings ----
+   Each is an inline svg 40 units tall; the width varies with the shape and the page sizes them by
+   height, so a pill and a disc sit on one baseline. Brand colours are literal here, like the
+   accent swatches: the point is to look like the button. */
+const SVG_FONT = "Manrope, Segoe UI, system-ui, sans-serif";
+const SVG_MONO = "IBM Plex Mono, Consolas, monospace";
+const DISC_DARK = "#26262C";
+const DISC_RING = "rgba(255,255,255,0.28)";
+
+function svgIcon(w, body) {
+  return `<svg class="btn-icon" viewBox="0 0 ${w} 40" width="${w}" height="40" aria-hidden="true">${body}</svg>`;
+}
+function svgText(x, t, size, fill, opts = {}) {
+  return `<text x="${x}" y="20.5" text-anchor="middle" dominant-baseline="central" ` +
+    `font-family="${opts.mono ? SVG_MONO : SVG_FONT}" font-size="${size}" font-weight="${opts.weight || 700}" fill="${fill}">${esc(t)}</text>`;
+}
+/* A face button: a disc with a letter or a shape on it. */
+function disc(fill, inner, ring) {
+  return svgIcon(40, `<circle cx="20" cy="20" r="18" fill="${fill}"${ring ? ` stroke="${ring}" stroke-width="1.5"` : ""}/>${inner}`);
+}
+/* A shoulder, a trigger, Options, Start: a pill with its name on it. */
+function pill(label) {
+  const w = Math.max(44, 20 + label.length * 11);
+  return svgIcon(w, `<rect x="1.5" y="6.5" width="${w - 3}" height="27" rx="13.5" fill="var(--ink)" fill-opacity="0.08" ` +
+    `stroke="var(--ink)" stroke-opacity="0.45" stroke-width="1.5"/>` +
+    svgText(w / 2, label, label.length > 3 ? 12 : 15, "var(--ink)", { weight: 600 }));
+}
+/* A key on the keyboard: a cap with the key's name and a shade along its bottom edge. */
+function keycap(label) {
+  const w = Math.max(40, 22 + label.length * 10.5);
+  return svgIcon(w, `<rect x="1.5" y="3.5" width="${w - 3}" height="33" rx="7" fill="var(--ink)" fill-opacity="0.12" ` +
+    `stroke="var(--ink)" stroke-opacity="0.5" stroke-width="1.5"/>` +
+    `<rect x="6" y="30.5" width="${w - 12}" height="3" rx="1.5" fill="var(--bg-deep)" fill-opacity="0.55"/>` +
+    svgText(w / 2, label, label.length > 3 ? 12.5 : 15, "var(--ink)", { weight: 600, mono: true }));
+}
+/* The D-pad, with the arms that matter lit: "v" for up and down, "h" for left and right. */
+function dpad(arms) {
+  const on = (a) => (arms === "all" || arms === a ? 0.95 : 0.26);
+  return svgIcon(40,
+    `<rect x="15" y="2" width="10" height="12" rx="2" fill="currentColor" fill-opacity="${on("v")}"/>` +
+    `<rect x="15" y="26" width="10" height="12" rx="2" fill="currentColor" fill-opacity="${on("v")}"/>` +
+    `<rect x="2" y="15" width="12" height="10" rx="2" fill="currentColor" fill-opacity="${on("h")}"/>` +
+    `<rect x="26" y="15" width="12" height="10" rx="2" fill="currentColor" fill-opacity="${on("h")}"/>` +
+    `<rect x="14" y="14" width="12" height="12" fill="currentColor" fill-opacity="0.26"/>`);
+}
+/* A pad we have no names for: the four face buttons as a diamond, the one meant filled in. */
+function diamond(pos) {
+  const dots = { top: [20, 7], right: [33, 20], bottom: [20, 33], left: [7, 20] };
+  return svgIcon(40, Object.entries(dots).map(([k, [x, y]]) =>
+    `<circle cx="${x}" cy="${y}" r="5.5" fill="currentColor" fill-opacity="${k === pos ? 1 : 0.2}" ` +
+    `stroke="currentColor" stroke-opacity="0.55" stroke-width="1.2"/>`).join(""));
+}
+
+const GLYPH = {
+  // Xbox's View: two overlapping panes. Menu: three bars. Both are what is printed on the pad.
+  view: `<rect x="10" y="15.5" width="12" height="10" rx="1.6" fill="none" stroke="#fff" stroke-width="2"/>` +
+        `<path d="M15.5 15.5V13a1.5 1.5 0 0 1 1.5-1.5h11.5a1.5 1.5 0 0 1 1.5 1.5v9.5a1.5 1.5 0 0 1-1.5 1.5H26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`,
+  lines: `<path d="M12.5 14h15M12.5 20h15M12.5 26h15" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>`,
+  nexus: `<circle cx="20" cy="20" r="11" fill="none" stroke="#fff" stroke-width="2.2"/>` +
+         `<path d="M13.5 13c4.2 2.6 9.2 8.8 13 14M26.5 13c-4.2 2.6-9.2 8.8-13 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`,
+  cross: `<path d="M13.5 13.5l13 13M26.5 13.5l-13 13" stroke="#7C9BE6" stroke-width="3.2" stroke-linecap="round"/>`,
+  circle: `<circle cx="20" cy="20" r="7.5" fill="none" stroke="#E0554F" stroke-width="3.2"/>`,
+  square: `<rect x="12.5" y="12.5" width="15" height="15" rx="1.5" fill="none" stroke="#E68AC0" stroke-width="3.2"/>`,
+  triangle: `<path d="M20 11.5 28.8 26.5H11.2z" fill="none" stroke="#63C58F" stroke-width="3.2" stroke-linejoin="round"/>`,
+  // The two small buttons either side of the DualSense's touchpad, drawn the way the pad prints
+  // them and the way the common icon packs do: the slanted pill of the button itself with its
+  // mark above it -- three short rays for Create, three bars for Options. Each leans towards
+  // the touchpad, so the two lean opposite ways.
+  sonyCreate: `<rect x="15" y="17" width="10" height="21" rx="5" fill="var(--ink)" transform="rotate(14 20 27.5)"/>` +
+              `<path d="M20 13V4.5M17.8 13.6 13.2 6.5M22.2 13.6l4.6-7.1" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/>`,
+  sonyOptions: `<rect x="15" y="17" width="10" height="21" rx="5" fill="var(--ink)" transform="rotate(-14 20 27.5)"/>` +
+               `<path d="M15 5.5h10M15 9.5h10M15 13.5h10" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>`,
+  minus: `<path d="M12 20h16" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
+  plus: `<path d="M12 20h16M20 12v16" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`,
+  home: `<path d="M11 19.5 20 11.5l9 8V28a1 1 0 0 1-1 1h-5.5v-6h-5v6H12a1 1 0 0 1-1-1z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`,
+};
+
+const BUTTON_ART = {
+  xbox: {
+    A: () => disc("#3AA03C", svgText(20, "A", 21, "#fff")),
+    B: () => disc("#D3433C", svgText(20, "B", 21, "#fff")),
+    X: () => disc("#3C7CD3", svgText(20, "X", 21, "#fff")),
+    Y: () => disc("#E2B128", svgText(20, "Y", 21, "#101012")),
+    LB: () => pill("LB"), RB: () => pill("RB"), LT: () => pill("LT"), RT: () => pill("RT"),
+    LS: () => pill("LS"), RS: () => pill("RS"),
+    View: () => disc(DISC_DARK, GLYPH.view, DISC_RING),
+    Menu: () => disc(DISC_DARK, GLYPH.lines, DISC_RING),
+    Guide: () => disc("#107C10", GLYPH.nexus),
+  },
+  playstation: {
+    A: () => disc(DISC_DARK, GLYPH.cross, DISC_RING),
+    B: () => disc(DISC_DARK, GLYPH.circle, DISC_RING),
+    X: () => disc(DISC_DARK, GLYPH.square, DISC_RING),
+    Y: () => disc(DISC_DARK, GLYPH.triangle, DISC_RING),
+    LB: () => pill("L1"), RB: () => pill("R1"), LT: () => pill("L2"), RT: () => pill("R2"),
+    LS: () => pill("L3"), RS: () => pill("R3"),
+    View: () => svgIcon(40, GLYPH.sonyCreate),
+    Menu: () => svgIcon(40, GLYPH.sonyOptions),
+    Guide: () => disc(DISC_DARK, svgText(20, "PS", 13, "#fff"), DISC_RING),
+  },
+  // By position: the launcher's "A" is the bottom button, which Nintendo prints a B on.
+  switch: {
+    A: () => disc("#1B1B1F", svgText(20, "B", 20, "#fff"), DISC_RING),
+    B: () => disc("#1B1B1F", svgText(20, "A", 20, "#fff"), DISC_RING),
+    X: () => disc("#1B1B1F", svgText(20, "Y", 20, "#fff"), DISC_RING),
+    Y: () => disc("#1B1B1F", svgText(20, "X", 20, "#fff"), DISC_RING),
+    LB: () => pill("L"), RB: () => pill("R"), LT: () => pill("ZL"), RT: () => pill("ZR"),
+    LS: () => pill("LS"), RS: () => pill("RS"),
+    View: () => disc("#1B1B1F", GLYPH.minus, DISC_RING),
+    Menu: () => disc("#1B1B1F", GLYPH.plus, DISC_RING),
+    Guide: () => disc("#1B1B1F", GLYPH.home, DISC_RING),
+  },
+  generic: {
+    A: () => diamond("bottom"), B: () => diamond("right"), X: () => diamond("left"), Y: () => diamond("top"),
+    LB: () => pill("L1"), RB: () => pill("R1"), LT: () => pill("L2"), RT: () => pill("R2"),
+    LS: () => pill("L3"), RS: () => pill("R3"),
+    View: () => pill("SELECT"), Menu: () => pill("START"), Guide: () => pill("HOME"),
+  },
+  keyboard: {
+    A: () => keycap("Enter"), B: () => keycap("Esc"), X: () => keycap("X"), Y: () => keycap("Y"),
+    LB: () => keycap("["), RB: () => keycap("]"), LT: () => keycap("LT"), RT: () => keycap("RT"),
+    LS: () => keycap("LS"), RS: () => keycap("RS"),
+    View: () => keycap("/"), Menu: () => keycap("M"), Guide: () => keycap("Guide"),
+  },
+};
+
+/** The picture of a button, for a family (the current one by default). */
+function btnIcon(btn, family) {
+  const fam = family || inputFamily;
+  btn = canonBtn(btn);
+  if (btn === "DpadV" || btn === "DpadH" || btn === "Dpad") {
+    if (fam === "keyboard")
+      return btn === "DpadV" ? keycap("↑") + keycap("↓") : btn === "DpadH" ? keycap("←") + keycap("→") : keycap("↑↓←→");
+    return dpad(btn === "DpadV" ? "v" : btn === "DpadH" ? "h" : "all");
+  }
+  const art = BUTTON_ART[fam] || BUTTON_ART.xbox;
+  const draw = art[btn] || BUTTON_ART.xbox[btn];
+  return draw ? draw() : pill(btn);
+}
+
+/*
+ * A slot is where a button is drawn. It carries the button's name, so paintButtons can redraw
+ * every one on the page when the pad in hand changes without anything being re-rendered.
+ * `padOnly` marks a slot that is about a gamepad whatever is in use: the button rows in Settings.
+ */
+function slot(btn, padOnly) {
+  return `<span class="btn-slot" data-btn="${esc(canonBtn(btn))}"${padOnly ? ' data-pad=""' : ""}>` +
+    btnIcon(btn, padOnly ? padFamily : inputFamily) + `</span>`;
+}
+
+/** "LS + RS" as pictures, for a settings value. */
+function comboHtml(combo) {
+  if (!combo || combo === "Off") return "Off";
+  return `<span class="combo">` + combo.split("+").map(p => slot(p.trim(), true)).join(`<span class="combo-plus">+</span>`) + `</span>`;
+}
+
+/** Text with [[A]]-style references drawn as buttons. Escapes the text first, so a title cannot smuggle markup in. */
+function hintHtml(text) {
+  return esc(text).replace(/\[\[(\w+)\]\]/g, (_, b) => slot(b, true));
+}
+
+/** Redraw every slot for the families now in use. */
+function paintButtons(root) {
+  (root || document).querySelectorAll("[data-btn]").forEach(el => {
+    el.innerHTML = btnIcon(el.dataset.btn, "pad" in el.dataset ? padFamily : inputFamily);
+  });
+}
+
+/*
+ * The last thing the user touched. A pad announces its family with every press and whenever the
+ * host sees it picked up; a keypress or a mouse click says "keyboard". Mouse MOVEMENT does not
+ * count: the left stick moves the real Windows pointer, so a mousemove can be the pad.
+ */
+function setInputFamily(family) {
+  if (!family || !BTN_NAMES[family]) return;
+  if (family !== "keyboard") padFamily = family;
+  if (inputFamily === family) return;
+  inputFamily = family;
+  document.body.dataset.input = family;
+  paintButtons(document);
+  // Settings names buttons in its hints and warnings, and those are words, not slots.
+  if (view === "settings") renderSettings();
+}
+
+/** One entry of a legend: the button, then what it does. Clickable, so a mouse can press it. */
+function legendItem(btn, label) {
+  const press = /^Dpad/.test(btn) ? "" : ` data-press="${esc(canonBtn(btn))}"`;
+  return `<div class="legend-item"${press}>${slot(btn)}<span>${esc(label)}</span></div>`;
+}
+
+const LIBRARY_LEGEND = [["A", "Launch"], ["X", "Filter"], ["Y", "Options"], ["View", "Search"], ["Menu", "Settings"]];
+
+function renderLibraryLegend() {
+  const el = $("libraryFoot");
+  if (el) el.innerHTML = foot(...LIBRARY_LEGEND);
+}
+
+function renderDetailLegend(g) {
+  const el = $("detailFoot");
+  if (el) el.innerHTML = foot(["A", "Select"], ["B", "Back"], ["X", g && g.favorite ? "Unfavorite" : "Favorite"]);
+}
+
+// A click on a legend entry is that button. Delegated, because footers are rebuilt constantly.
+document.addEventListener("click", (e) => {
+  const item = e.target instanceof Element ? e.target.closest(".legend-item[data-press]") : null;
+  if (!item || inputOpen) return;
+  handleInput(item.dataset.press, "mouse");
+});
 
 /**
  * Shared renderer for every overlay menu, so the game options, manage, collection and
@@ -870,11 +1248,9 @@ function menuStep(dir, idx, count) {
   return Math.max(0, Math.min(count - 1, next));
 }
 
-/** Standard footer hints. */
+/** Standard footer hints: [button, label] pairs, drawn for the pad in hand. */
 function foot(...pairs) {
-  return pairs.map(([btn, label]) =>
-    `<div class="legend-item"><div class="btn-badge${btn === "A" ? " btn-a" : ""}">${btn}</div><span>${esc(label)}</span></div>`
-  ).join("");
+  return pairs.map(([btn, label]) => legendItem(btn, label)).join("");
 }
 
 /* overlays */
@@ -1237,7 +1613,31 @@ function updateBattery(m) {
 let bdFront = "bdA";
 let bdCurrentKey = null;
 
+/*
+ * The backdrop follows the highlight, but not tile by tile during a fast run.
+ *
+ * Every change decodes a full-size hero, crossfades two screen-sized layers and re-blurs a third
+ * (#backdrop::before, blur(64px) across the whole screen). Done on each step of a held key that
+ * was the single most expensive thing in the frame, and it is what made the grid stutter under
+ * the scroll. A run of steps now changes the text straight away and the picture once the
+ * highlight settles -- which is also what a console dashboard does.
+ */
+const BACKDROP_SETTLE_MS = 170;
+let bdDeferTimer = null, lastPaintAt = -Infinity;
+
+function scheduleBackdrop(g) {
+  const now = performance.now();
+  const fast = now - lastPaintAt < BACKDROP_SETTLE_MS;
+  lastPaintAt = now;
+  if (!fast) { setBackdrop(g); return; }
+  clearTimeout(bdDeferTimer);
+  bdDeferTimer = setTimeout(() => { bdDeferTimer = null; setBackdrop(focusedGame()); }, BACKDROP_SETTLE_MS);
+}
+
 function setBackdrop(game) {
+  // A direct call -- the detail page and Settings clear it -- wins over one still waiting.
+  clearTimeout(bdDeferTimer);
+  bdDeferTimer = null;
   // Keyed on the picture, not the game. On the game id alone this skipped every repaint while
   // the highlight stayed put -- including the one after a metadata pass swapped the art out from
   // under it, which left the element pointing at a file that no longer existed and the screen
@@ -1734,7 +2134,7 @@ function renderLibrary() {
   renderPlaying();
   contItems = cont;
   gridRows = rows;
-  // Not only from revealIn: scrolling with the wheel never moves the pad focus, and the top
+  // Not only from revealFocus: scrolling with the wheel never moves the pad focus, and the top
   // fade still has to come on.
   watchScrolled($("gridScroll"));
 
@@ -1790,9 +2190,9 @@ function renderLibrary() {
     note.innerHTML = S.scanning
       ? "Scanning your Steam, Epic, GOG and Xbox libraries…"
       : F.search
-        ? `No games match “${esc(F.search)}”. Press <b>VIEW</b> to change the search, or <b>B</b> while typing to clear it.`
+        ? `No games match “${esc(F.search)}”. Press ${slot("View")} to change the search, or ${slot("B")} while typing to clear it.`
       : (visibleGames().length
-        ? "Nothing matches the current filter. Press <b>X</b> to change it, or <b>Y</b> to reset."
+        ? `Nothing matches the current filter. Press ${slot("X")} to change it, or ${slot("Y")} to reset.`
         : "No games found yet. Use the <b>+ Add game</b> tile below, or rescan from <b>Settings → Library</b>.");
     scroll.appendChild(note);
   }
@@ -1946,7 +2346,7 @@ function offerInstall(g) {
   confirmState = {
     title: `Install ${g.title}?`,
     body: `${Store} opens with ${g.title} ready to install. Consolify steps aside while it does` +
-      (combo ? `; press ${combo} to come back.` : "; start Consolify again to come back.") +
+      (combo ? `; press ${comboName(combo, padFamily)} to come back.` : "; start Consolify again to come back.") +
       " The tile turns playable once the download has finished.",
     yesLabel: `Install with ${store.replace(/^the /, "")}`,
     icon: "download", danger: false,
@@ -2175,7 +2575,7 @@ function renderDetail() {
   $("detailCrumb").textContent = g.platform.toUpperCase();
   $("detailTitle").textContent = g.title;
   $("detailFav").style.display = g.favorite ? "" : "none";
-  $("favLegend").textContent = g.favorite ? "Unfavorite" : "Favorite";
+  renderDetailLegend(g);
 
   // The wordmark, where the art we already fetch has one. It is the game's own lettering rather
   // than ours, which is most of what makes this page look like a storefront instead of a form.
@@ -2307,15 +2707,40 @@ function allSettingsRows() {
   rows.push(sliderRow("Stick deadzone", () => s.deadzone, 0.05, 0.40, 0.01, v => set(() => s.deadzone = v), v => v.toFixed(2)));
   rows.push(sliderRow("Cursor sensitivity", () => s.sensitivity, 0.2, 3.0, 0.1, v => set(() => s.sensitivity = v), v => v.toFixed(1) + "×"));
   rows.push(sliderRow("Acceleration curve", () => s.accelExponent, 1.0, 3.0, 0.1, v => set(() => s.accelExponent = v), v => v.toFixed(1)));
-  rows.push(cycleRow("Speed boost button", ["RT", "LT", "LB", "RB", "LS", "RS", "Off"], () => s.boostButton, v => set(() => s.boostButton = v),
+  rows.push(buttonRow("Speed boost button", ["RT", "LT", "LB", "RB", "LS", "RS", "Off"], () => s.boostButton, v => set(() => s.boostButton = v),
     "Hold to move the cursor and scroll faster — crossing a 4K screen a nudge at a time gets old"));
   if (s.boostButton !== "Off")
     rows.push(sliderRow("Boost multiplier", () => s.boostMultiplier, 1.5, 5.0, 0.5, v => set(() => s.boostMultiplier = v), v => v.toFixed(1) + "×"));
-  rows.push(cycleRow("Left click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.leftClickButton, v => set(() => s.leftClickButton = v),
+  rows.push(buttonRow("Left click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.leftClickButton, v => set(() => s.leftClickButton = v),
     "Sends a real mouse click when the launcher is not focused"));
-  rows.push(cycleRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
+  rows.push(buttonRow("Right click button", ["A", "B", "X", "Y", "LB", "RB", "LS", "RS"], () => s.rightClickButton, v => set(() => s.rightClickButton = v)));
   rows.push(toggleRow("Hide pointer system-wide", "The pointer always hides inside the launcher on D-pad input; this extends it to the rest of Windows. Replaces the system cursors, so it is restored when Consolify exits",
     () => s.hideCursorSystemWide, v => set(() => s.hideCursorSystemWide = v)));
+  // A setting the host defaults to on: a settings file from before it has no key, and undefined
+  // must read as on rather than off.
+  rows.push(toggleRow("Touchpad mouse", "DualSense and DualShock 4 as a laptop touchpad: one finger moves the pointer, two fingers scroll, pinch to zoom, press the pad to click (with two fingers down for a right click)",
+    () => s.touchpadMouse !== false, v => set(() => s.touchpadMouse = v)));
+  // Every touchpad setting defaults to on or to 1.0 on the host; a settings file from before one
+  // existed has no key, and undefined must read as that default.
+  if (s.touchpadMouse !== false) {
+    rows.push(sliderRow("Touchpad sensitivity", () => s.touchpadSensitivity ?? 1, 0.25, 4.0, 0.25,
+      v => set(() => s.touchpadSensitivity = v), v => v.toFixed(2) + "×",
+      "Slow strokes move the pointer a little for precision, quick ones a lot; this scales both"));
+    rows.push(toggleRow("Tap to click", "A light tap is a click, a two-finger tap a right click, two taps a double click. Pressing the pad down always clicks",
+      () => s.touchpadTapToClick !== false, v => set(() => s.touchpadTapToClick = v)));
+    if (s.touchpadTapToClick !== false)
+      rows.push(toggleRow("Tap and drag", "Tap, then touch and hold: the button stays down while the finger moves, to drag a window or select text. Lift and touch again quickly to carry on; tap to let go. Makes a single tap wait a moment before it clicks",
+        () => s.touchpadTapDrag !== false, v => set(() => s.touchpadTapDrag = v)));
+    rows.push(cycleRow("Two-finger scroll direction", ["Natural", "Traditional"],
+      () => (s.touchpadNaturalScroll === false ? "Traditional" : "Natural"),
+      v => set(() => s.touchpadNaturalScroll = v === "Natural"),
+      s.touchpadNaturalScroll === false
+        ? "Fingers down scrolls down, like a mouse wheel"
+        : "The page follows the fingers, like a phone. The Windows touchpad default"));
+    rows.push(sliderRow("Scroll speed", () => s.touchpadScrollSpeed ?? 1, 0.25, 4.0, 0.25,
+      v => set(() => s.touchpadScrollSpeed = v), v => v.toFixed(2) + "×",
+      "How far two fingers scroll. A quick flick keeps the page coasting after they lift"));
+  }
   const comboWarn =
     s.minimizeCombo === "Guide" ?
       "Windows and Steam both grab this button. Disable BOTH: (1) Windows — Settings > Gaming > " +
@@ -2329,11 +2754,11 @@ function allSettingsRows() {
       "Steam afterwards."
     : null;
 
-  rows.push(cycleRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
+  rows.push(buttonRow("Menu combo", MINIMIZE_COMBOS, () => s.minimizeCombo, v => set(() => s.minimizeCombo = v),
     "Tap to hide or bring back the launcher (in-game menu while a game runs); double tap to open the Power Wheel",
     comboWarn));
 
-  rows.push(cycleRow("Screenshot button", SCREENSHOT_COMBOS, () => s.screenshotCombo, v => set(() => s.screenshotCombo = v),
+  rows.push(buttonRow("Screenshot button", SCREENSHOT_COMBOS, () => s.screenshotCombo, v => set(() => s.screenshotCombo = v),
     "Taps F12, Steam's screenshot key. Works while a game is focused, which the Xbox Share button cannot manage, " +
     "because Windows keeps that button to itself and never passes it to applications",
     s.screenshotCombo !== "Off" && s.screenshotCombo === s.minimizeCombo
@@ -2350,7 +2775,7 @@ function allSettingsRows() {
         "needs a real mouse. Both also take the foreground, so the field you were typing into can " +
         "lose its caret.",
     KEYBOARD_APP_LABELS));
-  rows.push(cycleRow("Keyboard button", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
+  rows.push(buttonRow("Keyboard button", ["Start", "Back", "LS", "RS", "LB", "RB"], () => s.keyboardToggleButton, v => set(() => s.keyboardToggleButton = v),
     "Shows and hides the keyboard from anywhere in the launcher"));
   // Press is quicker and is the default. Hold exists because it leaves the tap free, which is the
   // only way to keep a button that already does something inside the launcher.
@@ -2359,7 +2784,7 @@ function allSettingsRows() {
       ? "Hold the button down. A tap still does whatever that button normally does"
       : "One tap. The button does nothing else while this is set",
     (s.keyboardToggleMode || "Press") !== "Hold" && (s.keyboardToggleButton === "Start" || s.keyboardToggleButton === "Back")
-      ? `${s.keyboardToggleButton === "Start" ? "Start is the Menu button" : "Back is the View button"}, which the launcher uses. On Press the keyboard takes it outright — pick another button, or switch to Hold.`
+      ? `${s.keyboardToggleButton === "Start" ? "[[Menu]] opens Settings from the library" : "[[View]] opens search on the library"}, and on Press the keyboard takes it outright — pick another button, or switch to Hold.`
       : null,
     { Press: "Press", Hold: "Hold" }));
   if ((s.keyboardToggleMode || "Press") === "Hold")
@@ -2424,7 +2849,7 @@ function allSettingsRows() {
       const n = (c.gameIds || []).length;
       rows.push({
         name: c.name,
-        hint: n === 1 ? "1 game · filter by it with X on the library" : `${n} games · filter by it with X on the library`,
+        hint: n === 1 ? "1 game · filter by it with [[X]] on the library" : `${n} games · filter by it with [[X]] on the library`,
         type: "action", label: "Delete", danger: true,
         action: () => askDeleteCollection(c),
       });
@@ -2513,7 +2938,7 @@ function steamAccountHint() {
   if (!a || !a.steamId) return "No Steam login was found on this PC. Sign in to Steam once, then rescan";
   const who = `Signed in to Steam as ${a.personaName || a.steamId}`;
   if (!S.settings || !S.settings.steamShowOwned)
-    return `${who}. Lists your whole Steam library, with anything not on disk greyed out and installable with A`;
+    return `${who}. Lists your whole Steam library, with anything not on disk greyed out and installable with [[A]]`;
   if (a.error) return `${who} · ${a.error}`;
   if (a.fetchedAt) return `${who} · ${a.ownedCount} game${a.ownedCount === 1 ? "" : "s"} in your library`;
   return `${who} · fetching your library…`;
@@ -2598,6 +3023,14 @@ function cycleRow(name, options, get, setV, hint, warn, labels) {
       setV(options[i]);
     },
   };
+}
+
+/* A row whose options are gamepad buttons or combos. The stored value is the XInput name, as it
+   always was; what is shown is the button drawn for the pad last used. */
+function buttonRow(name, options, get, setV, hint, warn) {
+  const row = cycleRow(name, options, get, setV, hint, warn);
+  row.valueHtml = comboHtml(options.includes(get()) ? get() : options[0]);
+  return row;
 }
 
 /* The accent picker. ◂ ▸ walk the presets so the common case never needs a keyboard, and A opens
@@ -2718,16 +3151,12 @@ function renderSettings() {
   renderSettingsNav();
   // The legend changes with the pane: on the categories B leaves Settings, inside the options it
   // only steps back to the categories, and saying so is cheaper than letting people find out.
-  const foot = $("settingsFoot");
+  const footEl = $("settingsFoot");
   // No LB/RB entry: there is one screen left, so the shoulders switch between nothing. A legend
   // that names a button which does not respond is worse than a shorter legend.
-  if (foot) foot.innerHTML = settingsPane === "nav"
-    ? `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Open</span></div>` +
-      `<div class="legend-item"><div class="btn-badge">B</div><span>Back</span></div>` +
-      `<div class="legend-item"><div class="dpad-badge mono">▴ ▾</div><span>Category</span></div>`
-    : `<div class="legend-item"><div class="btn-badge btn-a">A</div><span>Select</span></div>` +
-      `<div class="legend-item"><div class="btn-badge">B</div><span>Categories</span></div>` +
-      `<div class="legend-item"><div class="dpad-badge mono">◂ ▸</div><span>Adjust</span></div>`;
+  if (footEl) footEl.innerHTML = settingsPane === "nav"
+    ? foot(["A", "Open"], ["B", "Back"], ["DpadV", "Category"])
+    : foot(["A", "Select"], ["B", "Categories"], ["DpadH", "Adjust"]);
   const rows = settingsRows();
   const scroll = $("settingsScroll");
   scroll.innerHTML = "";
@@ -2754,13 +3183,15 @@ function renderSettings() {
     // Left/Right adjust the value here instead of moving; settingsInput reads this.
     if (r.adjust) el.dataset.navLock = "horizontal";
 
+    // The arrows carry a direction, so a mouse can step a value either way (see the click below).
+    const left = `<span class="arrow" data-dir="-1">◂</span>`, rightArrow = `<span class="arrow" data-dir="1">▸</span>`;
     let right = "";
     if (r.type === "toggle") {
       right = r.value
-        ? `<span class="arrow">◂</span><span class="set-toggle-on">ON</span><span class="arrow">▸</span>`
-        : `<span class="arrow">◂</span><span class="set-toggle-off">OFF</span><span class="arrow">▸</span>`;
+        ? `${left}<span class="set-toggle-on">ON</span>${rightArrow}`
+        : `${left}<span class="set-toggle-off">OFF</span>${rightArrow}`;
     } else if (r.type === "select") {
-      right = `<span class="arrow">◂</span><span>${esc(r.value)}</span><span class="arrow">▸</span>`;
+      right = `${left}<span>${r.valueHtml || esc(r.value)}</span>${rightArrow}`;
     } else if (r.type === "swatch") {
       // The presets are shown as dots, the selected one ringed, with a trailing dot for a custom
       // colour so the strip reads as the row's full range rather than a value plus a mystery.
@@ -2768,25 +3199,28 @@ function renderSettings() {
         `<span class="swatch${on ? " on" : ""}" style="background:${esc(hex)}"></span>`;
       const dots = r.swatches.map(hex => dot(hex, hex === r.value)).join("")
         + (r.custom ? dot(r.value, true) : "");
-      right = `<span class="arrow">◂</span><span class="swatch-strip">${dots}</span>`
-        + `<span class="swatch-name">${esc(r.label)}</span><span class="arrow">▸</span>`;
+      right = `${left}<span class="swatch-strip">${dots}</span>`
+        + `<span class="swatch-name">${esc(r.label)}</span>${rightArrow}`;
     } else if (r.type === "slider") {
       const pct = ((r.value - r.min) / (r.max - r.min)) * 100;
-      right = `<div class="slider"><span class="arrow">◂</span><div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div><span class="arrow">▸</span><span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
+      right = `<div class="slider">${left}<div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div>${rightArrow}<span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
     } else if (r.type === "action") {
       right = `<span class="set-action-label${r.danger ? " danger" : ""}">${esc(r.label)}</span>`;
     }
 
-    el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${esc(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${esc(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
+    el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${hintHtml(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${hintHtml(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
 
     el.addEventListener("mouseenter", () => {
       if (!hoverEnabled()) return;
       if (settingsIdx === idx && settingsPane === "rows") return;
       settingsIdx = idx; settingsPane = "rows"; renderSettings();
     });
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
       settingsIdx = idx; settingsPane = "rows";
       const row = settingsRows().filter(x => !x.section)[idx];
+      // On an arrow, step that way; anywhere else on the row is the same as pressing A.
+      const arrow = e.target instanceof Element ? e.target.closest(".arrow") : null;
+      if (arrow && row.adjust) { row.adjust(parseInt(arrow.dataset.dir, 10) || 1); return; }
       if (row.action) row.action(); else if (row.adjust) row.adjust(1);
     });
     scroll.appendChild(el);
@@ -3432,7 +3866,7 @@ $("libSearch").addEventListener("mouseenter", () => { if (hoverEnabled() && !sea
 /* ============================== couch setup guide ============================== */
 
 const GUIDE_STEPS = [
-  ["Switch the touch keyboard to the Gamepad layout (one time)", "Windows does not expose this as a setting an app can flip, so do it once by hand and it sticks. Open the touch keyboard (hold <b>Start</b>), tap the <b>cog icon</b> in its top-left, open <b>Keyboard layout</b> and choose <b>Gamepad</b>. You then get controller navigation with button accelerators — <b>X</b> backspace, <b>Y</b> space. On the default layout the keyboard ignores the pad entirely. Requires Windows 11 build 26100.3624 or newer."],
+  ["Switch the touch keyboard to the Gamepad layout (one time)", `Windows does not expose this as a setting an app can flip, so do it once by hand and it sticks. Open the touch keyboard (the keyboard button, ${slot("RB", true)} unless you changed it), tap the <b>cog icon</b> in its top-left, open <b>Keyboard layout</b> and choose <b>Gamepad</b>. You then get controller navigation with button accelerators — <b>X</b> backspace, <b>Y</b> space. On the default layout the keyboard ignores the pad entirely. Requires Windows 11 build 26100.3624 or newer.`],
   ["Sign in from the couch: set up a Windows Hello PIN", "Apps cannot type into the secure lock screen, but you don't need one: in <b>Settings → Accounts → Sign-in options</b>, add a <b>PIN (Windows Hello)</b>. The sign-in screen's PIN pad works with the touch keyboard, which supports gamepad input — so after a wake you can sign in without leaving the sofa. For a fully hands-off couch PC, enable automatic sign-in instead (<b>netplwiz</b>, untick \"Users must enter a user name and password\")."],
   ["Let your controller's receiver wake the PC", "Open <b>Device Manager</b> and find your gamepad's USB receiver (under <b>Human Interface Devices</b> or <b>Xbox Peripherals</b>). Open its <b>Power Management</b> tab and tick <b>Allow this device to wake the computer</b>. Pressing the controller button will then wake the PC from sleep."],
   ["Auto-start Consolify", "Turn on <b>Launch Consolify at login</b> in Settings → Startup so the PC lands straight back on the TV with gamepad-mouse active after waking."],
@@ -3447,8 +3881,8 @@ function renderGuide() {
 function guideInput(btn) {
   const body = $("guideBody");
   switch (btn) {
-    case "Up": body.scrollBy({ top: -160, behavior: "smooth" }); break;
-    case "Down": body.scrollBy({ top: 160, behavior: "smooth" }); break;
+    case "Up": animateScroll(body, "y", scrollTarget(body, "y") - 160); break;
+    case "Down": animateScroll(body, "y", scrollTarget(body, "y") + 160); break;
     case "B": case "A": guideOpen = false; $("overlay-guide").classList.remove("active"); break;
   }
 }
@@ -3528,21 +3962,93 @@ function handleInput(btn, src) {
 const routeInput = handleInput;
 handleInput = function (btn, src) { routeInput(btn, src); publishClaims(); };
 
+/*
+ * The keyboard, as a pad. What each key stands for is what the legend draws for it (see
+ * BUTTON_ART.keyboard), so the two have to move together: Enter is A, Esc is B, the letters are
+ * the letters, the brackets are the shoulders, "/" opens search and M opens Settings.
+ */
 const KEYMAP = {
   ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
-  Enter: "A", Escape: "B", Backspace: "B",
-  KeyY: "Y", KeyX: "X",
+  Enter: "A", Space: "A", Escape: "B", Backspace: "B",
+  KeyY: "Y", KeyX: "X", KeyM: "Menu",
   BracketLeft: "LB", BracketRight: "RB",
   Slash: "View",
 };
+// By key as well as by physical code: some keyboards and injected input carry only the one.
+const KEYMAP_BY_KEY = {
+  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+  Enter: "A", " ": "A", Escape: "B", Backspace: "B",
+  y: "Y", Y: "Y", x: "X", X: "X", m: "Menu", M: "Menu",
+  "[": "LB", "]": "RB", "/": "View",
+};
+
+const KEY_REPEAT_MS = 85;
+let lastKeyStepAt = -Infinity;
 
 window.addEventListener("keydown", (e) => {
   if (inputOpen) return;
-  const btn = KEYMAP[e.code];
-  if (!btn) return;
+  const btn = KEYMAP[e.code] || KEYMAP_BY_KEY[e.key];
+  if (!btn || e.ctrlKey || e.altKey || e.metaKey) return;
   e.preventDefault();
+  setInputFamily("keyboard");
+  // A held direction walks on; a held Enter must not launch the game twice.
+  if (e.repeat && !DIRECTIONS.has(btn)) return;
+  // Windows repeats a held key about 30 times a second. Every one of those used to be handled,
+  // each with a layout pass, faster than the page could paint -- so the screen froze while the
+  // key was held and jumped to the end when it was let go. Repeats are paced to a rate the eye
+  // can follow, and the ones in between are dropped rather than queued.
+  const now = performance.now();
+  if (e.repeat && now - lastKeyStepAt < KEY_REPEAT_MS) return;
+  lastKeyStepAt = now;
   handleInput(btn, "kb");   // handleInput switches to pad mode on directions only
 });
+
+/*
+ * The mouse, as a pad. Buttons only: a real click means a hand is on the mouse, where a mousemove
+ * can be the left stick driving the pointer. The right button is "back", and on a game it is that
+ * game's menu -- the two things a mouse otherwise cannot do. A click on the dimmed screen around
+ * any menu is "back" as well, as it already was on the confirm dialog.
+ */
+/* A click the host sent from a pad's touchpad is not the mouse. The host says so just before
+   sending it, and the two can arrive in either order, so the note is kept for a moment AND puts
+   the pad family back in case the click got here first. */
+let padClickAt = -Infinity;
+window.addEventListener("mousedown", () => {
+  if (performance.now() - padClickAt > 400) setInputFamily("keyboard");
+}, true);
+
+window.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (inputOpen) return;
+  const tile = e.target instanceof Element ? e.target.closest("[data-game-id]") : null;
+  if (tile && view === "library" && !overlayOpen() && !overlayMode) {
+    setFocusEl(tile);
+    setPointerOnItem(true);
+    updateLibraryFocus(true);
+    libraryAccept("Y");
+    return;
+  }
+  handleInput("B", "mouse");
+});
+
+document.querySelectorAll(".overlay").forEach(ov => {
+  if (ov.id === "overlay-confirm") return;   // has its own, and answers "no"
+  ov.addEventListener("click", (e) => {
+    if (e.target !== ov) return;
+    if (ov.id === "overlay-input") closeInput(false);
+    else handleInput("B", "mouse");
+  });
+});
+
+/* The text prompt's own hints. Always keys, whatever is in hand: it is a text field. */
+function renderInputHint() {
+  const el = $("inputHint");
+  if (!el) return;
+  el.innerHTML = `<div class="legend-item" id="inputOk">${keycap("Enter")}<span>Confirm</span></div>` +
+    `<div class="legend-item" id="inputCancel">${keycap("Esc")}<span>Cancel</span></div>`;
+  $("inputOk").addEventListener("click", () => closeInput(true));
+  $("inputCancel").addEventListener("click", () => closeInput(false));
+}
 
 /* ============================== host messages ============================== */
 
@@ -3596,7 +4102,20 @@ function handleHostMessage(m) {
       if (!m.busy && view === "settings") renderSettings();
       break;
     case "pad":
+      // The family rides with the press, so the legend is right for the pad that was just used.
+      setInputFamily(m.layout);
       handleInput(m.button, "pad");
+      break;
+    // The pad in hand changed, or one was picked up again after the keyboard had the legend.
+    case "padLayout":
+      setInputFamily(m.layout);
+      break;
+    case "padClick":
+      padClickAt = performance.now();
+      setInputFamily(padFamily);
+      break;
+    case "stickScroll":
+      onStickScroll(m.v || 0);
       break;
     case "overlay":
       overlayTargetTitle = m.targetTitle || "";
@@ -3643,6 +4162,8 @@ function handleHostMessage(m) {
       // Only the host can tell us the stick moved the cursor, or that the launcher just came
       // back to the foreground and the pad should be driving again. It never pushes "pad" off
       // a face button, so this can't re-arm a highlight the pointer has cleared.
+      // "pointer" from the host is the stick and nothing else, so it is the pad being used.
+      if (m.mode === "pointer") setInputFamily(padFamily);
       setInputMode(m.mode);
       break;
     case "padConnected":
@@ -3752,6 +4273,8 @@ function mockHandle(msg) {
         tvDeviceName: "\\\\.\\DISPLAY2", switchPrimaryOnLaunch: true, repositionGameWindow: true,
         keepFocus: true, launchOnStartup: false, gamepadMouseEnabled: true, gamepadMouseDuringGame: false,
         deadzone: 0.18, sensitivity: 1.0, accelExponent: 1.8, hideCursorSystemWide: false,
+        touchpadMouse: true, touchpadSensitivity: 1.0, touchpadTapToClick: true,
+        touchpadTapDrag: true, touchpadNaturalScroll: true, touchpadScrollSpeed: 1.0,
         boostButton: "RT", boostMultiplier: 2.5, hideLegend: false, igdbClientId: "", igdbClientSecret: "", steamGridDbKey: "", metadataEndpoint: "",
         steamShowOwned: true, steamApiKey: "", gamePassCatalog: false, xboxClientId: "",
         leftClickButton: "A", rightClickButton: "B",
@@ -3824,6 +4347,9 @@ fitStage();
 tickClock();
 renderTabbars();
 renderGuide();
+renderLibraryLegend();
+renderInputHint();
+paintButtons(document);
 // Show the no-controller state straight away. The host only pushes when something changes, so
 // waiting for a message left the corner blank until a pad was plugged in.
 updateBattery(null);

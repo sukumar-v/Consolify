@@ -172,7 +172,7 @@ html, body {
 
 /* All-games grid */
 .grid-scroll {
-  /* relative so revealIn() can measure rows against it with offsetTop */
+  /* relative so revealOffset() can measure rows against it with offsetTop */
   position: relative;
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px;
@@ -318,19 +318,23 @@ html, body {
 body.no-legend .legend { display: none; }
 .legend-item { display: flex; align-items: center; gap: 14px; }
 .legend-item > span { font-size: 22px; color: color-mix(in srgb, var(--ink) 80%, transparent); }
-.btn-badge {
-  width: 40px; height: 40px; border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px; font-weight: 600; color: color-mix(in srgb, var(--ink) 80%, transparent);
-}
-.btn-badge.btn-a { background: var(--accent); border: none; color: var(--on-accent); font-weight: 700; }
-.btn-pill, .dpad-badge {
-  height: 40px; padding: 0 16px; border-radius: 20px;
-  border: 2px solid color-mix(in srgb, var(--ink) 40%, transparent);
-  display: flex; align-items: center;
-  font-size: 16px; letter-spacing: 0.08em; color: color-mix(in srgb, var(--ink) 80%, transparent);
-}
+/* A legend entry is a button a mouse can press: see the delegated click in app.js. */
+.legend-item[data-press] { cursor: pointer; }
+
+/* ---- button glyphs ----
+   Every hint is drawn as the button itself -- see btnIcon in app.js: a green A on an Xbox pad, a
+   cross on a DualSense, a key cap on a keyboard. The slot is what gets repainted when the pad in
+   hand changes; the svg inside is sized by height and keeps the width its shape needs, so a disc
+   and a pill sit on one baseline. Themes size the icon, never the slot. */
+.btn-slot { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; vertical-align: middle; }
+.btn-icon { height: 40px; width: auto; display: block; }
+/* A combo -- "LS + RS" -- in a settings value. */
+.combo { display: inline-flex; align-items: center; }
+.combo-plus { margin: 0 8px; font-size: 20px; color: color-mix(in srgb, var(--ink) 40%, transparent); }
+/* Inline in a sentence: a settings hint, an empty-library note, the setup guide. */
+.set-hint .btn-slot, .set-warn .btn-slot, .empty-note .btn-slot, .guide-step-text .btn-slot { margin: 0 2px; }
+.set-hint .btn-icon, .set-warn .btn-icon, .guide-step-text .btn-icon { height: 24px; }
+.empty-note .btn-icon { height: 28px; }
 
 /* ---- detail screen ---- */
 #screen-detail { background: var(--bg); }
@@ -479,12 +483,8 @@ body.no-legend .legend { display: none; }
 }
 .pill-primary span { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .pill-primary.focused { animation: focusPulse 2.4s ease-in-out infinite; }
-.pill-a-badge {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: color-mix(in srgb, var(--bg-deep) 85%, transparent); color: var(--accent);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; flex: 0 0 auto;
-}
+/* The button drawn inside the Play pill. Smaller than in a legend: it sits beside 22px type. */
+.pill-a-badge .btn-icon { height: 30px; }
 .pill-secondary {
   padding: 0 27px; border: 2px solid color-mix(in srgb, var(--ink) 22%, transparent);
   font-size: 19px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
@@ -594,6 +594,7 @@ body.no-legend .legend { display: none; }
 .guide-step-text { font-size: 20px; line-height: 1.55; color: color-mix(in srgb, var(--ink) 62%, transparent); }
 .guide-step-text b { color: color-mix(in srgb, var(--ink) 90%, transparent); font-weight: 600; }
 .guide-foot { display: flex; align-items: center; gap: 14px; font-size: 20px; color: color-mix(in srgb, var(--ink) 70%, transparent); }
+.guide-foot .btn-icon, .input-hint .btn-icon { height: 34px; }
 
 /* ---- toast ---- */
 #toast {
@@ -717,7 +718,10 @@ body.no-legend .legend { display: none; }
   outline: none;
 }
 .text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 20%, transparent); }
-.input-hint { font-size: 15px; letter-spacing: 0.1em; color: color-mix(in srgb, var(--ink) 40%, transparent); }
+/* Enter and Esc under the text prompt, as key caps whatever is in hand: it is a text field. */
+.input-hint { display: flex; align-items: center; gap: 28px; }
+.input-hint .legend-item { cursor: pointer; }
+.input-hint .legend-item > span { font-size: 18px; }
 
 /* ---- pad mode: the pointer gets out of the way while the D-pad drives ---- */
 body.pad-mode, body.pad-mode * { cursor: none !important; }
@@ -743,7 +747,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   border-top: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
 }
 .ov-foot .legend-item > span { font-size: 19px; }
-.ov-foot .btn-badge { width: 34px; height: 34px; font-size: 17px; }
+.ov-foot .btn-icon { height: 34px; }
 .ov-sub { font-size: 17px; color: color-mix(in srgb, var(--ink) 40%, transparent); font-weight: 400; }
 .ov-row.danger { color: var(--danger); }
 
@@ -806,8 +810,8 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .playing-name { font-size: 40px; font-weight: 600; letter-spacing: -0.02em; }
 .playing-meta { font-size: 17px; letter-spacing: 0.14em; color: var(--accent); }
 .playing-hint { display: flex; align-items: center; gap: 12px; padding-top: 6px; }
-.playing-hint > span:not(.btn-badge) { font-size: 20px; color: color-mix(in srgb, var(--ink) 70%, transparent); margin-right: 14px; }
-.playing-hint .btn-badge { width: 34px; height: 34px; font-size: 17px; }
+.playing-hint > span:not(.btn-slot) { font-size: 20px; color: color-mix(in srgb, var(--ink) 70%, transparent); margin-right: 14px; }
+.playing-hint .btn-icon { height: 34px; }
 /* ---- Power Wheel (the radial) ---- */
 .radial-wrap {
   position: relative; width: 880px; height: 880px;
@@ -1013,12 +1017,11 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   font-size: 21px; font-weight: 600; cursor: pointer; white-space: nowrap;
   transition: background 160ms linear;
 }
-.dialog-btn .btn-badge { width: 36px; height: 36px; font-size: 18px; }
+.dialog-btn .btn-icon { height: 36px; }
 .dialog-yes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
 .dialog-yes:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
 .dialog.danger .dialog-yes { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 .dialog.danger .dialog-yes:hover { background: color-mix(in srgb, var(--danger) 26%, transparent); }
-.dialog.danger .dialog-yes .btn-a { background: var(--danger); }
 .dialog-no { color: color-mix(in srgb, var(--ink) 72%, transparent); }
 .dialog-no:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
 
@@ -1043,7 +1046,8 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   color: var(--ink); letter-spacing: 0;
 }
 .lib-search input::placeholder { color: color-mix(in srgb, var(--ink) 42%, transparent); }
-.lib-search-key { height: 34px; font-size: 14px; flex: 0 0 auto; opacity: 0.8; }
+.lib-search-key { flex: 0 0 auto; opacity: 0.85; }
+.lib-search-key .btn-icon { height: 32px; }
 .lib-search.has-query { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .lib-search.active {
   border-color: var(--accent); color: var(--accent);
