@@ -32,23 +32,35 @@
    legend's 72px and the hero absorbs all of it.
 
    Six columns across the 1760px between the gutters: (1760 - 5x28) / 6 = 270.
+
+   OPTIONS. theme.json declares five, and they arrive as --tv-cols, --tv-peek and --tv-slide on
+   the root and as data-theme-labels / data-theme-dim-art on <html>. Every fallback below is the
+   option's default, so the theme reads the same with or without them.
+
+   MOTION. Every duration here is multiplied by --motion, the app's animation setting, so "off"
+   and the speed slider reach this theme as well; a bare 460ms would ignore both.
    ============================================================================ */
 
 .tv {
-  --tile-w: 270px;
+  --cols: var(--tv-cols, 6);
+  /* The same sum for five, six or seven: the tiles plus the gaps always come to 1760, so a row
+     lands exactly on both gutters whichever count is chosen. */
+  --tile-w: calc((1760px - (var(--cols) - 1) * var(--gap)) / var(--cols));
   /* 1.75:1, which is Steam capsule_616x353 exactly rather than a rounded 16:9. Written as the
      division so the two can never drift apart: the whole point is that the box is the shape of
      the picture, so the picture fills it corner to corner with nothing trimmed and no mat. */
   --art-h: calc(var(--tile-w) / 1.745);
   --name-h: 26px;
   --gap: 28px;
-  --dock-h: 232px;    /* 22 + 155 art + 6 + 26 name + 22, rounded up */
-  --peek: 40px;       /* how much of the grid shows under the dock at rest */
+  /* Derived from the tile rather than a number, so a change of count moves the hero with it. */
+  --dock-h: calc(22px + var(--art-h) + 6px + var(--name-h) + 22px);   /* 231 at six across */
+  --peek: var(--tv-peek, 40px);       /* how much of the grid shows under the dock at rest */
   --view-h: 912px;    /* 1080 less the chrome and the legend */
   --hero-h: calc(var(--view-h) - var(--dock-h) - var(--peek));
   --gutter: 80px;
   --radius: 16px;
   --ease: cubic-bezier(0.22, 0.86, 0.24, 1);
+  --slide: calc(var(--tv-slide, 460ms) * var(--motion, 1));   /* the column's move, the one option about timing */
 
   height: 100%;
   display: flex;
@@ -86,20 +98,25 @@ body.no-legend .tv-foot { display: none; }
    middle 57% of it and nothing else, which is what "zoomed in" was. The bed is blurred, so its
    resolution does not matter; the part you actually look at is never scaled up.
 
-   --bd-image is written by setBackdrop alongside the art itself. */
-body:has(#screen-library.active) #backdrop::before {
+   --bd-image is written by setBackdrop alongside the art itself.
+
+   :is(.active, .closing, .under) rather than .active: the library loses .active the instant a
+   detail page or Settings opens and is .under for as long as one is up, and on .active alone the
+   sharp hero snapped to Classic's blurred wash the moment a page opened, then transitioned back
+   from it when the page closed -- the "background goes up and settles down" jump. */
+body:has(#screen-library:is(.active, .closing, .under)) #backdrop::before {
   content: "";
   position: absolute; inset: -8%;
   background-image: var(--bd-image, none);
   background-size: cover; background-position: center;
   filter: blur(64px) saturate(1.5) brightness(0.78);
-  opacity: 0; transition: opacity 320ms linear;
+  opacity: 0; transition: opacity calc(320ms * var(--motion, 1)) linear;
 }
-body:has(#screen-library.active) #backdrop.has-art::before { opacity: 1; }
+body:has(#screen-library:is(.active, .closing, .under)) #backdrop.has-art::before { opacity: 1; }
 /* Browsing, the bed is all that is left of the art, so it comes up as the sharp layer goes. */
-body:has(#screen-library.active[data-focus-region="grid"]) #backdrop.has-art::before { opacity: 0.85; }
+body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) #backdrop.has-art::before { opacity: 0.85; }
 
-body:has(#screen-library.active) .bd {
+body:has(#screen-library:is(.active, .closing, .under)) .bd {
   top: 0; left: 0; right: 0; bottom: auto;
   height: auto;
   aspect-ratio: var(--art-aspect, 3.1);
@@ -129,25 +146,34 @@ body:has(#screen-library.active) .bd {
      dissolve to happen in, so it starts higher than it did. */
   -webkit-mask-image: linear-gradient(180deg, #000 0, #000 34%, transparent 100%);
           mask-image: linear-gradient(180deg, #000 0, #000 34%, transparent 100%);
-  transition: opacity 300ms linear, filter 380ms var(--ease), transform 380ms var(--ease);
+  transition: opacity calc(300ms * var(--motion, 1)) linear,
+              filter calc(380ms * var(--motion, 1)) var(--ease),
+              transform calc(380ms * var(--motion, 1)) var(--ease);
 }
-body:has(#screen-library.active) .bd.visible { opacity: 1; }
+body:has(#screen-library:is(.active, .closing, .under)) .bd.visible { opacity: 1; }
 
 /* Browsing: the art recedes to a wash so 20-odd tiles are not competing with it.
    Scaled up rather than just blurred -- the element stops at 58% and blur would
    otherwise bleed a soft edge along the sides and top. */
-body:has(#screen-library.active[data-focus-region="grid"]) .bd {
+body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) .bd {
   filter: blur(28px) saturate(1.1) brightness(0.5);
   transform: scale(1.08);
 }
-body:has(#screen-library.active[data-focus-region="grid"]) .bd.visible { opacity: 0.8; }
+body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) .bd.visible { opacity: 0.8; }
+/* "Dim the art while browsing" off: the picture stays close to itself once the highlight is in the
+   grid -- softened a touch so the tiles still read against it, but neither darkened nor washed. */
+html[data-theme-dim-art="false"] body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) .bd {
+  filter: blur(8px) saturate(1.1) brightness(0.82);
+  transform: scale(1.04);
+}
+html[data-theme-dim-art="false"] body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) .bd.visible { opacity: 1; }
 
 /* Scrims: one under the chrome, one under the dock, one behind the title. Without
    these the readability of every label depends on what the art happens to be. */
-body:has(#screen-library.active) #backdrop::after {
+body:has(#screen-library:is(.active, .closing, .under)) #backdrop::after {
   content: "";
   position: absolute; inset: 0; pointer-events: none;
-  transition: background 380ms var(--ease);
+  transition: background calc(380ms * var(--motion, 1)) var(--ease);
   /* The bottom used to go fully opaque, because there was nothing behind it. There is now --
      the blurred bed reaches the whole screen -- so it only has to carry the dock and the title,
      not hide an empty half. */
@@ -156,10 +182,16 @@ body:has(#screen-library.active) #backdrop::after {
     linear-gradient(0deg, color-mix(in srgb, var(--bg) 84%, transparent) 0, color-mix(in srgb, var(--bg) 52%, transparent) 30%, transparent 62%),
     linear-gradient(90deg, color-mix(in srgb, var(--bg) 66%, transparent) 0, transparent 44%);
 }
-body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
+body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) #backdrop::after {
   background: linear-gradient(180deg,
     color-mix(in srgb, var(--bg) 90%, transparent),
     color-mix(in srgb, var(--bg) 82%, transparent));
+}
+/* With the art kept bright the scrim only has to hold the chrome and the dock, not hide a picture. */
+html[data-theme-dim-art="false"] body:has(#screen-library:is(.active, .closing, .under)[data-focus-region="grid"]) #backdrop::after {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--bg) 46%, transparent),
+    color-mix(in srgb, var(--bg) 58%, transparent));
 }
 
 /* ------------------------------------------------------------------ chrome --
@@ -181,7 +213,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
 .tv-stack {
   position: absolute; left: 0; right: 0; top: 0;
   transform: translateY(0);
-  transition: transform 460ms var(--ease);
+  transition: transform var(--slide) var(--ease);
   will-change: transform;
 }
 #screen-library[data-focus-region="grid"] .tv-stack {
@@ -196,7 +228,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   height: var(--hero-h);
   display: flex; flex-direction: column; justify-content: flex-end;
   gap: 26px; padding: 0 var(--gutter) 34px;
-  transition: opacity 300ms linear;
+  transition: opacity calc(300ms * var(--motion, 1)) linear;
 }
 #screen-library[data-focus-region="grid"] .tv-hero { opacity: 0; }
 
@@ -244,7 +276,8 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   background: color-mix(in srgb, var(--edge) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--edge) 9%, transparent);
   backdrop-filter: blur(26px) saturate(1.5);
-  transition: background 380ms var(--ease), border-color 380ms var(--ease);
+  transition: background calc(380ms * var(--motion, 1)) var(--ease),
+              border-color calc(380ms * var(--motion, 1)) var(--ease);
 }
 /* Once the art is gone the tray has nothing to sit against, so it has to carry its own edge --
    otherwise the recents read as just another grid row. */
@@ -270,7 +303,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
    down rather than as a second row competing with the art. */
 .tv-shelf {
   height: calc(var(--view-h) - var(--dock-h)); padding: 0 var(--gutter);
-  opacity: 0.5; transition: opacity 340ms var(--ease);
+  opacity: 0.5; transition: opacity calc(340ms * var(--motion, 1)) var(--ease);
 }
 #screen-library[data-focus-region="grid"] .tv-shelf { opacity: 1; }
 .tv-shelf .lib-section { gap: 0; height: 100%; }
@@ -278,7 +311,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
 
 .tv-shelf .grid-scroll {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(var(--cols), 1fr);
   gap: 30px var(--gap);
   align-content: start;
   /* Room for the focus lift, pulled back out so the columns still measure 1760. */
@@ -323,7 +356,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
 .tv-tile {
   display: flex; flex-direction: column; gap: 6px;
   transform-origin: center center;
-  transition: transform 220ms var(--ease);
+  transition: transform calc(220ms * var(--motion, 1)) var(--ease);
 }
 .tv-tile.focused { transform: scale(1.12); z-index: 6; }
 
@@ -334,7 +367,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--bg-deep) 90%, transparent);
-  transition: box-shadow 220ms var(--ease);
+  transition: box-shadow calc(220ms * var(--motion, 1)) var(--ease);
 }
 /* contain, not cover.
    Tile art has the game name burnt into it, usually running close to the edges, so cropping it
@@ -390,7 +423,7 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   font-size: 12px; letter-spacing: 0.14em;
   color: color-mix(in srgb, var(--ink) 70%, transparent);
   background: linear-gradient(0deg, color-mix(in srgb, var(--bg-deep) 88%, transparent), transparent);
-  opacity: 0; transition: opacity 180ms linear;
+  opacity: 0; transition: opacity calc(180ms * var(--motion, 1)) linear;
 }
 .tv-tile.focused .tv-off { opacity: 1; }
 .tv-tile.uninstalled .tv-img { filter: grayscale(0.65) brightness(0.6); }
@@ -400,9 +433,12 @@ body:has(#screen-library.active[data-focus-region="grid"]) #backdrop::after {
   height: var(--name-h); width: var(--tile-w);
   font-size: 19px; font-weight: 500; letter-spacing: -0.01em; line-height: var(--name-h);
   text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  opacity: 0; transition: opacity 180ms linear;
+  opacity: 0; transition: opacity calc(180ms * var(--motion, 1)) linear;
 }
 .tv-tile.focused .tv-name { opacity: 1; }
+/* "Always show titles": every tile keeps its name, a step quieter than the focused one's. */
+html[data-theme-labels="true"] .tv-name { opacity: 0.72; }
+html[data-theme-labels="true"] .tv-tile.focused .tv-name { opacity: 1; }
 
 /* Focus: a lift, an accent edge and a shadow deep enough to separate the tile from
    whatever art is behind it. */

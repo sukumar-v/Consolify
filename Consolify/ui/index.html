@@ -144,23 +144,28 @@
     </div>
   </div>
 
-  <!-- ============ SETTINGS ============ -->
+  <!-- ============ SETTINGS ============
+       A box over the library rather than a screen of its own: the library stays drawn behind it,
+       blurred, so Settings reads as something you opened rather than somewhere you went. -->
   <div class="screen" id="screen-settings" data-focus-scope>
-    <header class="topbar">
-      <div class="topbar-left" data-tabbar="settings"></div>
-      <div class="topbar-right mono">
-        <span class="clock">—</span>
+    <div class="settings-box">
+      <header class="topbar">
+        <div class="settings-title">Settings</div>
+        <div class="topbar-left" data-tabbar="settings"></div>
+        <div class="topbar-right mono">
+          <span class="clock">—</span>
+        </div>
+      </header>
+
+      <div class="settings-body">
+        <!-- Categories, so one screen is not a wall of every setting at once. Driven by LB/RB and
+             by clicking; the rows to the right are only ever the active category. -->
+        <nav class="settings-nav" id="settingsNav"></nav>
+        <div class="settings-scroll" id="settingsScroll"></div>
       </div>
-    </header>
 
-    <div class="settings-body">
-      <!-- Categories, so one screen is not a wall of every setting at once. Driven by LB/RB and
-           by clicking; the rows to the right are only ever the active category. -->
-      <nav class="settings-nav" id="settingsNav"></nav>
-      <div class="settings-scroll" id="settingsScroll"></div>
+      <footer class="legend" id="settingsFoot"></footer>
     </div>
-
-    <footer class="legend" id="settingsFoot"></footer>
   </div>
 
   <!-- ============ FILTER & SORT ============ -->

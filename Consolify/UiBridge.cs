@@ -1094,6 +1094,9 @@ public class UiBridge
         if (SettingsStore.IsHexColor(s.AccentColor)) t.AccentColor = s.AccentColor.ToUpperInvariant();
         t.Theme = s.Theme ?? "";
         t.HideLegend = s.HideLegend;
+        t.AnimationsEnabled = s.AnimationsEnabled;
+        t.AnimationSpeed = Math.Clamp(s.AnimationSpeed, 0.5, 2.0);
+        t.ThemeSettings = ThemeService.CleanSettingValues(s.ThemeSettings);
         t.IgdbClientId = s.IgdbClientId.Trim();
         t.IgdbClientSecret = s.IgdbClientSecret.Trim();
         t.SteamGridDbKey = s.SteamGridDbKey.Trim();

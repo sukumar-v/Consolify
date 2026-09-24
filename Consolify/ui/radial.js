@@ -55,7 +55,7 @@ function closeAllMenus() {
   manageOpen = false; confirmState = null; guideOpen = false;
   ["overlay-filter", "overlay-gamemenu", "overlay-collect",
    "overlay-manage", "overlay-confirm", "overlay-guide"]
-    .forEach(id => $(id).classList.remove("active"));
+    .forEach(hideOverlay);
 }
 
 /* ============================== radial ============================== */
@@ -66,13 +66,13 @@ function openRadial(targetTitle) {
   setOverlayMode(true);
   closeAllMenus();
   renderRadial();
-  $("overlay-radial").classList.add("active");
+  showOverlay("overlay-radial");
 }
 
 function closeRadial(refocus) {
   radialOpen = false; radialSub = null;
-  $("overlay-radial").classList.remove("active");
-  $("overlay-radialsub").classList.remove("active");
+  hideOverlay("overlay-radial");
+  hideOverlay("overlay-radialsub");
   setOverlayMode(false);
   send({ cmd: "closeOverlay", refocus: refocus !== false });
 }
@@ -98,22 +98,35 @@ function mouseInGameDesc() {
 
 function renderRadial() {
   const ring = $("radialRing");
-  ring.innerHTML = "";
   const R = 310, cx = 440, cy = 440;
+  // Built once and updated in place from then on. The spokes carry the wheel's opening animation
+  // (see .radial-item in app.css), and rebuilding them on every move would replay it each step.
+  if (ring.children.length !== RADIAL_ITEMS.length) {
+    ring.innerHTML = "";
+    RADIAL_ITEMS.forEach((it, i) => {
+      const ang = (-90 + i * (360 / RADIAL_ITEMS.length)) * Math.PI / 180;
+      const el = document.createElement("div");
+      el.style.left = (cx + R * Math.cos(ang)) + "px";
+      el.style.top = (cy + R * Math.sin(ang)) + "px";
+      // For the bloom: its turn in the sequence, and the way back to the centre it starts from.
+      el.style.setProperty("--i", i);
+      el.style.setProperty("--dx", (-R * 0.55 * Math.cos(ang)).toFixed(1) + "px");
+      el.style.setProperty("--dy", (-R * 0.55 * Math.sin(ang)).toFixed(1) + "px");
+      el.addEventListener("mouseenter", () => {
+        if (hoverEnabled() && radialIdx !== i) { radialIdx = i; renderRadial(); }
+      });
+      el.addEventListener("click", () => { radialIdx = i; radialActivate(); });
+      ring.appendChild(el);
+    });
+  }
   RADIAL_ITEMS.forEach((it, i) => {
-    const ang = (-90 + i * (360 / RADIAL_ITEMS.length)) * Math.PI / 180;
-    const el = document.createElement("div");
+    const el = ring.children[i];
     el.className = "radial-item"
       + (i === radialIdx && focusVisible() ? " focused" : "")
       + (it.danger ? " danger" : "");
-    el.style.left = (cx + R * Math.cos(ang)) + "px";
-    el.style.top = (cy + R * Math.sin(ang)) + "px";
-    el.innerHTML = iconSvg(radialIcon(it)) + "<span>" + esc(radialLabel(it)) + "</span>";
-    el.addEventListener("mouseenter", () => {
-      if (hoverEnabled() && radialIdx !== i) { radialIdx = i; renderRadial(); }
-    });
-    el.addEventListener("click", () => { radialIdx = i; radialActivate(); });
-    ring.appendChild(el);
+    // Only the mouse-in-game spoke ever changes what it says; the rest are written once.
+    const html = iconSvg(radialIcon(it)) + "<span>" + esc(radialLabel(it)) + "</span>";
+    if (el.__html !== html) { el.innerHTML = html; el.__html = html; }
   });
   const sel = RADIAL_ITEMS[radialIdx];
   $("radialSelName").textContent = radialLabel(sel);
@@ -142,8 +155,8 @@ function radialActivate() {
       // host re-centres the pointer and closes the overlay; do not refocus the old window
       send({ cmd: "centerMouse" });
       radialOpen = false; radialSub = null;
-      $("overlay-radial").classList.remove("active");
-      $("overlay-radialsub").classList.remove("active");
+      hideOverlay("overlay-radial");
+      hideOverlay("overlay-radialsub");
       setOverlayMode(false);
       setInputMode("pointer");    // tells the host too, so its copy stays in step
       break;
@@ -189,7 +202,7 @@ function openRadialSub(kind) {
   // Shown before it is filled. renderMenu paints the highlight onto whichever row is focusable,
   // and nothing inside a hidden overlay is: rendering first left the first row unhighlighted
   // until something moved.
-  $("overlay-radialsub").classList.add("active");
+  showOverlay("overlay-radialsub");
   if (kind === "windows") send({ cmd: "listWindows" });
   renderRadialSub();
 }
@@ -210,7 +223,7 @@ function radialSubInput(btn) {
     case "Up": radialSubIdx = Math.max(0, radialSubIdx - 1); renderRadialSub(); break;
     case "Down": radialSubIdx = Math.min(items.length - 1, radialSubIdx + 1); renderRadialSub(); break;
     case "A": if (focusVisible() && items[radialSubIdx]) items[radialSubIdx].action(); break;
-    case "B": radialSub = null; $("overlay-radialsub").classList.remove("active"); renderRadial(); break;
+    case "B": radialSub = null; hideOverlay("overlay-radialsub"); renderRadial(); break;
   }
 }
 
@@ -221,12 +234,12 @@ function openIngame() {
   setOverlayMode(true);
   closeAllMenus();
   renderIngame();
-  $("overlay-ingame").classList.add("active");
+  showOverlay("overlay-ingame");
 }
 
 function hideIngame() {
   ingameOpen = false;
-  $("overlay-ingame").classList.remove("active");
+  hideOverlay("overlay-ingame");
   setOverlayMode(false);
 }
 
@@ -287,7 +300,7 @@ function ingameInput(btn) {
 function dismissOverlays() {
   radialOpen = false; radialSub = null; ingameOpen = false;
   ["overlay-radial", "overlay-radialsub", "overlay-ingame"]
-    .forEach(id => $(id).classList.remove("active"));
+    .forEach(hideOverlay);
   closeAllMenus();
   setOverlayMode(false);
 }

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Consolify.Models;
 
 public class AppSettings
@@ -15,6 +17,21 @@ public class AppSettings
     /// <summary>Hide the button-hint bar along the bottom of every screen. Off by default: it is
     /// the only thing telling a new player what A and Y do, so it is opt-out, not opt-in.</summary>
     public bool HideLegend { get; set; }
+    /// <summary>Screens, menus and the Power Wheel move into place rather than appearing. Off
+    /// makes every change instant: the page does it with one CSS multiplier (--motion), so
+    /// nothing here has to know which animation is which.</summary>
+    public bool AnimationsEnabled { get; set; } = true;
+    /// <summary>Multiplier on the speed of every animation, 0.5 .. 2.0. 1.0 is the design's own timing.</summary>
+    public double AnimationSpeed { get; set; } = 1.0;
+    /// <summary>
+    /// The themes' own options, keyed by theme id and then by option id: the values behind the
+    /// rows a theme declares in its theme.json (see the README's Themes section). Kept here rather
+    /// than in the theme's folder so updating a bundled theme, which replaces the folder, keeps
+    /// them, and per theme so switching away and back finds them as they were. Only the page reads
+    /// them, as CSS, and it checks each value against the theme's definition first; the host keeps
+    /// them to plain values (ThemeService.CleanSettingValues) and nothing more.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, JsonElement>> ThemeSettings { get; set; } = new();
 
     // Metadata providers
     // Nothing here needs setting. Steam games are keyed by app id, non-Steam games are looked up

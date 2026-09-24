@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Consolify.Services;
 
@@ -22,6 +23,14 @@ public class ThemeInfo
     public string? Html { get; set; }
     /// <summary>Tokens applied on top of the stylesheet, e.g. {"--accent": "#0FF"}.</summary>
     public Dictionary<string, string>? Tokens { get; set; }
+    /// <summary>
+    /// The options the theme declares for itself -- the rows under Settings → Appearance that
+    /// belong to this theme alone. Passed to the page exactly as written: the page is what turns
+    /// them into rows and into CSS, so it is the page that checks them (themeSettingDefs in
+    /// app.js), and a bad entry costs that one row rather than the manifest. The shape is
+    /// documented in the README's Themes section.
+    /// </summary>
+    public JsonElement? Settings { get; set; }
     /// <summary>Set when the manifest could not be read; the theme still loads, badly named.</summary>
     public string? Error { get; set; }
 }
@@ -90,6 +99,7 @@ public class ThemeService : IDisposable
                             info.Version = parsed.Version;
                             info.Description = parsed.Description;
                             info.Tokens = parsed.Tokens;
+                            info.Settings = parsed.Settings;
                         }
                     }
                     catch (Exception ex)
@@ -187,6 +197,45 @@ public class ThemeService : IDisposable
             Log.Info($"Syncing bundled themes failed: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// An option id as theme.json may declare one and as the page checks it: a letter, then
+    /// letters, digits and hyphens, 32 at most.
+    /// </summary>
+    private static readonly Regex OptionId = new("^[a-z][a-z0-9-]{0,31}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Keep what the page sent for the themes' own options to what an option can be -- a bool, a
+    /// number or a short string, under an id shaped like one theme.json may declare, for a theme
+    /// id shaped like a folder name -- and drop the rest. The page checks every value against
+    /// the theme's definition when it applies it; this only stops settings.json from carrying
+    /// arbitrary JSON that a page happened to send.
+    /// </summary>
+    public static Dictionary<string, Dictionary<string, JsonElement>> CleanSettingValues(
+        Dictionary<string, Dictionary<string, JsonElement>>? values)
+    {
+        var clean = new Dictionary<string, Dictionary<string, JsonElement>>();
+        if (values is null) return clean;
+        foreach (var (themeId, options) in values)
+        {
+            if (options is null || !IsThemeId(themeId)) continue;
+            var kept = new Dictionary<string, JsonElement>();
+            foreach (var (id, v) in options)
+            {
+                if (!OptionId.IsMatch(id)) continue;
+                var ok = v.ValueKind is JsonValueKind.True or JsonValueKind.False or JsonValueKind.Number
+                      || (v.ValueKind == JsonValueKind.String && v.GetString()!.Length <= 64);
+                if (ok) kept[id] = v.Clone();
+            }
+            if (kept.Count > 0) clean[themeId] = kept;
+        }
+        return clean;
+    }
+
+    /// <summary>A folder name List() would accept, which is what a theme id is; "" is Classic.</summary>
+    private static bool IsThemeId(string id) =>
+        id.Length <= 64 && !id.StartsWith('.') && !id.Contains("..")
+        && !id.Any(c => c is '/' or '\\' or '?' or '#' or ':');
 
     /// <summary>The version string from a theme folder's manifest, or null if it has none.</summary>
     private static string? VersionOf(string dir)

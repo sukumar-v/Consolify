@@ -108,7 +108,7 @@ function askDeleteCollection(c) {
     onYes: () => { send({ cmd: "deleteCollection", id: c.id }); toast(`${c.name} deleted`); },
   };
   confirmIdx = 0;
-  $("overlay-confirm").classList.add("active");
+  showOverlay("overlay-confirm");
   renderConfirm();
 }
 
@@ -667,7 +667,8 @@ function updateFocusDetail(g) {
 /** The game the highlight is on, straight off the element. */
 function focusedGame() {
   if (view === "detail") return gameById(detailGameId);
-  const el = focusEl();
+  // Settings sits over the library, so the picture behind it stays the library's own.
+  const el = focusEl(view === "settings" ? document.getElementById("screen-library") : undefined);
   return el && el.dataset.gameId ? gameById(el.dataset.gameId) : null;
 }
 
@@ -747,7 +748,7 @@ function applyTheme() {
   applyThemeSheet();
   // A class rather than a per-screen render, because every screen has its own legend and a
   // theme may have moved it somewhere of its own.
-  document.body.classList.toggle("no-legend", !!(S.settings && S.settings.hideLegend));
+  document.body.classList.toggle("no-legend", lookHideHints());
   // Fire and forget: the markup arrives a tick later and re-renders then, so the
   // colours are not held up waiting on a file read.
   applyThemeMarkup().then(changed => { if (changed) rerenderAll(); });
@@ -767,12 +768,180 @@ function applyTheme() {
     appliedTokens[name] = value;
   }
 
-  const hex = S.settings && S.settings.accentColor;
+  const hex = lookAccent();
   const ok = isHexColor(hex);
+  // The theme's own options go on before the accent, so a theme cannot offer one that takes
+  // the accent away from the user; and the motion multiplier last, because it is not a colour.
+  applyThemeSettings(theme);
   root.setProperty("--accent", ok ? hex : "");
   // 0.5 rather than WCAG's 0.179 contrast crossover: the ink is off-white and the deep is
   // near-black, so both are legible over a mid-tone and the eye prefers dark ink there.
   root.setProperty("--on-accent", ok && luminance(hex) < 0.5 ? "var(--ink)" : "");
+  applyMotion();
+}
+
+/* ---- the look, per theme ----
+   The accent, the hints and the animation settings belong to the theme in use, not to the app:
+   a warm accent on one theme, animations off on another. They live in the same per-theme bag as
+   the theme's own options (settings.themeSettings[themeId]) under ids no theme may declare, and
+   what a theme has not set falls back to the app-wide fields in settings.json -- which is where a
+   value from before this lived, so an accent chosen last year still shows. "Restore <theme>'s
+   defaults" empties that one bag and nothing else. */
+const LOOK_IDS = { accent: "accent", hideHints: "hide-hints", animations: "animations", speed: "animation-speed" };
+const RESERVED_IDS = new Set(Object.values(LOOK_IDS));
+
+/** The current theme's bag of values, made on demand when `create` is set. Classic's id is "". */
+function lookBag(create) {
+  const s = S.settings;
+  if (!s) return null;
+  const id = s.theme || "";
+  if (!s.themeSettings || typeof s.themeSettings !== "object") { if (!create) return null; s.themeSettings = {}; }
+  if (!s.themeSettings[id]) { if (!create) return null; s.themeSettings[id] = {}; }
+  return s.themeSettings[id];
+}
+function lookGet(id) { const b = lookBag(false); return b ? b[id] : undefined; }
+function lookSet(id, v) { lookBag(true)[id] = v; }
+
+function lookAccent() {
+  const v = lookGet(LOOK_IDS.accent), s = S.settings;
+  return isHexColor(v) ? v.toUpperCase() : s && isHexColor(s.accentColor) ? s.accentColor.toUpperCase() : DEFAULT_ACCENT;
+}
+function lookHideHints() {
+  const v = lookGet(LOOK_IDS.hideHints);
+  return typeof v === "boolean" ? v : !!(S.settings && S.settings.hideLegend);
+}
+function lookAnimations() {
+  const v = lookGet(LOOK_IDS.animations);
+  return typeof v === "boolean" ? v : !(S.settings && S.settings.animationsEnabled === false);
+}
+function lookSpeed() {
+  const v = lookGet(LOOK_IDS.speed), s = S.settings;
+  const speed = typeof v === "number" && isFinite(v) ? v
+    : s && typeof s.animationSpeed === "number" && isFinite(s.animationSpeed) ? s.animationSpeed : 1;
+  return Math.max(0.5, Math.min(2, speed));
+}
+
+/* ---- animation ----
+   One number on the root, --motion, that every duration in app.css (and a well-behaved theme.css)
+   is multiplied by. 1 is the design's own timing; the speed slider divides it, so 2× is half the
+   time; off writes 0, which makes every transition and animation instant without a single rule
+   having to check. The body class is for the few things a zero cannot switch off -- an infinite
+   pulse just sits on a frame at 0s. */
+function motionScale() {
+  return lookAnimations() ? 1 / lookSpeed() : 0;
+}
+
+function applyMotion() {
+  const scale = motionScale();
+  document.documentElement.style.setProperty("--motion", String(scale));
+  document.body.classList.toggle("no-motion", scale === 0);
+}
+
+/* ---- a theme's own options ----
+   theme.json may declare settings, and they belong to that theme alone: the values are kept
+   under its id (settings.themeSettings[themeId][optionId]) and reach the page only as CSS. Each
+   one is written to the root as the custom property named by its `token`, and as a
+   data-theme-<id> attribute on <html> -- so a theme, which cannot run script, keys its rules off
+   either: `.tv { --tile-w: var(--tv-tile, 270px) }`, or
+   `html[data-theme-labels="true"] .tv-name { opacity: 1 }`. The README's Themes section is the
+   author's side of this.
+
+   Definitions are checked here rather than trusted. A theme is a folder anyone can edit, and a
+   bad entry should cost that one row, not the Appearance screen. */
+const THEME_SETTING_TYPES = new Set(["toggle", "select", "slider"]);
+const THEME_SETTING_ID = /^[a-z][a-z0-9-]{0,31}$/;
+
+/** A JSON value as a string, if it is the kind of thing that has one. */
+function plainString(v) {
+  return typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : null;
+}
+function stringMap(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) { const s = plainString(v); if (s !== null) out[k] = s; }
+  return out;
+}
+
+function themeSettingDefs(theme) {
+  const list = theme && Array.isArray(theme.settings) ? theme.settings : [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const id = String(raw.id || "").toLowerCase();
+    if (!THEME_SETTING_ID.test(id) || seen.has(id) || RESERVED_IDS.has(id)) continue;
+    const type = String(raw.type || "").toLowerCase();
+    if (!THEME_SETTING_TYPES.has(type)) continue;
+    const d = {
+      id, type,
+      name: plainString(raw.name) || id,
+      hint: typeof raw.hint === "string" ? raw.hint : null,
+      token: typeof raw.token === "string" && /^--[A-Za-z0-9_-]+$/.test(raw.token) ? raw.token : null,
+      unit: typeof raw.unit === "string" ? raw.unit.slice(0, 8) : "",
+      values: stringMap(raw.values),
+    };
+    if (type === "select") {
+      d.options = (Array.isArray(raw.options) ? raw.options : []).map(plainString).filter(o => o).slice(0, 24);
+      if (d.options.length < 2) continue;
+      d.labels = stringMap(raw.labels);
+      const def = plainString(raw.default);
+      d.default = d.options.includes(def) ? def : d.options[0];
+    } else if (type === "slider") {
+      const num = (v, f) => (typeof v === "number" && isFinite(v) ? v : f);
+      d.min = num(raw.min, 0); d.max = num(raw.max, 100); d.step = num(raw.step, 1);
+      if (!(d.max > d.min) || !(d.step > 0)) continue;
+      d.default = Math.max(d.min, Math.min(d.max, num(raw.default, d.min)));
+      d.decimals = (String(d.step).split(".")[1] || "").length;
+    } else {
+      d.default = raw.default === true;
+    }
+    seen.add(id);
+    out.push(d);
+  }
+  return out;
+}
+
+/** The value in force for one of a theme's options: the saved one when it is valid, else the default. */
+function themeSettingValue(theme, d) {
+  const bag = S.settings && S.settings.themeSettings && S.settings.themeSettings[theme.id];
+  const v = bag ? bag[d.id] : undefined;
+  if (d.type === "toggle") return typeof v === "boolean" ? v : d.default;
+  if (d.type === "select") return d.options.includes(v) ? v : d.default;
+  return typeof v === "number" && isFinite(v) ? Math.max(d.min, Math.min(d.max, v)) : d.default;
+}
+
+/** What the value becomes in the stylesheet: the theme's own mapping when it gives one, else the value. */
+function themeSettingCss(d, v) {
+  const key = String(v);
+  if (d.values && typeof d.values[key] === "string") return d.values[key];
+  if (d.type === "toggle") return v ? "1" : "0";
+  if (d.type === "slider") return v + d.unit;
+  return key;
+}
+
+function fmtThemeValue(d, v) {
+  return v.toFixed(d.decimals || 0) + (d.unit ? " " + d.unit : "");
+}
+
+/* What the current theme's options put on the root, so a change of theme takes them off again. */
+let appliedThemeSettings = { tokens: [], attrs: [] };
+
+function applyThemeSettings(theme) {
+  const root = document.documentElement;
+  appliedThemeSettings.tokens.forEach(t => root.style.removeProperty(t));
+  appliedThemeSettings.attrs.forEach(a => root.removeAttribute(a));
+  appliedThemeSettings = { tokens: [], attrs: [] };
+  if (!theme) return;
+  for (const d of themeSettingDefs(theme)) {
+    const v = themeSettingValue(theme, d);
+    const attr = "data-theme-" + d.id;
+    root.setAttribute(attr, String(v));
+    appliedThemeSettings.attrs.push(attr);
+    if (d.token) {
+      root.style.setProperty(d.token, themeSettingCss(d, v));
+      appliedThemeSettings.tokens.push(d.token);
+    }
+  }
 }
 
 /* Tokens this theme set, so switching themes can take them off again -- otherwise a token
@@ -1033,6 +1202,63 @@ let gridRows = [];
 /* ============================== helpers ============================== */
 
 const $ = (id) => document.getElementById(id);
+
+/* ============================== motion ==============================
+ *
+ * Every screen and overlay has two classes: .active means it owns input, .closing means it is
+ * only still being drawn while its exit animation runs. The split is what keeps an animation from
+ * changing behaviour: Nav.activeScope only ever looks at .active, so the D-pad moves to whatever is
+ * underneath the moment a menu is dismissed, not after its fade, and a click cannot land on a
+ * card that is on its way out. The stylesheet holds the animations; this only sets the classes
+ * and takes .closing off again when the exit has run.
+ *
+ * How long that is comes from the stylesheet itself -- the longest animation on the element or
+ * its direct children, delay included -- so a theme that lengthens a card's exit is not cut off
+ * by the wash's, and with animations off (every duration 0) the class comes off at once, in the
+ * same call, so nothing is ever left mid-state for a timer to clean up.
+ */
+function motionMs(el) {
+  const time = (v) => { v = v.trim(); return (v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000) || 0; };
+  let ms = 0;
+  for (const node of [el, ...el.children]) {
+    const cs = getComputedStyle(node);
+    const delays = cs.animationDelay.split(",");
+    cs.animationDuration.split(",").forEach((d, i) => { ms = Math.max(ms, time(d) + time(delays[i] ?? delays[0])); });
+  }
+  return ms;
+}
+
+function motionEnter(el) {
+  if (!el) return;
+  clearTimeout(el.__leave);
+  el.__leave = null;
+  el.classList.remove("closing");
+  el.classList.add("active");
+}
+
+function motionLeave(el) {
+  // Not active means already gone, or already going: putting .closing on a hidden element would
+  // flash it up just to fade it.
+  if (!el || !el.classList.contains("active")) return;
+  el.classList.remove("active");
+  el.classList.add("closing");
+  const done = () => { el.__leave = null; el.classList.remove("closing"); };
+  const ms = motionMs(el);
+  if (ms <= 0) { done(); return; }
+  clearTimeout(el.__leave);
+  el.__leave = setTimeout(done, ms + 30);
+}
+
+function showOverlay(id) { motionEnter($(id)); }
+function hideOverlay(id) { motionLeave($(id)); }
+
+/** Replay a one-shot animation class on an element whose content has just been replaced. */
+function pulse(el, cls = "swap") {
+  if (!el) return;
+  el.classList.remove(cls);
+  void el.offsetWidth;   // a reflow between the remove and the add, or the browser sees no change
+  el.classList.add(cls);
+}
 // esc() lives in glyphs.js: the drawings escape their labels with it, and the browse window's
 // bar loads only that file.
 
@@ -1946,8 +2172,12 @@ function renderLibrary() {
     track.appendChild(item);
   });
 
-  // Grid
+  // Grid. Emptying a scroller snaps its scrollTop to 0, and this runs on every state push -- the
+  // end of a scan, the end of a metadata pass, a favourite toggled -- so mid-browse the rows
+  // jumped down to the top and the reveal glided them back up to the highlight. Hold the position
+  // across the rebuild; revealFocus moves it from there only if it has to.
   const scroll = $("gridScroll");
+  const keepTop = scroll.scrollTop;
   scroll.innerHTML = "";
   if (total === 0) {
     const note = document.createElement("div");
@@ -1974,6 +2204,7 @@ function renderLibrary() {
     });
     scroll.appendChild(rowDiv);
   });
+  scroll.scrollTop = keepTop;
 
   clampFocus();
   updateLibraryFocus();
@@ -2079,7 +2310,7 @@ function launchGame(g) {
       onYes: () => { toast(`Closing ${running ? running.title : "the game"}…`); send({ cmd: "launch", id: g.id, replace: true }); },
     };
     confirmIdx = 0;
-    $("overlay-confirm").classList.add("active");
+    showOverlay("overlay-confirm");
     renderConfirm();
     return;
   }
@@ -2118,7 +2349,7 @@ function offerInstall(g) {
     onYes: () => send({ cmd: "install", id: g.id }),
   };
   confirmIdx = 0;
-  $("overlay-confirm").classList.add("active");
+  showOverlay("overlay-confirm");
   renderConfirm();
 }
 
@@ -2385,7 +2616,6 @@ function renderDetail() {
   });
 
   updateDetailFocus();
-  setBackdrop(null);
 }
 
 const DETAIL_BTNS = ["play", "collect", "manage"];
@@ -2431,7 +2661,9 @@ function allSettingsRows() {
   };
 
   const rows = [];
-  rows.push({ section: "APPEARANCE", cat: "general" });
+  // Appearance, all of it per theme: the theme, then its look, its motion, and last the options
+  // it declares for itself with the row that puts it all back.
+  rows.push({ section: "THEME", cat: "appearance" });
   const themes = S.themes && S.themes.length ? S.themes : [{ id: "", name: "Classic" }];
   const theme = themes.find(t => t.id === (s.theme || "")) || themes[0];
   rows.push(cycleRow("Theme", themes.map(t => t.id), () => (s.theme || ""), v => set(() => s.theme = v),
@@ -2447,9 +2679,18 @@ function allSettingsRows() {
     type: "action", label: "Open",
     action: () => send({ cmd: "openThemesFolder" }),
   });
-  rows.push(accentRow(s, set));
+  rows.push({ section: "LOOK", cat: "appearance" });
+  rows.push(accentRow(set));
   rows.push(toggleRow("Hide the button hints", "Drops the bar along the bottom of every screen. The buttons still do the same things",
-    () => !!s.hideLegend, v => set(() => s.hideLegend = v)));
+    () => lookHideHints(), v => set(() => lookSet(LOOK_IDS.hideHints, v))));
+  rows.push({ section: "ANIMATION", cat: "appearance" });
+  rows.push(toggleRow("Animations", "Screens, menus and the Power Wheel move into place rather than appearing. Off makes every change instant",
+    () => lookAnimations(), v => set(() => lookSet(LOOK_IDS.animations, v))));
+  if (lookAnimations())
+    rows.push(sliderRow("Animation speed", () => lookSpeed(), 0.5, 2.0, 0.25,
+      v => set(() => lookSet(LOOK_IDS.speed, v)), v => v.toFixed(2) + "×",
+      "Higher is quicker. 1× is the launcher's own timing, and a theme's own animations scale with it too"));
+  rows.push(...themeSettingRows(theme, s, set));
 
   rows.push({ section: "DISPLAY", cat: "general" });
   rows.push({
@@ -2723,7 +2964,7 @@ function allSettingsRows() {
   rows.push({
     name: "Couch setup guide", hint: "Gamepad keyboard layout, PIN sign-in, controller wake, auto-start",
     type: "action", label: "Open guide",
-    action: () => { guideOpen = true; $("overlay-guide").classList.add("active"); },
+    action: () => { guideOpen = true; showOverlay("overlay-guide"); },
   });
   rows.push({
     name: "Restore default settings",
@@ -2738,7 +2979,7 @@ function allSettingsRows() {
         onYes: () => send({ cmd: "resetSettings" }),
       };
       confirmIdx = 0;
-      $("overlay-confirm").classList.add("active");
+      showOverlay("overlay-confirm");
       renderConfirm();
     },
   });
@@ -2749,6 +2990,40 @@ function allSettingsRows() {
   return rows;
 }
 
+
+/* The theme's own rows and the way back, as the last block of Appearance. The options the theme
+   declares, read and written through the validated definitions (see themeSettingDefs), then a
+   restore that puts THIS theme's look, animation and options back -- every other theme keeps its
+   own. The block is there for a theme with no options of its own too: the restore still has the
+   look and the animation to restore. */
+function themeSettingRows(theme, s, set) {
+  const defs = theme ? themeSettingDefs(theme) : [];
+  const name = theme && theme.name ? theme.name : "Classic";
+  const rows = [{ section: `${name.toUpperCase()} OPTIONS`, cat: "appearance" }];
+  const put = (d, v) => set(() => { lookBag(true)[d.id] = v; });
+  for (const d of defs) {
+    const cur = () => themeSettingValue(theme, d);
+    if (d.type === "toggle") rows.push(toggleRow(d.name, d.hint, cur, v => put(d, v)));
+    else if (d.type === "select") rows.push(cycleRow(d.name, d.options, cur, v => put(d, v), d.hint, null, d.labels));
+    else rows.push(sliderRow(d.name, cur, d.min, d.max, d.step, v => put(d, v), v => fmtThemeValue(d, v), d.hint));
+  }
+  const bag = lookBag(false);
+  const touched = !!bag && Object.keys(bag).length > 0;
+  rows.push({
+    name: `Restore ${name}'s defaults`,
+    hint: (defs.length
+      ? `${name}'s colour, hints, animation and the options above all go back to how a fresh install has them`
+      : `${name}'s colour, hints and animation go back to how a fresh install has them`)
+      + ". Every other theme keeps its own",
+    type: "action", label: "Restore",
+    action: () => {
+      if (!touched) { toast(`${name} is already at its defaults`); return; }
+      set(() => { if (s.themeSettings) delete s.themeSettings[s.theme || ""]; });
+      toast(`${name}'s defaults restored`);
+    },
+  });
+  return rows;
+}
 
 /*
  * A credential. Shown masked because these rows sit on a TV, which is the one screen in the house
@@ -2812,7 +3087,7 @@ function askSignOut(store, name) {
     onYes: () => send({ cmd: "storeSignOut", store }),
   };
   confirmIdx = 0;
-  $("overlay-confirm").classList.add("active");
+  showOverlay("overlay-confirm");
   renderConfirm();
 }
 
@@ -2874,8 +3149,8 @@ function buttonRow(name, options, get, setV, hint, warn) {
    A hand-typed colour joins the strip as an extra stop on the end rather than snapping to the
    nearest preset, and cycling off it drops it again -- so the strip only ever shows colours you
    can actually land on, and there is no dead stop to press through. */
-function accentRow(s, set) {
-  const cur = () => (isHexColor(s.accentColor) ? s.accentColor.toUpperCase() : DEFAULT_ACCENT);
+function accentRow(set) {
+  const cur = () => lookAccent();
   const custom = () => !ACCENTS.some(a => a.hex === cur());
   const stops = () => (custom() ? [...ACCENTS.map(a => a.hex), cur()] : ACCENTS.map(a => a.hex));
 
@@ -2889,11 +3164,11 @@ function accentRow(s, set) {
     custom: custom(),
     adjust: (dir) => set(() => {
       const list = stops();
-      s.accentColor = list[(list.indexOf(cur()) + dir + list.length) % list.length];
+      lookSet(LOOK_IDS.accent, list[(list.indexOf(cur()) + dir + list.length) % list.length]);
     }),
     action: () => openInput("Accent colour (hex, e.g. #F0A253)", cur(), (v) => {
       const hex = v.startsWith("#") ? v : "#" + v;
-      if (isHexColor(hex)) set(() => s.accentColor = hex.toUpperCase());
+      if (isHexColor(hex)) set(() => lookSet(LOOK_IDS.accent, hex.toUpperCase()));
       else toast("Enter a colour as #RRGGBB");
     }),
   };
@@ -2911,10 +3186,11 @@ const KEYBOARD_APP_LABELS = {
    bound: they used to move between Library, Collections and Settings, and with one screen left
    there is nothing for them to do -- so the legend does not offer them either. */
 const SETTINGS_TABS = [
-  { id: "general",  label: "General" },
-  { id: "input",    label: "Controller" },
-  { id: "keyboard", label: "Keyboard" },
-  { id: "library",  label: "Library" },
+  { id: "general",    label: "General" },
+  { id: "appearance", label: "Appearance" },
+  { id: "input",      label: "Controller" },
+  { id: "keyboard",   label: "Keyboard" },
+  { id: "library",    label: "Library" },
 ];
 let settingsTab = "general";
 /* Which half of the screen has the highlight. Settings opens on the sidebar, so the first thing
@@ -2931,8 +3207,11 @@ function settingsRows() {
 }
 
 function setSettingsTab(id) {
-  if (settingsTab !== id) { settingsTab = id; settingsIdx = 0; }
+  const changed = settingsTab !== id;
+  if (changed) { settingsTab = id; settingsIdx = 0; }
   renderSettings();
+  // Only when the rows are a different category's, never on the re-render every move costs.
+  if (changed) pulse($("settingsScroll"));
 }
 
 function settingsTabIdx() {
@@ -2961,24 +3240,32 @@ function renderSettingsNav() {
     counts[cat] = (counts[cat] || 0) + 1;
   });
 
-  nav.innerHTML = "";
-  SETTINGS_TABS.forEach(t => {
-    const el = document.createElement("div");
-    el.className = "set-tab" + (t.id === settingsTab ? " active" : "");
-    el.dataset.focusable = "";
-    el.dataset.focusKey = "settab:" + t.id;
-    el.dataset.settingsTab = t.id;
-    el.innerHTML = `<span>${esc(t.label)}</span><span class="set-tab-count">${counts[t.id] || 0}</span>`;
-    el.addEventListener("click", () => { setFocusEl(el); setSettingsTab(t.id); });
-    el.addEventListener("mouseenter", () => {
-      if (!hoverEnabled()) return;
-      // Repaint the highlight; do NOT rebuild the list. renderSettings() replaces every tab node,
-      // and a node destroyed between mousedown and mouseup never raises a click -- which is why
-      // the categories could not be clicked at all. The option rows already guard against this.
-      setFocusEl(el);
-      paintNav();
+  // Built once; from then on only the active mark and the counts change, so the tab's own
+  // transition runs and a node is never destroyed under a click.
+  if (nav.children.length !== SETTINGS_TABS.length) {
+    nav.innerHTML = "";
+    SETTINGS_TABS.forEach(t => {
+      const el = document.createElement("div");
+      el.className = "set-tab";
+      el.dataset.focusable = "";
+      el.dataset.focusKey = "settab:" + t.id;
+      el.dataset.settingsTab = t.id;
+      el.innerHTML = `<span>${esc(t.label)}</span><span class="set-tab-count"></span>`;
+      el.addEventListener("click", () => { setFocusEl(el); setSettingsTab(t.id); });
+      el.addEventListener("mouseenter", () => {
+        if (!hoverEnabled()) return;
+        // Repaint the highlight only: a node destroyed between mousedown and mouseup never raises
+        // a click, which is why the categories once could not be clicked at all.
+        setFocusEl(el);
+        paintNav();
+      });
+      nav.appendChild(el);
     });
-    nav.appendChild(el);
+  }
+  SETTINGS_TABS.forEach((t, i) => {
+    const el = nav.children[i];
+    el.classList.toggle("active", t.id === settingsTab);
+    el.querySelector(".set-tab-count").textContent = counts[t.id] || 0;
   });
 }
 
@@ -2994,71 +3281,38 @@ function renderSettings() {
     : foot(["A", "Select"], ["B", "Categories"], ["DpadH", "Adjust"]);
   const rows = settingsRows();
   const scroll = $("settingsScroll");
-  scroll.innerHTML = "";
 
   const focusables = rows.filter(r => !r.section);
   settingsIdx = Math.max(0, Math.min(settingsIdx, focusables.length - 1));
+
+  /* Updated in place. The list used to be emptied and rebuilt on every highlight move, and
+     emptying a scroller snaps its scrollTop to 0 -- so each step started a glide from the top back
+     down to the row, which read as the list jittering under the D-pad. Now the elements stay
+     unless the shape of the list changes (a different category, a toggle revealing a sub-row): a
+     move only flips a class, the scroller is never touched, and the row's own focus transition
+     gets to run. A rebuild keeps the scroll position, as renderMenu does. */
+  const nodes = [];
   let fi = -1;
-
   rows.forEach(r => {
-    if (r.section) {
-      const el = document.createElement("div");
-      el.className = "set-section";
-      el.textContent = r.section;
-      scroll.appendChild(el);
-      return;
-    }
+    if (r.section) { nodes.push({ section: r.section }); return; }
     fi++;
-    const idx = fi;
-    const el = document.createElement("div");
-    el.className = "set-row";
-    el.dataset.focusable = "";
-    el.dataset.focusKey = "setrow:" + settingsTab + ":" + idx;
-    el.dataset.rowIndex = idx;
+    nodes.push({ row: r, idx: fi, html: settingsRowHtml(r) });
+  });
+  const shape = settingsTab + "|" + nodes.map(n => n.section !== undefined ? "s:" + n.section : "r").join("|");
+  if (scroll.__shape !== shape) {
+    const keepTop = scroll.scrollTop;
+    scroll.innerHTML = "";
+    nodes.forEach(n => scroll.appendChild(n.section !== undefined ? settingsSectionEl(n.section) : settingsRowEl(n.idx)));
+    scroll.scrollTop = keepTop;
+    scroll.__shape = shape;
+  }
+  nodes.forEach((n, i) => {
+    if (n.section !== undefined) return;
+    const el = scroll.children[i];
+    el.dataset.focusKey = "setrow:" + settingsTab + ":" + n.idx;
     // Left/Right adjust the value here instead of moving; settingsInput reads this.
-    if (r.adjust) el.dataset.navLock = "horizontal";
-
-    // The arrows carry a direction, so a mouse can step a value either way (see the click below).
-    const left = `<span class="arrow" data-dir="-1">◂</span>`, rightArrow = `<span class="arrow" data-dir="1">▸</span>`;
-    let right = "";
-    if (r.type === "toggle") {
-      right = r.value
-        ? `${left}<span class="set-toggle-on">ON</span>${rightArrow}`
-        : `${left}<span class="set-toggle-off">OFF</span>${rightArrow}`;
-    } else if (r.type === "select") {
-      right = `${left}<span>${r.valueHtml || esc(r.value)}</span>${rightArrow}`;
-    } else if (r.type === "swatch") {
-      // The presets are shown as dots, the selected one ringed, with a trailing dot for a custom
-      // colour so the strip reads as the row's full range rather than a value plus a mystery.
-      const dot = (hex, on) =>
-        `<span class="swatch${on ? " on" : ""}" style="background:${esc(hex)}"></span>`;
-      const dots = r.swatches.map(hex => dot(hex, hex === r.value)).join("")
-        + (r.custom ? dot(r.value, true) : "");
-      right = `${left}<span class="swatch-strip">${dots}</span>`
-        + `<span class="swatch-name">${esc(r.label)}</span>${rightArrow}`;
-    } else if (r.type === "slider") {
-      const pct = ((r.value - r.min) / (r.max - r.min)) * 100;
-      right = `<div class="slider">${left}<div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div>${rightArrow}<span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
-    } else if (r.type === "action") {
-      right = `<span class="set-action-label${r.danger ? " danger" : ""}">${esc(r.label)}</span>`;
-    }
-
-    el.innerHTML = `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${hintHtml(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${hintHtml(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
-
-    el.addEventListener("mouseenter", () => {
-      if (!hoverEnabled()) return;
-      if (settingsIdx === idx && settingsPane === "rows") return;
-      settingsIdx = idx; settingsPane = "rows"; renderSettings();
-    });
-    el.addEventListener("click", (e) => {
-      settingsIdx = idx; settingsPane = "rows";
-      const row = settingsRows().filter(x => !x.section)[idx];
-      // On an arrow, step that way; anywhere else on the row is the same as pressing A.
-      const arrow = e.target instanceof Element ? e.target.closest(".arrow") : null;
-      if (arrow && row.adjust) { row.adjust(parseInt(arrow.dataset.dir, 10) || 1); return; }
-      if (row.action) row.action(); else if (row.adjust) row.adjust(1);
-    });
-    scroll.appendChild(el);
+    if (n.row.adjust) el.dataset.navLock = "horizontal"; else delete el.dataset.navLock;
+    if (el.__html !== n.html) { el.innerHTML = n.html; el.__html = n.html; }
   });
 
   // Keep the highlight on the row the caller has selected, then let the engine paint.
@@ -3068,6 +3322,66 @@ function renderSettings() {
   paintNav();
   const cur = focusEl(scope);
   if (cur && focusVisible()) revealFocus(cur);
+}
+
+function settingsSectionEl(text) {
+  const el = document.createElement("div");
+  el.className = "set-section";
+  el.textContent = text;
+  return el;
+}
+
+/* A row's frame and its handlers, made once per shape. The handlers go by index and read the row
+   afresh, so they stay right while the row's content is updated under them. */
+function settingsRowEl(idx) {
+  const el = document.createElement("div");
+  el.className = "set-row";
+  el.dataset.focusable = "";
+  el.dataset.rowIndex = idx;
+  el.addEventListener("mouseenter", () => {
+    if (!hoverEnabled()) return;
+    if (settingsIdx === idx && settingsPane === "rows") return;
+    settingsIdx = idx; settingsPane = "rows"; renderSettings();
+  });
+  el.addEventListener("click", (e) => {
+    settingsIdx = idx; settingsPane = "rows";
+    const row = settingsRows().filter(x => !x.section)[idx];
+    if (!row) return;
+    // On an arrow, step that way; anywhere else on the row is the same as pressing A.
+    const arrow = e.target instanceof Element ? e.target.closest(".arrow") : null;
+    if (arrow && row.adjust) { row.adjust(parseInt(arrow.dataset.dir, 10) || 1); return; }
+    if (row.action) row.action(); else if (row.adjust) row.adjust(1);
+  });
+  return el;
+}
+
+/** What a row shows: its name and hint on the left, its value or its action on the right. */
+function settingsRowHtml(r) {
+  // The arrows carry a direction, so a mouse can step a value either way (see settingsRowEl).
+  const left = `<span class="arrow" data-dir="-1">◂</span>`, rightArrow = `<span class="arrow" data-dir="1">▸</span>`;
+  let right = "";
+  if (r.type === "toggle") {
+    right = r.value
+      ? `${left}<span class="set-toggle-on">ON</span>${rightArrow}`
+      : `${left}<span class="set-toggle-off">OFF</span>${rightArrow}`;
+  } else if (r.type === "select") {
+    right = `${left}<span>${r.valueHtml || esc(r.value)}</span>${rightArrow}`;
+  } else if (r.type === "swatch") {
+    // The presets are shown as dots, the selected one ringed, with a trailing dot for a custom
+    // colour so the strip reads as the row's full range rather than a value plus a mystery.
+    const dot = (hex, on) =>
+      `<span class="swatch${on ? " on" : ""}" style="background:${esc(hex)}"></span>`;
+    const dots = r.swatches.map(hex => dot(hex, hex === r.value)).join("")
+      + (r.custom ? dot(r.value, true) : "");
+    right = `${left}<span class="swatch-strip">${dots}</span>`
+      + `<span class="swatch-name">${esc(r.label)}</span>${rightArrow}`;
+  } else if (r.type === "slider") {
+    const pct = ((r.value - r.min) / (r.max - r.min)) * 100;
+    right = `<div class="slider">${left}<div class="slider-track"><div class="slider-fill" style="width:${pct}%"></div></div>${rightArrow}<span class="slider-val">${esc(r.fmt(r.value))}</span></div>`;
+  } else if (r.type === "action") {
+    right = `<span class="set-action-label${r.danger ? " danger" : ""}">${esc(r.label)}</span>`;
+  }
+  return `<div class="set-left"><div class="set-name">${esc(r.name)}</div>${r.hint ? `<div class="set-hint">${hintHtml(r.hint)}</div>` : ""}${r.warn ? `<div class="set-warn">${hintHtml(r.warn)}</div>` : ""}</div><div class="set-value">${right}</div>`;
 }
 
 /* Settings keeps its two panes, but they are now just two groups of focusables in one
@@ -3141,17 +3455,19 @@ function applyFilter() {
   focus = { zone: "grid", row: 0, col: 0 };
   renderLibrary();
   renderFilter();
+  // The grid behind the menu is a new list now, and rising in says so.
+  pulse($("gridScroll"));
 }
 
 function openFilter() {
   filterOpen = true; filterIdx = 0; filterLevel = null;
-  $("overlay-filter").classList.add("active");
+  showOverlay("overlay-filter");
   renderFilter();
 }
 
 function closeFilter() {
   filterOpen = false; filterLevel = null;
-  $("overlay-filter").classList.remove("active");
+  hideOverlay("overlay-filter");
 }
 
 /** Rows of the top-level Filter / Sort menu. */
@@ -3282,13 +3598,13 @@ let gameMenu = null;   // { gameId, from, idx }
 
 function openGameMenu(gameId, from) {
   gameMenu = { gameId, from, idx: 0 };
-  $("overlay-gamemenu").classList.add("active");
+  showOverlay("overlay-gamemenu");
   renderGameMenu();
 }
 
 function closeGameMenu() {
   gameMenu = null;
-  $("overlay-gamemenu").classList.remove("active");
+  hideOverlay("overlay-gamemenu");
 }
 
 function gameMenuItems() {
@@ -3395,10 +3711,10 @@ function collectItems() {
 function openCollect(gameId) {
   collectTarget = gameId || detailGameId;
   collectOpen = true; collectIdx = 0;
-  $("overlay-collect").classList.add("active");
+  showOverlay("overlay-collect");
   renderCollect();
 }
-function closeCollect() { collectOpen = false; $("overlay-collect").classList.remove("active"); }
+function closeCollect() { collectOpen = false; hideOverlay("overlay-collect"); }
 
 function renderCollect() {
   const items = collectItems();
@@ -3538,10 +3854,10 @@ function manageItems() {
 
 function openManage() {
   manageOpen = true; manageIdx = 0;
-  $("overlay-manage").classList.add("active");
+  showOverlay("overlay-manage");
   renderManage();
 }
-function closeManage() { manageOpen = false; $("overlay-manage").classList.remove("active"); }
+function closeManage() { manageOpen = false; hideOverlay("overlay-manage"); }
 
 function renderManage() {
   const items = manageItems();
@@ -3578,12 +3894,12 @@ function canHaveMods(g) { return !!g && g.installed && !g.emulated; }
 
 function openMods(gameId) {
   modsState = { gameId, idx: 0, view: null, busy: "Talking to Vortex…" };
-  $("overlay-mods").classList.add("active");
+  showOverlay("overlay-mods");
   renderMods();
   send({ cmd: "modsOpen", id: gameId });
 }
 
-function closeMods() { modsState = null; $("overlay-mods").classList.remove("active"); }
+function closeMods() { modsState = null; hideOverlay("overlay-mods"); }
 
 /* Ask the host for something and say so on screen until its answer replaces the list. */
 function modsAsk(cmd, extra, busy) {
@@ -3784,7 +4100,7 @@ function askRemoveMod(m) {
     onYes: () => modsAsk("modsRemove", { modId: m.id }, `Removing ${m.name}…`),
   };
   confirmIdx = 0;
-  $("overlay-confirm").classList.add("active");
+  showOverlay("overlay-confirm");
   renderConfirm();
 }
 
@@ -3821,11 +4137,11 @@ let choiceState = null;   // { title, items, idx, onBack }
 function openChoice(title, items, opts = {}) {
   const idx = Math.max(0, items.findIndex(i => !i.cat && i.checked));
   choiceState = { title, items, idx, onBack: opts.onBack || null };
-  $("overlay-choice").classList.add("active");
+  showOverlay("overlay-choice");
   renderChoice();
 }
 
-function closeChoice() { choiceState = null; $("overlay-choice").classList.remove("active"); }
+function closeChoice() { choiceState = null; hideOverlay("overlay-choice"); }
 
 function renderChoice() {
   if (!choiceState) return;
@@ -3978,7 +4294,7 @@ function openRomFolderOptions(f) {
         onYes: () => send({ cmd: "romFolderRemove", id: f.id }),
       };
       confirmIdx = 0;
-      $("overlay-confirm").classList.add("active");
+      showOverlay("overlay-confirm");
       renderConfirm();
     },
   });
@@ -4004,7 +4320,7 @@ function openEmulatorOptions(e) {
           onYes: () => send({ cmd: "emuRemove", id: e.id }),
         };
         confirmIdx = 0;
-        $("overlay-confirm").classList.add("active");
+        showOverlay("overlay-confirm");
         renderConfirm();
       } },
   ];
@@ -4037,7 +4353,7 @@ function renderConfirm() {
 function confirmChoose(yes) {
   const st = confirmState;
   confirmState = null;
-  $("overlay-confirm").classList.remove("active");
+  hideOverlay("overlay-confirm");
   if (yes && st) st.onYes();
 }
 
@@ -4063,7 +4379,7 @@ function openInput(title, value, onConfirm) {
   $("inputTitle").textContent = title;
   const field = $("inputField");
   field.value = value;
-  $("overlay-input").classList.add("active");
+  showOverlay("overlay-input");
   send({ cmd: "focusPage" });   // see openSearch: no keystrokes reach the page without it
   setTimeout(() => { field.focus(); field.select(); }, 50);
   setTimeout(() => { if (document.activeElement !== field) { field.focus(); field.select(); } }, 250);
@@ -4075,7 +4391,7 @@ function closeInput(confirmed) {
   const value = $("inputField").value.trim();
   inputOpen = false;
   inputConfirm = null;
-  $("overlay-input").classList.remove("active");
+  hideOverlay("overlay-input");
   $("inputField").blur();
   send({ cmd: "hideKeyboard" });
   if (confirmed && cb) cb(value);
@@ -4215,7 +4531,7 @@ function guideInput(btn) {
   switch (btn) {
     case "Up": animateScroll(body, "y", scrollTarget(body, "y") - 160); break;
     case "Down": animateScroll(body, "y", scrollTarget(body, "y") + 160); break;
-    case "B": case "A": guideOpen = false; $("overlay-guide").classList.remove("active"); break;
+    case "B": case "A": guideOpen = false; hideOverlay("overlay-guide"); break;
   }
 }
 
@@ -4254,14 +4570,31 @@ function stickToSpoke(x, y, count) {
 
 /* ============================== view switching ============================== */
 
+/* The library is the home screen and the other two sit over it: the detail page as an opaque
+   sheet, Settings as a box with the library blurred around it. The library is never taken down
+   for either -- it stays drawn and unreachable as .under -- so its backdrop is never rebuilt, and
+   the picture behind a game's page is the picture it left, in the same place, when the page goes.
+   Coming back to it is no entrance at all (data-motion="none"): it was never away. */
 function switchView(v) {
+  const prev = view;
   view = v;
-  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
-  $("screen-" + v).classList.add("active");
+  document.body.dataset.view = v;   // what the stylesheet blurs under Settings hangs off this
+  const next = $("screen-" + v);
+  if (prev !== v) {
+    document.querySelectorAll(".screen").forEach(s => {
+      if (s === next) return;
+      if (s.id === "screen-library" && s.classList.contains("active")) { s.classList.remove("active"); s.classList.add("under"); }
+      else motionLeave(s);
+    });
+    if (v === "library") next.dataset.motion = "none"; else delete next.dataset.motion;
+    next.classList.remove("under");
+  }
+  // Already up (boot, or Home from the in-game menu while the library is showing) just stays up.
+  motionEnter(next);
   if (v === "library") { clampFocus(); updateLibraryFocus(); }
   if (v === "detail") renderDetail();
   // Always land on the categories, never mid-list in whatever was open last time.
-  if (v === "settings") { settingsPane = "nav"; settingsIdx = 0; renderSettings(); setBackdrop(null); }
+  if (v === "settings") { settingsPane = "nav"; settingsIdx = 0; renderSettings(); }
 }
 
 
@@ -4748,6 +5081,7 @@ function mockHandle(msg) {
         keyboardToggleButton: "Start", keyboardToggleHoldMs: 600,
         keyboardApp: "Builtin", keyboardScale: 1.0, keyRepeatDelayMs: 350, keyRepeatIntervalMs: 90,
         accentColor: "#F0A253", theme: "",
+        animationsEnabled: true, animationSpeed: 1.0, themeSettings: {},
       },
       displays: [
         { deviceName: "\\\\.\\DISPLAY1", friendlyName: "Dell U2723QE", x: 0, y: 0, width: 3840, height: 2160, isPrimary: true },
@@ -4759,6 +5093,18 @@ function mockHandle(msg) {
 
   if (msg.cmd === "ready") {
     setTimeout(pushState, 60);
+    // The bundled theme, read off the same server, so the preview's Appearance screen has a theme
+    // with options to show and Polish can be switched to. The server's root is Consolify/, which
+    // is what makes /themes/polish/… reachable at all; a server rooted anywhere else just leaves
+    // the list at Classic.
+    fetch("/themes/polish/theme.json").then(r => (r.ok ? r.json() : null)).then(t => {
+      if (!t || typeof t !== "object") return;
+      const v = Date.now();
+      handleHostMessage({ type: "themes", themes: [
+        { id: "", name: "Classic" },
+        { ...t, id: "polish", css: `/themes/polish/theme.css?v=${v}`, html: `/themes/polish/theme.html?v=${v}` },
+      ] });
+    }).catch(() => {});
     setTimeout(() => { handleHostMessage({ type: "padConnected", connected: true }); handleHostMessage({ type: "battery", present: true, percent: 62, charging: false, level: 2 }); }, 700);
   } else if (msg.cmd === "launch") {
     toast("(preview) would launch " + msg.id);

@@ -971,3 +971,66 @@ Stop the scrolled grid from clipping through the All games header
   `FindRomFolders` with empty lists, nothing saved). It asserts what this PC has -- RetroArch at
   `C:\RetroArch-Win64`, PCSX2 at `C:\PCSX2`, a GBA and a DS playlist -- so it will need its
   expectations changed on another machine.
+
+## Motion, and a theme's own options
+
+- Every duration in `app.css` is `calc(<base> * var(--motion))` through the `--t-*` tokens on
+  `:root`. `applyMotion` writes `--motion` from the Animations toggle and speed slider (1/speed, 0
+  for off) plus `body.no-motion` for the one thing 0 cannot stop, the Play button's infinite pulse.
+  A literal `180ms` anywhere in app.css or a bundled theme is a bug: it ignores the setting.
+- Screens and overlays have a two-class lifecycle: `.active` owns input, `.closing` is only still
+  drawn while the exit runs (`motionEnter` / `motionLeave`, `showOverlay` / `hideOverlay`).
+  `Nav.activeScope` looks at `.active` only, so a closing menu never takes the D-pad. How long
+  `.closing` stays is read off the computed animation of the element and its direct children, delay
+  included, so a theme that lengthens an exit is not cut off, and at 0 the class comes off in the
+  same call. `hideOverlay` on something not active is a no-op: adding `.closing` to a hidden
+  overlay would flash it up to fade it.
+- Entrances are `from`-only keyframes with `backwards` fill. A `to { transform: none }` held by
+  `forwards` overrides the element's own `.focused` scale for good; letting the animation end on
+  whatever the element's style says is what stops anything snapping. Exits name their end state
+  and hold it.
+- Anything rebuilt on every highlight move (menu rows, in-game tiles) must not carry an entrance
+  animation, or every step replays it. `renderRadial` builds its spokes once and updates them in
+  place for exactly this reason; `--i`, `--dx`, `--dy` on each spoke are the stagger and the way
+  back to the centre.
+- **The library never leaves.** `switchView` marks it `.under` (drawn, `pointer-events: none`) while
+  the detail page or Settings is up, and brings it back with `data-motion="none"` so it gets no
+  entrance. That is what keeps the backdrop still across a game's page: `renderDetail` no longer
+  clears it, `focusedGame` under Settings answers with the library's own highlight, and Polish keys
+  its backdrop rules on `#screen-library:is(.active, .closing, .under)`. On `.active` alone the
+  sharp hero snapped to Classic's blurred wash the moment a page opened and transitioned back from
+  it on return -- "the background goes up and settles back down".
+- Settings is a box (`.settings-box`) over the blurred library: `body[data-view="settings"]` blurs
+  `#screen-library` and `#backdrop`, transitioned. The detail page is an opaque sheet that fades
+  with no scale, because its art sits exactly where the library's backdrop hangs the same picture.
+- `renderSettings` and `renderSettingsNav` update in place and only rebuild when the list's shape
+  changes (`__shape`). Emptying the scroller on every move snapped scrollTop to 0 and the reveal
+  then glided back down from the top each step -- the "jittery" settings rows. A rebuild keeps
+  scrollTop, like renderMenu, and so does `renderLibrary` now: a state push mid-browse (end of a
+  scan or a metadata pass, a favourite toggled) used to drop the grid to the top and glide it back.
+  **Any function that empties a scroller has to put scrollTop back before it returns.**
+- The dock "pulled down and back" in Polish could not be reproduced with the D-pad in the
+  windowed build (three and five rows, slow and fast, frames captured every 35 ms): the stack
+  slides once and settles. If it comes back, ask whether it is the right stick or the D-pad and
+  whether the grid was scrolled; `data-focus-region` on `#screen-library` is the only thing that
+  moves the dock, so log its changes first.
+- Accent, hints and the animation settings are per theme: the same bag as the theme's own options,
+  under reserved ids (`LOOK_IDS`: accent, hide-hints, animations, animation-speed) that
+  `themeSettingDefs` refuses. `AppSettings.AccentColor/HideLegend/AnimationsEnabled/AnimationSpeed`
+  are only the fallback a theme with nothing set reads -- which is what keeps a pre-existing accent
+  -- and "Restore <theme>'s defaults" deletes that theme's bag and nothing else.
+- A theme's options (`settings` in theme.json) are stored in `AppSettings.ThemeSettings` keyed by
+  theme id, validated on the page (`themeSettingDefs`; a bad entry drops that one row), and reach
+  CSS as the option's `token` on the root and `data-theme-<id>` on `<html>`. The host only cleans
+  the values (`ThemeService.CleanSettingValues`: bool, number or short string under a well-formed
+  id) -- it never models the definitions, which is why `ThemeInfo.Settings` is a `JsonElement`.
+  Three places have to know a new app-level appearance setting: `AppSettings`, `CopySettings` and
+  the mock's settings object; a theme option needs none of them.
+- The preview fetches `/themes/polish/theme.json` off the same server and pushes a `themes`
+  message, so Polish and its rows are in the mock without the hand-pushed message the note under
+  "Verifying changes" describes. The mock still starts on Classic.
+- Polish's grid is `repeat(var(--cols), 1fr)` with `--tile-w` derived from the count and the dock
+  height derived from the tile, so the column-count option moves the hero with it. Its own
+  transitions multiply by `var(--motion, 1)`; the dock slide's base is the `--tv-slide` option.
+- Bumped Polish to 3.5 for this. Anything that changes a bundled theme has to bump it or nobody
+  gets the change (see `SyncBuiltIn` above).

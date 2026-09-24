@@ -22,6 +22,24 @@
   --danger: #E97A6C;      /* destructive actions only */
   --accent: #F0A253;      /* focus rings, active tabs, sliders — the one the user picks */
   --on-accent: var(--bg-deep);  /* text sitting on an accent fill; flipped for a dark accent */
+
+  /* ---- motion ----
+     Every duration in this file is a base time multiplied by --motion, so one number scales the
+     whole UI: Settings → Appearance writes it (1 at the default speed, 0.5 at 2×, 0 when
+     animations are off), and a theme retunes a single kind of motion by redefining its --t-*
+     token -- keeping the multiplier in the calc, so the user's speed still applies to it.
+     0 is what makes "off" instant: a 0ms transition never runs and a 0ms animation lands on its
+     last frame at once, so nothing has to check the setting. */
+  --motion: 1;
+  --ease: cubic-bezier(0.2, 0.9, 0.2, 1);       /* the design's own: quick start, soft landing */
+  --ease-in: cubic-bezier(0.5, 0, 0.85, 0.35);  /* the reverse, for things on their way out */
+  --t-focus: calc(180ms * var(--motion));       /* the highlight moving, a row lighting up */
+  --t-fade: calc(240ms * var(--motion));        /* colour and opacity: the backdrop, a toast */
+  --t-menu: calc(220ms * var(--motion));        /* a menu, dialog or the power wheel opening */
+  --t-menu-out: calc(150ms * var(--motion));    /* ...and closing. Quicker: you asked for it to go */
+  --t-screen: calc(300ms * var(--motion));      /* one screen giving way to another */
+  --t-screen-out: calc(220ms * var(--motion));
+  --t-slide: calc(260ms * var(--motion));       /* a list or carousel sliding to follow the highlight */
 }
 
 * { box-sizing: border-box; user-select: none; -webkit-user-drag: none; }
@@ -60,15 +78,45 @@ html, body {
   position: absolute; inset: -80px;
   background-size: cover; background-position: center;
   filter: blur(64px); opacity: 0;
-  transition: opacity 240ms linear;
+  transition: opacity var(--t-fade) linear;
 }
 .bd.visible { opacity: 0.22; }
 .bd.detail-mode { filter: none; inset: 0; }
 .bd.detail-mode.visible { opacity: 1; }
 
-/* ---- screens ---- */
+/* ---- screens ----
+   The library is the home screen and the other two sit over it: the detail page as an opaque
+   sheet, Settings as a box with the library blurred around it. Three states: `.active` owns the
+   D-pad; `.closing` is on its way out, still drawn for the length of its exit but no longer
+   active, so Nav.activeScope never hands it the highlight and a click cannot land on it; `.under`
+   is the library while something is over it -- drawn, unreachable, never taken down. That last one
+   is what keeps the picture behind a game's page the same picture in the same place: the library's
+   backdrop is never rebuilt, so there is nothing to fade back in when the page closes.
+
+   The library's own entrance (boot, or coming back from an overlay menu) is a touch of depth;
+   everything over it fades, and it comes back from under them with no entrance at all
+   (data-motion="none"), because it was never away. */
 .screen { position: absolute; inset: 0; display: none; flex-direction: column; }
-.screen.active { display: flex; }
+.screen.active, .screen.closing, .screen.under { display: flex; }
+.screen.active { animation: screenIn var(--t-screen) var(--ease) backwards; }
+.screen.active[data-motion="none"] { animation: none; }
+.screen.closing { animation: fadeOut var(--t-screen-out) linear forwards; pointer-events: none; }
+.screen.under { pointer-events: none; }
+/* `from` only, never a `to`: the end of every entrance is whatever the element's own style says,
+   so nothing snaps when the animation lets go -- a tile that is focused ends at its focused scale,
+   not at 1 and then a jump. The exits do name their end state, and hold it (forwards) until the
+   class comes off. */
+@keyframes screenIn { from { opacity: 0; transform: scale(0.985); } }
+@keyframes fadeIn  { from { opacity: 0; } }
+@keyframes fadeOut { to   { opacity: 0; } }
+@keyframes riseIn  { from { opacity: 0; transform: translateY(18px); } }
+
+/* Under Settings the library and the art behind it soften, so the box reads as a box and what
+   is around it still reads as the library. Transitioned rather than snapped: the box arrives over
+   a blur that is forming. body[data-view] is written by switchView. */
+#screen-library, #backdrop { transition: filter var(--t-screen) var(--ease); }
+body[data-view="settings"] #screen-library,
+body[data-view="settings"] #backdrop { filter: blur(22px) saturate(0.85) brightness(0.7); }
 
 /* ---- top bar ---- */
 .topbar {
@@ -76,7 +124,7 @@ html, body {
   padding: 56px 80px 0; flex: 0 0 auto;
 }
 .topbar-left { display: flex; align-items: baseline; gap: 40px; }
-.tab { font-size: 24px; color: color-mix(in srgb, var(--ink) 42%, transparent); transition: color 180ms linear, font-size 180ms linear; }
+.tab { font-size: 24px; color: color-mix(in srgb, var(--ink) 42%, transparent); transition: color var(--t-focus) linear, font-size var(--t-focus) linear; }
 .tab.tab-active { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
 .tab.focused { color: var(--accent); }
 .topbar-right {
@@ -112,7 +160,7 @@ html, body {
 }
 .batt-fill {
   display: block; height: 100%; border-radius: 1px; background: currentColor;
-  transition: width 300ms linear;
+  transition: width calc(300ms * var(--motion)) linear;
 }
 /* No min-width: reserving room for "100%" left trailing space after a short number, widening
    the gap to the next item. The readout is the leftmost thing in a right-anchored row, so a
@@ -137,14 +185,14 @@ html, body {
 .continue-row { overflow: visible; padding: 16px 12px 0; margin: -16px -12px 0; }
 .continue-track {
   display: flex; gap: 28px;
-  transition: transform 260ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  transition: transform var(--t-slide) var(--ease);
   will-change: transform;
 }
 .cont-item {
   position: relative;
   display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto;
   transform-origin: center bottom;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  transition: transform var(--t-focus) var(--ease);
 }
 .cont-item.focused { transform: scale(1.05); z-index: 3; }
 .cont-art {
@@ -154,12 +202,12 @@ html, body {
   position: relative; width: 300px; height: 172px; border-radius: 14px;
   overflow: hidden; background-color: var(--surface);
   background-size: cover; background-position: center;
-  transition: opacity 200ms linear;
+  transition: opacity var(--t-fade) linear;
 }
 .zone-dim .cont-art { opacity: 0.55; }
 .cont-meta {
   display: flex; flex-direction: column; gap: 3px; min-height: 50px;
-  transition: opacity 180ms linear;
+  transition: opacity var(--t-focus) linear;
 }
 .zone-dim .cont-meta { opacity: 0.5; }
 .cont-title { font-size: 21px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
@@ -199,7 +247,7 @@ html, body {
   position: relative; width: 174px; height: 261px; border-radius: 14px;
   overflow: hidden; flex: 0 0 auto; background-color: var(--surface);
   transform-origin: center bottom;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), opacity 200ms linear;
+  transition: transform var(--t-focus) var(--ease), opacity var(--t-fade) linear;
 }
 .grid-item.focused {
   transform: scale(1.05); z-index: 3;
@@ -338,6 +386,16 @@ body.no-legend .legend { display: none; }
 
 /* ---- detail screen ---- */
 #screen-detail { background: var(--bg); }
+/* A plain fade, no depth: the page is opaque and its art sits exactly where the library's backdrop
+   hangs the same picture, so a fade is the one transition under which the picture holds still. */
+#screen-detail.active { animation-name: fadeIn; }
+/* The column settles in a beat behind the screen itself: crumb and store first, then the title
+   block, the numbers and the buttons each a step later. Keyed on .active so it runs when the page
+   is entered and not again on the state pushes that repaint it while it is up. */
+#screen-detail.active .detail-top { animation: fadeIn var(--t-screen) linear backwards; }
+#screen-detail.active .detail-main > * { animation: riseIn var(--t-screen) var(--ease) backwards; }
+#screen-detail.active .detail-main > :nth-child(2) { animation-delay: calc(50ms * var(--motion)); }
+#screen-detail.active .detail-main > :nth-child(3) { animation-delay: calc(100ms * var(--motion)); }
 /* The hero hangs in a band at its own aspect rather than being stretched over the whole screen,
    the same treatment the library uses. Steam's hero is 3.1:1, so a band 58% of the height shows
    the whole width at close to 1:1 -- covering the full screen with it instead meant cropping
@@ -476,13 +534,16 @@ body.no-legend .legend { display: none; }
 .pill-btn {
   display: flex; align-items: center; height: 62px; border-radius: 31px;
   flex: 0 0 auto; white-space: nowrap;
-  transition: box-shadow 180ms linear, border-color 180ms linear;
+  transition: box-shadow var(--t-focus) linear, border-color var(--t-focus) linear;
 }
 .pill-primary {
   gap: 13px; padding: 0 34px; background: var(--accent); color: var(--on-accent);
 }
 .pill-primary span { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
-.pill-primary.focused { animation: focusPulse 2.4s ease-in-out infinite; }
+/* An idle pulse, not a transition, so it is the one thing --motion cannot switch off by itself:
+   at 0 an infinite animation just sits on a frame. body.no-motion is set alongside the token. */
+.pill-primary.focused { animation: focusPulse calc(2.4s * var(--motion)) ease-in-out infinite; }
+body.no-motion .pill-primary.focused { animation: none; }
 /* The button drawn inside the Play pill. Smaller than in a legend: it sits beside 22px type. */
 .pill-a-badge .btn-icon { height: 30px; }
 .pill-secondary {
@@ -494,7 +555,32 @@ body.no-legend .legend { display: none; }
   box-shadow: 0 0 0 1px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* ---- settings ---- */
+/* ---- settings ----
+   A box, centred, with the blurred library showing round it (see .screen above). It opens the way
+   a menu does -- the wash fades and the box rises -- and everything in it, rows included, arrives
+   as one thing: the rows are inside the box, so they cannot appear before it. */
+#screen-settings {
+  align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+}
+#screen-settings.active { animation: fadeIn var(--t-menu) linear backwards; }
+#screen-settings.closing { animation: fadeOut var(--t-menu-out) linear forwards; }
+#screen-settings.active .settings-box { animation: cardIn var(--t-menu) var(--ease) backwards; }
+#screen-settings.closing .settings-box { animation: cardOut var(--t-menu-out) var(--ease-in) forwards; }
+.settings-box {
+  width: 1720px; height: 940px; display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--edge) 10%, transparent); border-radius: 30px;
+  box-shadow: 0 50px 140px -30px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+}
+.settings-box .topbar { padding: 38px 56px 0; }
+.settings-title { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+.settings-box .legend { padding: 18px 56px 30px; }
+/* A one-shot: pulse() puts .swap on the list after its rows have been replaced -- a new category,
+   a new filter -- and the new content rises in. Never on an ordinary re-render, which happens on
+   every highlight move and would otherwise flicker the whole list. */
+.swap { animation: riseIn var(--t-menu) var(--ease) backwards; }
 .settings-scroll {
   position: relative;   /* see .grid-scroll */
   flex: 1; min-height: 0; overflow-y: auto;
@@ -513,7 +599,9 @@ body.no-legend .legend { display: none; }
   min-height: 84px; padding: 0 36px; border-radius: 14px;
   background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   flex: 0 0 auto;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  /* The rows stay put across a highlight move (renderSettings updates them in place), which is
+     what lets this run: a rebuilt row is born focused and nothing transitions. */
+  transition: transform var(--t-focus) var(--ease), background var(--t-focus) linear, box-shadow var(--t-focus) linear;
 }
 .set-row.focused {
   transform: scale(1.012); background: var(--surface);
@@ -529,7 +617,7 @@ body.no-legend .legend { display: none; }
 .set-toggle-off { color: color-mix(in srgb, var(--ink) 45%, transparent); }
 .slider { display: flex; align-items: center; gap: 20px; }
 .slider-track { position: relative; width: 340px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--edge) 14%, transparent); }
-.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); transition: width var(--t-focus) var(--ease); }
 .slider-val { font-family: "IBM Plex Mono", monospace; font-size: 18px; width: 84px; text-align: right; color: color-mix(in srgb, var(--ink) 75%, transparent); }
 .set-action-label { font-size: 24px; font-weight: 500; color: var(--accent); }
 .set-action-label.danger { color: var(--danger); }
@@ -540,7 +628,7 @@ body.no-legend .legend { display: none; }
 .swatch {
   width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--edge) 22%, transparent);
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  transition: transform var(--t-focus) var(--ease), box-shadow var(--t-focus) linear;
 }
 /* The ring is drawn in the page background so it reads as a gap around the dot rather than a
    second colour competing with it. */
@@ -558,7 +646,19 @@ body.no-legend .legend { display: none; }
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   z-index: 100;
 }
-.overlay.active { display: flex; }
+/* The same two-class lifecycle as the screens: .active owns input, .closing is only still being
+   drawn. The wash fades and whatever sits in it -- a card, a dialog, the wheel, the in-game bar --
+   rises into place; on the way out everything drops back a little and goes, quicker than it came.
+   The exit is one rule for any direct child, so a theme that adds a box of its own gets it too. */
+.overlay.active, .overlay.closing { display: flex; }
+.overlay.active { animation: fadeIn var(--t-menu) linear backwards; }
+.overlay.closing { animation: fadeOut var(--t-menu-out) linear forwards; pointer-events: none; }
+.overlay.active > .quick-card, .overlay.active > .dialog, .overlay.active > .guide-card {
+  animation: cardIn var(--t-menu) var(--ease) backwards;
+}
+.overlay.closing > * { animation: cardOut var(--t-menu-out) var(--ease-in) forwards; }
+@keyframes cardIn  { from { opacity: 0; transform: translateY(16px) scale(0.97); } }
+@keyframes cardOut { to   { opacity: 0; transform: translateY(10px) scale(0.98); } }
 .quick-card {
   width: 560px; background: var(--card);
   border: 1px solid color-mix(in srgb, var(--edge) 9%, transparent); border-radius: 20px;
@@ -569,7 +669,7 @@ body.no-legend .legend { display: none; }
   position: relative; display: flex; align-items: center; justify-content: space-between;
   height: 76px; padding: 0 26px; border-radius: 14px;
   font-size: 25px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  transition: transform var(--t-focus) var(--ease);
 }
 .quick-item.focused { background: var(--surface); transform: scale(1.02); }
 .quick-item .quick-sub { font-size: 17px; color: color-mix(in srgb, var(--ink) 40%, transparent); font-weight: 400; }
@@ -604,7 +704,7 @@ body.no-legend .legend { display: none; }
   background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   font-size: 18px; letter-spacing: 0.06em; color: var(--ink);
   opacity: 0; pointer-events: none;
-  transition: opacity 240ms linear, transform 240ms cubic-bezier(0.2,0.9,0.2,1);
+  transition: opacity var(--t-fade) linear, transform var(--t-fade) var(--ease);
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
@@ -627,7 +727,7 @@ body.no-legend .legend { display: none; }
   min-height: 132px; padding: 0 40px; border-radius: 20px;
   background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   flex: 0 0 auto;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+  transition: transform var(--t-focus) var(--ease), background var(--t-focus) linear;
 }
 .coll-card.focused {
   transform: scale(1.012); background: var(--surface); z-index: 2;
@@ -696,7 +796,7 @@ body.no-legend .legend { display: none; }
   position: relative; display: flex; align-items: center; justify-content: space-between;
   min-height: 74px; padding: 0 26px; border-radius: 14px;
   font-size: 19px; font-weight: 500; color: color-mix(in srgb, var(--ink) 85%, transparent);
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+  transition: transform var(--t-focus) var(--ease), background var(--t-focus) linear;
 }
 .ov-row.focused {
   background: var(--surface); transform: scale(1.015); z-index: 2;
@@ -757,7 +857,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
 .ov-icon {
   flex: 0 0 auto; width: 25px; height: 25px;
   color: color-mix(in srgb, var(--ink) 45%, transparent);
-  transition: color 180ms linear;
+  transition: color var(--t-focus) linear;
 }
 .ov-row.focused .ov-icon { color: var(--accent); }
 .ov-row.danger .ov-icon { color: var(--danger); }
@@ -794,7 +894,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   height: 210px; padding: 0 34px 0 0; border-radius: 18px; overflow: hidden;
   background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   transform-origin: center left;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1);
+  transition: transform var(--t-focus) var(--ease);
 }
 .playing-card.focused {
   transform: scale(1.01);
@@ -827,7 +927,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   border-radius: 16px; background: var(--card);
   border: 1px solid color-mix(in srgb, var(--edge) 7%, transparent);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+  transition: transform var(--t-focus) var(--ease), background var(--t-focus) linear;
 }
 /* Known cosmetic artifact: against the near-black menu WebView2 rasterizes this glow with a
    faint 1px rim at the blur's outer bound. It tracks the blur radius and survives removing the
@@ -839,6 +939,19 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   box-shadow: 0 0 0 3px var(--accent), 0 0 44px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* The wheel opens by blooming: each spoke starts small at the centre and travels out to its place,
+   a beat after the one before it (--i is its index, --dx/--dy point back to the middle, all three
+   written by renderRadial). backwards, so a spoke is invisible while it waits its turn. There is
+   no per-spoke exit -- the whole wrap drops away as one, which is the generic rule above. */
+.overlay.active .radial-item {
+  animation: spokeIn var(--t-menu) var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 24ms * var(--motion));
+}
+@keyframes spokeIn { from { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.6); } }
+.overlay.active .radial-center, .overlay.active .radial-title, .overlay.active .radial-foot {
+  animation: fadeIn var(--t-menu) linear backwards;
+  animation-delay: calc(80ms * var(--motion));
+}
 .radial-item .ov-icon { width: 34px; height: 34px; }
 .radial-item.focused .ov-icon { color: var(--accent); }
 .radial-item span { font-size: 19px; font-weight: 500; color: color-mix(in srgb, var(--ink) 82%, transparent); }
@@ -876,6 +989,11 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 97%, transparent) 42%, color-mix(in srgb, var(--bg) 72%, transparent) 74%, color-mix(in srgb, var(--bg) 0%, transparent) 100%);
   padding-top: 150px;
 }
+/* Up from the bottom edge, the way a console's pause bar arrives, rather than the card's rise. */
+.overlay.active > .ingame-bar { animation: barIn var(--t-menu) var(--ease) backwards; }
+.overlay.closing > .ingame-bar { animation-name: barOut; }
+@keyframes barIn  { from { opacity: 0; transform: translateY(56px); } }
+@keyframes barOut { to   { opacity: 0; transform: translateY(40px); } }
 .ingame-head { display: flex; flex-direction: column; gap: 7px; min-height: 62px; }
 .ingame-title {
   font-family: "IBM Plex Mono", Consolas, monospace;
@@ -888,7 +1006,7 @@ body.pad-mode, body.pad-mode * { cursor: none !important; }
   background: var(--card); border: 1px solid color-mix(in srgb, var(--edge) 8%, transparent);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   transform-origin: center bottom;
-  transition: transform 180ms cubic-bezier(0.2,0.9,0.2,1), background 180ms linear;
+  transition: transform var(--t-focus) var(--ease), background var(--t-focus) linear;
 }
 .ingame-tile.focused {
   background: var(--surface); transform: scale(1.06);
@@ -942,7 +1060,7 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
 /* ---- settings categories ----
    The settings screen grew past the point where one scroll was readable, so it is split into
    categories down the left. The nav is a fixed column and only the rows scroll. */
-.settings-body { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 30px 64px 30px; }
+.settings-body { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 24px 40px 12px; }
 /* The focus ring is a 3px box-shadow OUTSIDE the border and the row scales up slightly, so the
    scroller needs room on all four sides or it clips the ring off the edges of every row. */
 .settings-body .settings-scroll { padding: 6px 16px; }
@@ -955,6 +1073,7 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   padding: 16px 20px; border-radius: 14px; cursor: pointer;
   font-size: 22px; color: color-mix(in srgb, var(--ink) 62%, transparent);
   border: 1px solid transparent;
+  transition: background var(--t-focus) linear, border-color var(--t-focus) linear, color var(--t-focus) linear;
 }
 .set-tab .set-tab-count {
   margin-left: auto; font-family: "IBM Plex Mono", monospace;
@@ -1018,9 +1137,7 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   padding: 48px 52px 40px;
   display: flex; flex-direction: column; align-items: flex-start; gap: 18px;
   box-shadow: 0 40px 120px -20px rgba(0, 0, 0, 0.7);
-  animation: dialogIn 200ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }
-@keyframes dialogIn { from { opacity: 0; transform: translateY(14px) scale(0.985); } }
 .dialog-icon {
   width: 64px; height: 64px; border-radius: 50%; margin-bottom: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -1040,7 +1157,7 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   display: flex; align-items: center; gap: 14px;
   height: 60px; padding: 0 26px 0 12px; border-radius: 30px;
   font-size: 21px; font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: background 160ms linear;
+  transition: background var(--t-focus) linear;
 }
 .dialog-btn .btn-icon { height: 36px; }
 .dialog-yes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
@@ -1061,7 +1178,7 @@ body.overlay-mode #overlay-ingame { background: color-mix(in srgb, var(--bg) 34%
   border: 2px solid transparent;
   color: color-mix(in srgb, var(--ink) 50%, transparent);
   cursor: text;
-  transition: border-color 160ms linear, background 160ms linear, box-shadow 160ms linear;
+  transition: border-color var(--t-focus) linear, background var(--t-focus) linear, box-shadow var(--t-focus) linear;
 }
 .lib-search-icon { width: 24px; height: 24px; flex: 0 0 auto; }
 .lib-search input {
