@@ -395,8 +395,9 @@ The updater looks for the zip by that name's ending (`-win-x64.zip`) on the late
 as the script names it. A build from `dotnet build` never updates itself; only the single-file
 build this script makes does.
 
-The icon is cut out of the logo: `.\tools\make-icon.ps1` writes `Loungepad\Loungepad.ico` and
-`loungepad-icon.png` from `assets\raw\Loungepad_logo.jpg`.
+Every logo asset is cut out of one master, `assets\raw\Loungepad_logo.jpg`:
+`.\tools\make-icon.ps1` writes the app icon (`Loungepad\Loungepad.ico`), `loungepad-icon.png`
+and this README's header image from it.
 
 ## Architecture
 
