@@ -1,0 +1,63 @@
+{
+  "name": "Polish",
+  "author": "Loungepad",
+  "version": "3.7",
+  "description": "Full-bleed art, recents on a dock, the grid on the way down",
+  "tokens": {
+    "--bg": "#05070B",
+    "--bg-deep": "#010204",
+    "--surface": "#11151E",
+    "--surface-hi": "#1B2231",
+    "--card": "#0B0F16",
+    "--ink": "#F2F5FA",
+    "--edge": "#FFFFFF"
+  },
+  "settings": [
+    {
+      "id": "columns",
+      "name": "Tiles across",
+      "hint": "How many tiles fit in a row of the grid. Fewer are larger; the dock's tiles match",
+      "type": "select",
+      "options": ["5", "6", "7"],
+      "labels": { "5": "5 · larger", "6": "6", "7": "7 · smaller" },
+      "default": "6",
+      "token": "--tv-cols"
+    },
+    {
+      "id": "labels",
+      "name": "Always show titles",
+      "hint": "Every tile carries its name. Off, only the tile under the highlight does",
+      "type": "toggle",
+      "default": false
+    },
+    {
+      "id": "peek",
+      "name": "Grid peek",
+      "hint": "How much of the grid shows under the dock while the art has the screen",
+      "type": "slider",
+      "min": 0,
+      "max": 120,
+      "step": 10,
+      "default": 40,
+      "unit": "px",
+      "token": "--tv-peek"
+    },
+    {
+      "id": "dim-art",
+      "name": "Dim the art while browsing",
+      "hint": "The backdrop blurs and darkens once the highlight is in the grid, so the tiles stand out. Off keeps it bright",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "id": "slide",
+      "name": "Dock slide",
+      "hint": "How quickly the column moves between the art and the grid. Scaled by the animation speed like everything else",
+      "type": "select",
+      "options": ["Snappy", "Smooth", "Slow"],
+      "default": "Smooth",
+      "token": "--tv-slide",
+      "values": { "Snappy": "300ms", "Smooth": "460ms", "Slow": "700ms" }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 "use strict";
 /*
- * Exercises Consolify/vortex-bridge/index.js without Vortex.
+ * Exercises Loungepad/vortex-bridge/index.js without Vortex.
  *
  * Stubs the `vortex-api` module and hands the extension a fake api -- a state tree in the shape
  * Vortex persists, a store whose dispatch applies the one action the bridge uses, and an event
@@ -53,7 +53,7 @@ function makeState() {
         ],
         dialogs: [
           { id: "d1", type: "question", title: "You Have Reached The Fallback Installer!",
-            content: { bbcode: "The archive [b]Consolify Test Mod[/b] does not match a known layout.<br/>Install it anyway?" },
+            content: { bbcode: "The archive [b]Loungepad Test Mod[/b] does not match a known layout.<br/>Install it anyway?" },
             actions: ["Cancel", "Continue"], defaultAction: "Continue" },
           { id: "d2", type: "question", title: "Pick a folder", content: { input: [{ id: "path", label: "Folder" }] }, actions: ["Cancel", "OK"] },
         ],
@@ -158,8 +158,8 @@ Module._load = function (request, parent, isMain) {
   return realLoad.apply(this, arguments);
 };
 
-const srcDir = path.join(__dirname, "..", "Consolify", "vortex-bridge");
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "consolify-bridge-"));
+const srcDir = path.join(__dirname, "..", "Loungepad", "vortex-bridge");
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "loungepad-bridge-"));
 for (const f of fs.readdirSync(srcDir)) fs.copyFileSync(path.join(srcDir, f), path.join(scratch, f));
 const writeConfig = (token, port = PORT) => fs.writeFileSync(path.join(scratch, "bridge.json"), JSON.stringify({ port, token }));
 writeConfig(TOKEN_A);
@@ -293,7 +293,7 @@ async function run() {
   r = await request("GET", "/attention");
   check("two dialogs and one warning; the info notification is left out", r.status === 200 && r.json.dialogs.length === 2 && r.json.notifications.length === 1 && r.json.notifications[0].title === "Unsolved conflicts", r.json);
   const d1 = r.json.dialogs[0], d2 = r.json.dialogs[1];
-  check("a button dialog carries its buttons and plain text", d1.answerable && d1.actions.join("|") === "Cancel|Continue" && d1.defaultAction === "Continue" && d1.message === "The archive Consolify Test Mod does not match a known layout. Install it anyway?", d1);
+  check("a button dialog carries its buttons and plain text", d1.answerable && d1.actions.join("|") === "Cancel|Continue" && d1.defaultAction === "Continue" && d1.message === "The archive Loungepad Test Mod does not match a known layout. Install it anyway?", d1);
   check("a dialog with a text field is not answerable from here", d2.answerable === false && d2.actions.length === 2, d2);
   calls.length = 0;
   r = await request("POST", "/answer", { body: { id: "d1", action: "Maybe" } });

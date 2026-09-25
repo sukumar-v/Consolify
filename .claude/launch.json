@@ -4,7 +4,7 @@
     {
       "name": "ui-preview",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "http-server", "Consolify", "-p", "8930", "-c-1", "--silent"],
+      "runtimeArgs": ["--yes", "http-server", "Loungepad", "-p", "8930", "-c-1", "--silent"],
       "port": 8930
     }
   ]

@@ -1,0 +1,6 @@
+{
+  "name": "Loungepad bridge",
+  "author": "Loungepad",
+  "version": "1.0.6",
+  "description": "Lets the Loungepad launcher list, enable, disable and remove this PC's mods from the TV. Listens on the local machine only; nothing leaves it."
+}

@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="assets/consolify-logo.jpg" alt="Consolify" width="160">
-</p>
-
-<h1 align="center">Consolify</h1>
+<h1 align="center">
+  <img src="assets/loungepad-logo.jpg" alt="Loungepad" width="520">
+</h1>
 
 <p align="center">
   <b>Turn a Windows 11 PC into a console.</b><br>
@@ -11,39 +9,62 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sukumar-v/Consolify/releases/latest">
-    <img alt="Download Consolify for Windows"
+  <a href="https://github.com/sukumar-v/Loungepad/releases/latest">
+    <img alt="Download Loungepad for Windows"
          src="https://img.shields.io/badge/Download%20for%20Windows-F0A253?style=for-the-badge&logo=windows&logoColor=08080A">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/sukumar-v/Consolify/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sukumar-v/Consolify?label=latest&color=F0A253"></a>
-  <img alt="Total downloads" src="https://img.shields.io/github/downloads/sukumar-v/Consolify/total?color=1F1F24">
+  <a href="https://github.com/sukumar-v/Loungepad/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sukumar-v/Loungepad?label=latest&color=F0A253"></a>
+  <img alt="Total downloads" src="https://img.shields.io/github/downloads/sukumar-v/Loungepad/total?color=1F1F24">
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-1F1F24"></a>
   <img alt="Platform: Windows 11" src="https://img.shields.io/badge/platform-Windows%2011-1F1F24">
 </p>
 
-![Consolify's library screen](assets/screenshot-library.jpg)
+![Loungepad's library screen](assets/screenshot-library.jpg)
 
 ## Install
 
-**[Download the latest release](https://github.com/sukumar-v/Consolify/releases/latest)**, unzip it
-anywhere, and run `Consolify.exe`.
+**[Download the latest release](https://github.com/sukumar-v/Loungepad/releases/latest)**, unzip it
+anywhere, and run `Loungepad.exe`.
 
 Nothing else to install: the .NET runtime is bundled. Windows 11 already has the one thing that is
 not — the **Edge WebView2 Runtime** — and on Windows 10 the app will tell you where to get it.
-Keep `Consolify.exe` and the `ui` folder together; the UI is loaded off disk at startup.
+Keep `Loungepad.exe` and the `ui` folder together; the UI is loaded off disk at startup.
 
 The build is not code-signed yet, so Windows SmartScreen will warn the first time you run it:
 choose **More info → Run anyway**.
 
-On first run Consolify scans Steam, Epic, GOG and the Xbox app for installed games, then puts
+On first run Loungepad scans Steam, Epic, GOG and the Xbox app for installed games, then puts
 itself full-screen on your primary display. Point it at the TV in **Settings → Display**, and
 turn on **Launch on startup** there if you want it to come up with Windows. Settings, library
-and cover art live in `%APPDATA%\Consolify`; uninstalling is deleting the folder you unzipped.
+and cover art live in `%APPDATA%\Loungepad`; uninstalling is deleting the folder you unzipped.
 
-`Consolify.exe --windowed` opens a 1280×720 window instead, which is easier to poke at from a desk.
+`Loungepad.exe --windowed` opens a 1280×720 window instead, which is easier to poke at from a desk.
+
+While it runs, Loungepad has an icon in the notification area (the `^` by the clock, until you
+pin it): click it to bring the launcher back, or right-click to check for updates or quit.
+
+### Updates
+
+Loungepad updates itself from this repository's releases. With **Settings → General → Update
+automatically** on, which is the default, it checks every few hours, downloads a new version in
+the background, and installs it the next time it starts. The **Loungepad** row above that toggle
+checks on demand and installs straight away (it restarts the launcher, so not while a game is
+running). Turn the toggle off and nothing is fetched until you ask.
+
+An update replaces the files in the folder you unzipped into, so that folder has to be one your
+account can write to — anywhere under your user folder is; `Program Files` is not.
+
+### Coming from Consolify
+
+Loungepad was called **Consolify** up to 1.4, which has no updater, so this one download is by
+hand. Unzip it and run `Loungepad.exe`; you do not need to close Consolify first. On its first
+start it closes a running Consolify, moves `%APPDATA%\Consolify` and `%LOCALAPPDATA%\Consolify`
+to their Loungepad names, and switches the startup entry over. Your library, art, settings and
+store sign-ins come with it. A shortcut that still starts `Consolify.exe` brings Loungepad to the
+front, and once you are happy you can delete `Consolify.exe`.
 
 ## No keyboard. No mouse.
 
@@ -51,7 +72,7 @@ Most couch launchers get you as far as starting a game, then leave you stranded 
 need to do anything else — dismiss an update prompt, log into a store, close a window that opened
 on the wrong screen. You end up walking to the desk for the mouse anyway.
 
-Consolify is built so that never happens. **The controller is a complete input device**, not just
+Loungepad is built so that never happens. **The controller is a complete input device**, not just
 a menu remote:
 
 - **The left stick is the mouse.** Deadzone, sensitivity and an acceleration curve — slow near
@@ -89,7 +110,7 @@ down; everything else stops being a reason to stand up.
 
 ## Your library, found automatically
 
-Consolify scans **Steam**, **Epic**, **GOG** and the **Xbox app** from their local install data —
+Loungepad scans **Steam**, **Epic**, **GOG** and the **Xbox app** from their local install data —
 no accounts, no API keys, nothing phoned anywhere. It picks up real cover art, tracks playtime and
 sessions locally, and rescans every time it starts, so a game installed yesterday is simply there.
 Anything the scanners drag in that isn't a game (benchmarks, wallpaper tools, redistributables)
@@ -106,7 +127,7 @@ pasted into the row under the toggle, which is the one case where a key is ever 
 **Epic, GOG and Xbox** work the way they do in Playnite: sign in to each store once, from
 Settings → Library, and its library is listed here. The sign-in is the store's own web page in a
 window of its own — the stick is the mouse, the keyboard toggle raises the on-screen keyboard —
-and Consolify keeps only the resulting token, encrypted for your Windows account. Pressing A on a
+and Loungepad keeps only the resulting token, encrypted for your Windows account. Pressing A on a
 game you own but do not have opens the right store ready to install: the Epic Games Launcher, GOG
 Galaxy (or the game's gog.com page when Galaxy is not installed), or the Microsoft Store. The
 Xbox list is your profile's title history, which is what Xbox Live exposes; **Show the PC Game
@@ -119,14 +140,14 @@ Xbox Live only issues tokens to programs Microsoft knows about. Playnite works b
 registered Playnite as an application with Microsoft — the "Let this app access your info?"
 prompt you see there is the consent screen for that registration. The old trick of signing in as
 one of Microsoft's own first-party clients is being withdrawn: the Xbox app's own id is now
-refused outright (a 403 from the user-token service), and the one Consolify falls back to can
+refused outright (a 403 from the user-token service), and the one Loungepad falls back to can
 stop working the same way at any time.
 
 Registering one takes five minutes and costs nothing:
 
 1. Sign in at https://portal.azure.com with any Microsoft account, open **Microsoft Entra ID →
    App registrations → New registration**.
-2. Name it (say, "Consolify"). Under **Supported account types** choose **Personal Microsoft
+2. Name it (say, "Loungepad"). Under **Supported account types** choose **Personal Microsoft
    accounts only**.
 3. Under **Redirect URI** pick the platform **Public client/native (mobile & desktop)** and enter
    `https://login.live.com/oauth20_desktop.srf`. Register.
@@ -135,7 +156,7 @@ Registering one takes five minutes and costs nothing:
 5. Copy the **Application (client) ID** from the Overview page.
 
 Paste it into **Settings → Library → Xbox sign-in app id** and sign in again; the consent prompt
-will now name your registration. If you build Consolify yourself, put the same id into
+will now name your registration. If you build Loungepad yourself, put the same id into
 `DefaultClientId` in `XboxAccountClient.cs` and everybody who runs your build gets the Xbox sign-in
 with nothing to set up — which is exactly what Playnite ships.
 
@@ -143,11 +164,11 @@ The TV is treated as a first-class display: the launcher places itself there pix
 it the Windows primary before a game starts so the game opens on the right screen, and puts your
 old primary back when you quit.
 
-![Consolify's settings screen](assets/screenshot-settings.png)
+![Loungepad's settings screen](assets/screenshot-settings.png)
 
 ## Emulators and ROMs
 
-Consolify runs emulated games the way Playnite and LaunchBox do: you tell it where the ROMs
+Loungepad runs emulated games the way Playnite and LaunchBox do: you tell it where the ROMs
 are and what runs them, and the games take their place in the library like anything else —
 cover art and box art, a description, a release date and a score, playtime, favourites,
 collections, and a tile you press A on.
@@ -198,7 +219,7 @@ its own launch arguments.
 
 ## Mods
 
-Consolify does not manage mods itself. It drives **[Vortex](https://www.nexusmods.com/site/mods/1)**,
+Loungepad does not manage mods itself. It drives **[Vortex](https://www.nexusmods.com/site/mods/1)**,
 Nexus Mods' free mod manager, which knows how to mod over 250 PC games — the Bethesda games,
 Cyberpunk 2077, Baldur's Gate 3, The Witcher 3, Stardew Valley, Elden Ring, The Sims 4 and the
 rest — and puts the parts of it you want from a sofa on the TV. Press **Y** on any installed game
@@ -219,7 +240,7 @@ and choose **Mods**:
   like they are for it, exact match first: choosing one opens Vortex's own extension browser on
   it, on the TV, where Install is one click; or the extension's page on Nexus Mods, where **Mod
   manager download** installs it. After a restart of Vortex the game is known to it but not yet
-  located, and **Set it up in Vortex** does the rest: Consolify hands Vortex the game's folder
+  located, and **Set it up in Vortex** does the rest: Loungepad hands Vortex the game's folder
   (Vortex checks the game's files are in it) and Vortex opens on the game for its first-time
   questions, which are answered from the Mods screen like any other.
 - **Answer Vortex's questions.** When Vortex stops to ask something — "this archive is not a
@@ -231,7 +252,7 @@ and choose **Mods**:
   game (the minimize combo, Guide by default).
 
 The first time, two one-off steps happen in Vortex's own window: Vortex has to be restarted
-once so it loads the small extension Consolify installs into it (the screen says so and offers
+once so it loads the small extension Loungepad installs into it (the screen says so and offers
 to do it), and each game has to be *managed* in Vortex once — a folder for the mods, how they
 are deployed. **Set it up in Vortex** on the Mods screen starts that and puts Vortex on the TV.
 Opening the Mods screen starts Vortex minimized if it is not already running.
@@ -243,8 +264,8 @@ account (signed into inside Vortex) is only needed to download mods. **Open the 
 opens it in your browser on the desktop. The same row lives under **Settings → Library → Mods**,
 with an optional **Vortex location** for a portable copy or one on another drive.
 
-How it works: Vortex has no way in from outside, so Consolify ships a tiny Vortex extension
-(`vortex-bridge`) that it copies into `%APPDATA%\Vortex\plugins\consolify-bridge`. The extension
+How it works: Vortex has no way in from outside, so Loungepad ships a tiny Vortex extension
+(`vortex-bridge`) that it copies into `%APPDATA%\Vortex\plugins\loungepad-bridge`. The extension
 listens on the local machine only (`127.0.0.1`, a fresh secret per run) and turns a handful of
 requests into calls on Vortex's own API — list, enable, disable, remove, deploy, switch game.
 Downloads go through Vortex's own command line (`Vortex.exe --install <link>`). Vortex deploys
@@ -254,7 +275,7 @@ supported.
 
 ## Themes
 
-A theme is a folder under `%APPDATA%\Consolify\themes` — **Settings → Appearance → Themes
+A theme is a folder under `%APPDATA%\Loungepad\themes` — **Settings → Appearance → Themes
 folder** opens it — with a `theme.css` in it and, optionally, a `theme.json` and a `theme.html`.
 Nothing is compiled or copied: the launcher loads the files straight off disk, watches the folder
 and reloads on save, so editing a theme is editing a file. Polish, the theme the launcher opens
@@ -272,7 +293,7 @@ on, ships this way too; Classic is the built-in look with no theme applied.
 
   ```json
   {
-    "name": "Polish", "author": "Consolify", "version": "3.5",
+    "name": "Polish", "author": "Loungepad", "version": "3.7",
     "description": "Full-bleed art, recents on a dock, the grid on the way down",
     "tokens": { "--bg": "#05070B" },
     "settings": [ ]
@@ -350,15 +371,15 @@ setting too; Polish does, and exposes its dock's slide as one of its options.
 Requirements: **.NET 8 SDK**, **WebView2 Runtime** (preinstalled on Windows 11).
 
 ```bash
-dotnet build Consolify.sln
+dotnet build Loungepad.sln
 ```
 
-Run `Consolify\bin\Debug\net8.0-windows\Consolify.exe`, or open `Consolify.sln`
+Run `Loungepad\bin\Debug\net8.0-windows\Loungepad.exe`, or open `Loungepad.sln`
 in Visual Studio 2022 and F5. Pass `--windowed` for a 1280×720 debug window (no always-on-top,
 no focus guarding) instead of the full-screen TV mode.
 
 The UI can also be previewed in a plain browser (it self-mocks sample data when not hosted in
-WebView2): serve `Consolify/ui/` with any static server and open `index.html`.
+WebView2): serve `Loungepad/ui/` with any static server and open `index.html`.
 
 To build the zip that goes on a release:
 
@@ -367,7 +388,15 @@ To build the zip that goes on a release:
 ```
 
 It publishes self-contained and single-file into `artifacts\`, checks that `ui\` came along,
-and writes `dist\Consolify-v<version>-win-x64.zip` with its SHA-256.
+and writes `dist\Loungepad-v<version>-win-x64.zip` with its SHA-256.
+
+The updater looks for the zip by that name's ending (`-win-x64.zip`) on the latest release of
+`sukumar-v/Loungepad`, and for a tag it can read as a version (`v1.5.0`). Attach the zip exactly
+as the script names it. A build from `dotnet build` never updates itself; only the single-file
+build this script makes does.
+
+The icon is cut out of the logo: `.\tools\make-icon.ps1` writes `Loungepad\Loungepad.ico` and
+`loungepad-icon.png` from `assets\raw\Loungepad_logo.jpg`.
 
 ## Architecture
 
@@ -375,11 +404,11 @@ A native WPF shell (.NET 8) hosting the UI as an HTML/CSS/JS app in WebView2, br
 messages, with every system-level feature behind Win32 P/Invoke.
 
 ```
-Consolify/
+Loungepad/
   MainWindow.xaml(.cs)    Borderless, topmost, taskbar-less window; hosts WebView2 on the TV display
   UiBridge.cs             JSON message bridge: web UI <-> native services
   ui/                     The design-faithful UI (index.html, app.css, app.js), 1920x1080 stage
-                          scaled to the display; served via WebView2 virtual host consolify.ui
+                          scaled to the display; served via WebView2 virtual host loungepad.ui
   Services/
     DisplayService.cs     Monitor enumeration + primary-display switching (ChangeDisplaySettingsEx)
     GameLaunchService.cs  Launch orchestration, process tracking, window repositioning, playtime
@@ -398,7 +427,10 @@ Consolify/
     VirtualKeyboardService.cs  Touch keyboard (TabTip) via ITipInvocation COM
     CursorService.cs      Optional system-wide pointer hiding while the D-pad drives
     StartupService.cs     HKCU Run key registration
-    Storage.cs            JSON persistence in %APPDATA%\Consolify (settings, library, log, covers)
+    UpdateService.cs      Checks GitHub releases, downloads, swaps the files in place, restarts
+    ConsolifyMigration.cs Carries an install over from the app's old name
+    Storage.cs            JSON persistence in %APPDATA%\Loungepad (settings, library, log, covers)
+  TrayIcon.cs             The notification-area icon: show, update, quit
   Interop/NativeMethods.cs   All P/Invoke declarations
   Interop/HidNative.cs       Raw Input and hid.dll, for the HID gamepad reader
 ```
@@ -499,17 +531,20 @@ Consolify/
   layout**, which Windows exposes solely through the keyboard's own settings flyout — there is
   no registry value or API to select it, so the app cannot switch it for you. It is a one-time
   choice that persists: step 01 of the in-app setup guide walks through it.
-- **Lock screen, wake & startup** — Settings → "Launch Consolify at login" (HKCU Run key),
+- **Lock screen, wake & startup** — Settings → "Launch Loungepad at login" (HKCU Run key),
   plus a step-by-step in-app guide: the touch keyboard's Gamepad layout, a Windows Hello PIN for
   couch-friendly sign-in (the sign-in screen's touch keyboard supports gamepad input), letting the
   controller receiver wake the PC from sleep, and auto-starting the launcher.
 - **Focus guarding** — no taskbar button; if the desktop steals focus while no game runs, the
   launcher re-activates itself (Settings → "Keep launcher focused"). Alt-Tab still works.
 
-Data lives in `%APPDATA%\Consolify\` (`settings.json`, `library.json`, `covers\`,
-`consolify.log`). Delete `library.json` to force a clean rescan.
+Data lives in `%APPDATA%\Loungepad\` (`settings.json`, `library.json`, `covers\`,
+`loungepad.log`). Delete `library.json` to force a clean rescan.
 
-The app was previously called **Couch Launcher**. On first run it copies `settings.json`,
+Up to 1.4 the app was **Consolify**; see [Coming from Consolify](#coming-from-consolify) for what
+the first start of Loungepad carries over.
+
+Before that it was called **Couch Launcher**. On first run it copies `settings.json`,
 `library.json` and any missing cover art out of `%APPDATA%\CouchLauncher\`, and moves an existing
 HKCU Run entry across. It copies rather than moves, and leaves the old folder alone — delete that
 yourself once you are satisfied the library came over.
@@ -562,5 +597,5 @@ the conventions this repo follows, and what is deliberately out of scope are in
 Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution and
 third-party components.
 
-"Consolify" and the Consolify logo are **not** covered by that grant — section 6 of the license
+"Loungepad" and the Loungepad logo are **not** covered by that grant — section 6 of the license
 reserves trademarks. Fork it freely; give the fork its own name.

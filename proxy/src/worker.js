@@ -1,5 +1,5 @@
 /*
- * Consolify metadata proxy.
+ * Loungepad metadata proxy.
  *
  * Holds the IGDB and SteamGridDB credentials so the launcher does not have to. This is the same
  * shape Playnite uses -- its IGDB plugin ships no keys and talks to api2.playnite.link -- and it

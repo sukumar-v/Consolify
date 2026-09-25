@@ -1,4 +1,4 @@
-# Consolify — working notes
+# Loungepad — working notes
 
 ## Commit messages
 
@@ -25,7 +25,7 @@ Stop the scrolled grid from clipping through the All games header
 - The `ui-preview` server renders the same HTML but **not** the WPF/WebView2
   hosting, so it cannot see host-level input, focus, cursor or window bugs. It is
   fine for layout and UI logic only.
-- It serves `Consolify/`, so the app is at `/ui/index.html` and a theme's files are
+- It serves `Loungepad/`, so the app is at `/ui/index.html` and a theme's files are
   reachable at `/themes/<id>/…` — which is what makes a theme previewable at all.
   Push one in by hand: a `{type:"themes", themes:[…]}` message with those URLs,
   then `S.settings.theme = "<id>"` and `applyTheme()`.
@@ -40,7 +40,7 @@ Stop the scrolled grid from clipping through the All games header
   user has open -- a held-arrow test once scrolled the user's browser. Take the foreground with
   `AttachThreadInput` + `BringWindowToTop` + `SetForegroundWindow`, verify, and abort if lost.
 - For anything touching input, focus, the cursor or window behaviour, run the
-  published app: `publish\Consolify.exe --windowed` gives a 1280x720
+  published app: `publish\Loungepad.exe --windowed` gives a 1280x720
   non-topmost window. Drive it with real `SendInput` and screen captures.
 - The WPF window sets `ShowInTaskbar=false`, so `Process.MainWindowHandle` is 0 —
   find the window by enumerating top-level windows for the pid.
@@ -513,18 +513,68 @@ Stop the scrolled grid from clipping through the All games header
 
 ## Running two copies
 
-- `App.OnStartup` takes a `Consolify_SingleInstance` mutex, and a second copy used to just
-  `Shutdown()`. That happens **before** `Log.Info("---- Consolify starting ----")`, so launching
+- `App.OnStartup` takes a `Loungepad_SingleInstance` mutex, and a second copy used to just
+  `Shutdown()`. That happens **before** `Log.Info("---- Loungepad <version> starting ----")`, so launching
   the exe while a copy was already running did nothing at all: no window, no error, and not one
   line in the log to say a start had been attempted. Whatever the running copy happened to be
-  showing then got blamed on the build. A second copy now signals `Consolify_ShowExisting` and the
+  showing then got blamed on the build. A second copy now signals `Loungepad_ShowExisting` and the
   running one calls `Unpark()` and logs that it did.
 - So: **never leave a test instance running.** The user launches
-  `publish\Consolify.exe` by hand and from the HKCU Run key, and a copy left behind after a test
+  `publish\Loungepad.exe` by hand and from the HKCU Run key, and a copy left behind after a test
   silently swallows every launch of theirs. Kill it in the same turn it is finished with.
 - A gap in the log where a start should be is the signature of this. If the user reports something
-  and the log has no `---- Consolify starting ----` for it, they were looking at an instance
+  and the log has no `---- Loungepad <version> starting ----` for it, they were looking at an instance
   somebody else started.
+
+## The rename from Consolify
+
+- Up to 1.4 the app was Consolify, and every name that identifies an install was keyed on it: the
+  data folders, the Run value, the mutex and wake event, the WebView hosts and the Vortex plugin
+  folder. All of the carrying-over is in `ConsolifyMigration`, so it can go in one piece one day.
+- Order in `OnStartup` matters: `CloseRunningCopy` (WM_CLOSE to a window titled exactly
+  "Consolify", never a kill), THEN `Paths.EnsureCreated`, which moves `%APPDATA%\Consolify` and
+  `%LOCALAPPDATA%\Consolify`. The old copy's last save has to land before the folder moves, and
+  nothing may create the new folders first or the move turns into the copy fallback.
+- A move, not a copy (the Couch Launcher migration copied): 569 MB of art on this PC, and on one
+  volume a rename is all-or-nothing. The copy is only the fallback for a refused move; the local
+  folder (caches, store sign-in profiles) is never copied, only moved or left for the next start.
+- **Running any Loungepad build on this PC moves the user's real data folder.** Ask before the
+  first run of the published app if `%APPDATA%\Consolify` still exists.
+- Loungepad keeps a handle on `Consolify_SingleInstance` and listens on `Consolify_ShowExisting`,
+  so an old shortcut to Consolify.exe finds "a copy running" and wakes Loungepad instead.
+- The metadata worker is still `consolify-metadata`: the worker's name is its URL, and a renamed
+  worker is a new one with no secrets. See the note in `proxy/wrangler.toml`.
+- The old Vortex extension folder `consolify-bridge` is deleted by `SyncPlugin`; left there, Vortex
+  would load both and they would race for port 47391 with one of them holding a dead token.
+
+## Updates and the tray icon
+
+- `UpdateService` reads `api.github.com/repos/sukumar-v/Loungepad/releases/latest`, picks the asset
+  ending `-win-x64.zip`, checks its size and the `sha256:` digest GitHub publishes, and unpacks it
+  under `%LOCALAPPDATA%\Loungepad\updates`. **The repo name is in the code** (`UpdateService.Repo`):
+  rename the repo and every shipped build stops finding updates, because GitHub redirects old
+  names to new ones but not the other way.
+- Installing renames each file the release carries to `<name>.loungepad-old`, copies the new one
+  in, starts the new exe with `--updated-from <v> --wait-for <pid>` and exits. Windows lets a
+  running single-file exe be renamed but not deleted (verified with a throwaway single-file app),
+  so the next start's `FinishPreviousUpdate` deletes the set-aside files. A failure halfway puts
+  every file back.
+- The new copy waits for the old pid, then for WebView2's `EBWebView\lockfile` to be free: a
+  browser process outlives its host briefly, and a second environment on a locked profile fails.
+  It then takes the mutex with `WaitOne`, since the old one may still be holding it.
+- Automatic updates download in the background and install at the NEXT start (`App.OnStartup`,
+  before any window), because installing is a restart and the launcher is what is on the TV.
+  Settings and the tray install at once, and refuse while a game is running.
+- Only a single-file build updates itself (`Assembly.Location` is empty there). A `dotnet build`
+  or the multi-file `publish\` build says "development build" and never replaces itself with the
+  release, so testing the updater needs `tools\package.ps1` output in a folder of its own.
+- `TrayIcon` is WinForms' NotifyIcon (`UseWindowsForms`, with its global usings removed in the
+  csproj so `Application`/`MessageBox` stay WPF's). Left click shows the launcher, the menu has
+  Show, the update step and Quit. It is disposed on `Closed`, hidden first, or it lingers as a
+  ghost icon until the pointer passes over it.
+- `System.Drawing.Icon.ToBitmap` in Windows PowerShell (.NET Framework) cannot read PNG-compressed
+  icon frames and returns noise, for the old icon as much as the new one. Check an .ico with WPF's
+  `IconBitmapDecoder` (WIC), which is what the shell and the window use.
 
 ## PEGI
 
@@ -623,9 +673,9 @@ Stop the scrolled grid from clipping through the All games header
 
 - Epic, GOG and Xbox libraries come from signing in to each store, the way Playnite does it: a
   `StoreLoginWindow` (a WebView2 with a profile folder per store under
-  `%LOCALAPPDATA%\Consolify\webview2-accounts`) shows the store's own page, a probe runs after every
+  `%LOCALAPPDATA%\Loungepad\webview2-accounts`) shows the store's own page, a probe runs after every
   navigation and closes the window the moment it has what it came for. Tokens are DPAPI-encrypted
-  in `%APPDATA%\Consolify\accounts\<store>.bin`; the last library answer is plain JSON beside it,
+  in `%APPDATA%\Loungepad\accounts\<store>.bin`; the last library answer is plain JSON beside it,
   held six hours and served on any failure. Sign-out deletes all three.
 - **GOG Galaxy's database was tried first and rejected**: it lists every connected store's library
   locally with no login, but only for people who have Galaxy, and a store disconnected in Galaxy
@@ -680,7 +730,7 @@ Stop the scrolled grid from clipping through the All games header
   account, Sept 2026. The way Playnite works is an Azure app registration of its own (client id in
   its source, scopes `Xboxlive.signin Xboxlive.offline_access`, `d=` ticket) -- the "Let this app
   access your info?" prompt is that registration's consent screen. `DefaultClientId` in
-  `XboxAccountClient` is the slot for a Consolify registration; until one exists the fallback is
+  `XboxAccountClient` is the slot for a Loungepad registration; until one exists the fallback is
   `000000004C12AE6F` with `t=`, which @xboxreplay/xboxlive-auth reports working and which can go
   the same way. The ticket loop tries every prefix on 400/401/403 and logs each answer.
 
@@ -756,7 +806,7 @@ Stop the scrolled grid from clipping through the All games header
   the launcher does (an overlay is up).
 - **A session used to wait a flat 15 s after every exit** for a successor process from the install
   dir. Now: anything of the game still running at that instant carries the session on (launchers
-  hand over before they exit); a close Consolify asked for waits for nothing (`_closeRequested`);
+  hand over before they exit); a close Loungepad asked for waits for nothing (`_closeRequested`);
   a process that lived under 90 s (a pre-launcher) keeps the 15 s window; anything longer gets 1 s,
   for a game that restarts itself. The poll is every 250 ms, not 1.5 s.
 
@@ -817,9 +867,9 @@ Stop the scrolled grid from clipping through the All games header
 ## Mods and Vortex
 
 - **Vortex has no external API at all.** It is Electron, its state is a LevelDB only it can open,
-  and the one way in is an extension running inside it. `Consolify/vortex-bridge/index.js` is that
+  and the one way in is an extension running inside it. `Loungepad/vortex-bridge/index.js` is that
   extension: an HTTP server on `127.0.0.1:47391` that turns JSON requests into Vortex API calls.
-  `VortexBackend.SyncPlugin` copies it into `%APPDATA%\Vortex\plugins\consolify-bridge`, keyed on
+  `VortexBackend.SyncPlugin` copies it into `%APPDATA%\Vortex\plugins\loungepad-bridge`, keyed on
   the version in `info.json` like the bundled themes -- bump it whenever the extension changes.
 - **Vortex loads extensions at startup only.** A Vortex that was already running when the folder
   appeared answers nothing, which is the `needsRestart` state and the Restart Vortex row; the
@@ -828,8 +878,8 @@ Stop the scrolled grid from clipping through the All games header
   shipped: an updated extension on disk is not the one running, and a route the new build asks
   for would otherwise come back 404 and read as an empty answer. Bump `info.json` and
   `BRIDGE_VERSION` together whenever the extension changes.
-- The token is new on every Consolify start and written to `bridge.json` beside the extension,
-  which re-reads the file on EVERY request. That is what lets a Consolify restart not strand Vortex
+- The token is new on every Loungepad start and written to `bridge.json` beside the extension,
+  which re-reads the file on EVERY request. That is what lets a Loungepad restart not strand Vortex
   on a stale token. The Host header must be loopback (DNS rebinding from a browser tab).
 - **Downloads and installs never go through the bridge.** `Vortex.exe --install <url>` is Vortex's
   own command line, and a second instance forwards its argv to the running one (`src/main/src/
@@ -865,7 +915,7 @@ Stop the scrolled grid from clipping through the All games header
   enabled)` is a helper that dispatches itself and returns a promise, NOT an action creator --
   called the old way it fails with "api.getState is not a function"). The harness models both the
   real way. `node tools\vortex-bridge-harness.js` is the extension's regression check; a scratch
-  console project referencing `bin\Release\...\Consolify.dll` and calling `ModService` directly is
+  console project referencing `bin\Release\...\Loungepad.dll` and calling `ModService` directly is
   how the host side was run without the launcher window (the single-instance mutex stops a second
   copy while the user's is up).
 - Vortex 2.7's all-users install is `C:\Program Files\Vortex\Vortex.exe`, with an uninstall entry

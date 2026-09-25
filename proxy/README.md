@@ -1,7 +1,7 @@
-# Consolify metadata proxy
+# Loungepad metadata proxy
 
 Holds the IGDB and SteamGridDB credentials so the launcher does not ship them, which means a user
-installs Consolify and gets artwork with no signup, no API key and no settings to fill in.
+installs Loungepad and gets artwork with no signup, no API key and no settings to fill in.
 
 This is the same arrangement Playnite uses. Its IGDB plugin ships no keys at all — its
 `IgdbClient` takes a base URL rather than credentials, and `plugin.cfg` points it at
@@ -56,13 +56,13 @@ Sign in to Cloudflare (opens a browser):
 npx wrangler login
 ```
 
-Create the cache. Note the two names: `consolify-metadata-cache` is the namespace's title in your
+Create the cache. Note the two names: `loungepad-metadata-cache` is the namespace's title in your
 Cloudflare account, shared with every Worker you ever deploy, so it should be specific.
 `METADATA` is only how this worker's own code refers to it (`env.METADATA`), and is scoped to
 this service.
 
 ```bash
-npx wrangler kv namespace create consolify-metadata-cache --binding METADATA --config proxy/wrangler.toml
+npx wrangler kv namespace create loungepad-metadata-cache --binding METADATA --config proxy/wrangler.toml
 ```
 
 This prints an `id` — paste it into `proxy/wrangler.toml`, replacing
@@ -109,8 +109,11 @@ npx wrangler deploy --config proxy/wrangler.toml
 curl "https://consolify-metadata.<your-subdomain>.workers.dev/v1/health"
 ```
 
+(The worker still carries the app's old name, Consolify, because a worker's name is its URL and
+every shipped build points at that URL. `proxy/wrangler.toml` says what renaming it involves.)
+
 Finally, point the launcher at it by setting `DefaultEndpoint` in
-`Consolify/Services/MetadataProxyClient.cs` to that URL and rebuilding. Users can override it in
+`Loungepad/Services/MetadataProxyClient.cs` to that URL and rebuilding. Users can override it in
 Settings, but the shipped default is what makes it zero-setup.
 
 ## When something goes wrong
@@ -157,7 +160,7 @@ wrong game's art on a tile.
 - **You become the accountable party.** Under the Twitch Developer Service Agreement the traffic
   through your IGDB credential is yours, whoever generated it. Same for your SteamGridDB key.
 - **IGDB's free tier is non-commercial.** That now applies to a service you operate, not just to
-  your own copy of the app. If Consolify ever takes money, this needs revisiting first.
+  your own copy of the app. If Loungepad ever takes money, this needs revisiting first.
 - **When this is down, artwork is down for everyone.** That is the trade you accept for zero
   setup — Playnite has the same failure mode, which is what their recurring "IGDB is broken"
   issues actually are. The launcher degrades quietly rather than erroring, and Steam games are

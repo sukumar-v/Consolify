@@ -62,10 +62,10 @@ $RECYCLE.BIN/
 *.swp
 *~
 
-# Consolify runtime data (lives in %APPDATA%\Consolify, but never commit strays)
+# Loungepad runtime data (lives in %APPDATA%\Loungepad, but never commit strays)
 /settings.json
 /library.json
-/consolify.log
+/loungepad.log
 /covers/
 
 # Packaging output

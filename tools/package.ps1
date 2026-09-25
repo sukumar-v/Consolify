@@ -3,12 +3,12 @@
     Builds the distributable zip that gets attached to a GitHub release.
 
 .DESCRIPTION
-    Publishes Consolify self-contained for win-x64 as a single file, so the download is one
+    Publishes Loungepad self-contained for win-x64 as a single file, so the download is one
     exe plus the ui folder and nothing has to be installed first -- no .NET runtime, no
     unpacking a folder of two hundred DLLs. The WebView2 runtime is the one thing that cannot
     be bundled; Windows 11 ships it, and the app says so plainly if it is missing.
 
-    Output: dist\Consolify-v<version>-win-x64.zip
+    Output: dist\Loungepad-v<version>-win-x64.zip
 
 .PARAMETER Version
     Overrides the version baked into the exe and the zip name. Defaults to <Version> in the
@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $repo 'Consolify\Consolify.csproj'
+$project = Join-Path $repo 'Loungepad\Loungepad.csproj'
 $staging = Join-Path $repo "artifacts\$Runtime"
 $dist = Join-Path $repo 'dist'
 
@@ -41,7 +41,7 @@ if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 
-Write-Host "Publishing Consolify $Version ($Runtime, self-contained)..." -ForegroundColor Cyan
+Write-Host "Publishing Loungepad $Version ($Runtime, self-contained)..." -ForegroundColor Cyan
 dotnet publish $project `
     -c Release `
     -r $Runtime `
@@ -60,7 +60,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)" }
 # csproj ever stops copying it, rather than shipping a zip that opens to a black screen.
 # themes\ is here for the same reason: ThemeService seeds the user's themes folder from the copy
 # next to the exe, so a zip without it installs a launcher whose theme list is empty.
-foreach ($required in 'Consolify.exe', 'ui\index.html', 'ui\app.js', 'ui\app.css', 'ui\radial.js',
+foreach ($required in 'Loungepad.exe', 'ui\index.html', 'ui\app.js', 'ui\app.css', 'ui\radial.js',
                       'themes\polish\theme.json', 'themes\polish\theme.css', 'themes\polish\theme.html') {
     if (-not (Test-Path (Join-Path $staging $required))) { throw "Missing from the publish output: $required" }
 }
@@ -75,7 +75,7 @@ foreach ($doc in "README.md", "LICENSE", "NOTICE", "CONTRIBUTING.md") {
     if (Test-Path $path) { Copy-Item $path $staging -Force }
 }
 
-$zip = Join-Path $dist "Consolify-v$Version-$Runtime.zip"
+$zip = Join-Path $dist "Loungepad-v$Version-$Runtime.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -CompressionLevel Optimal
 
